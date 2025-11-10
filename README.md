@@ -29,12 +29,12 @@ This refactoring maintains full compatibility with the original tool's predictio
 
 ### Completed
 - ✅ **Phase 1**: Core infrastructure (config, logging, device management, progress reporting)
+- ✅ **Phase 2**: Core pipeline refactoring (extracting models and utilities)
+- ✅ **Phase 3**: CLI implementation with Click
 
 ### In Progress
-- 🔨 **Phase 2**: Core pipeline refactoring (extracting models and utilities)
 
 ### Planned
-- 📋 **Phase 3**: CLI implementation with Click
 - 📋 **Phase 4**: Checkpointing system
 - 📋 **Phase 5**: Testing and documentation
 
