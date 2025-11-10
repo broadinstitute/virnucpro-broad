@@ -140,15 +140,27 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
         logger.info(f"  Cleanup intermediate files: {cleanup}")
         logger.info(f"  Progress bars: {'disabled' if no_progress else 'enabled'}")
 
-        # Note: The run_prediction function will be implemented in Phase 4
-        # For now, we'll just validate parameters and report configuration
-        logger.warning(
-            "Prediction pipeline not yet implemented. "
-            "This will be completed in Phase 4 of the refactoring."
+        # Import and run prediction pipeline
+        from virnucpro.pipeline.prediction import run_prediction
+
+        logger.info("Starting prediction pipeline...")
+
+        run_prediction(
+            input_file=Path(input_file),
+            model_path=Path(model_path),
+            expected_length=expected_length,
+            output_dir=output_dir,
+            device=device_obj,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            cleanup_intermediate=cleanup,
+            resume=resume,
+            show_progress=not no_progress,
+            config=config
         )
 
-        logger.info("Parameter validation completed successfully!")
-        logger.info("All parameters are valid and ready for prediction pipeline.")
+        logger.info("Prediction completed successfully!")
+        logger.info(f"Results saved to: {output_dir}")
 
     except Exception as e:
         logger.error(f"Prediction failed: {e}")

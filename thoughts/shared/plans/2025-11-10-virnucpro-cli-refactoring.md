@@ -1260,7 +1260,492 @@ def split_fasta_chunk(input_file: Path, output_file: Path, chunk_size: int):
     logger.info(f"Created {total_chunks} chunks from {total_sequences} sequences")
 ```
 
-**Continue in next phase...**
+#### 2.3 File Utilities Module
+
+**File**: `virnucpro/utils/file_utils.py`
+
+Extract file management functions from `units.py`:
+
+```python
+"""File management utilities for FASTA processing"""
+
+from Bio import SeqIO
+from pathlib import Path
+from typing import List
+import logging
+
+logger = logging.getLogger('virnucpro.file_utils')
+
+
+def split_fasta_file(
+    input_file: Path,
+    output_dir: Path,
+    sequences_per_file: int = 10000,
+    prefix: str = "output"
+) -> List[Path]:
+    """
+    Split FASTA file into multiple files with fixed sequence count.
+
+    Used for parallel processing of large FASTA files by creating
+    manageable batches.
+
+    Based on units.py:267-288
+
+    Args:
+        input_file: Input FASTA file path
+        output_dir: Output directory for split files
+        sequences_per_file: Number of sequences per output file
+        prefix: Prefix for output filenames
+
+    Returns:
+        List of created output file paths
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    output_files = []
+    current_file_idx = 0
+    current_count = 0
+    current_handle = None
+    current_path = None
+
+    logger.info(f"Splitting {input_file} into files of {sequences_per_file} sequences")
+
+    try:
+        for record in SeqIO.parse(input_file, 'fasta'):
+            # Open new file if needed
+            if current_count == 0:
+                if current_handle:
+                    current_handle.close()
+
+                current_path = output_dir / f"{prefix}_{current_file_idx}.fa"
+                current_handle = open(current_path, 'w')
+                output_files.append(current_path)
+                logger.debug(f"Creating {current_path}")
+
+            # Write sequence to current file
+            SeqIO.write(record, current_handle, 'fasta')
+            current_count += 1
+
+            # Check if file is complete
+            if current_count >= sequences_per_file:
+                current_count = 0
+                current_file_idx += 1
+
+    finally:
+        if current_handle:
+            current_handle.close()
+
+    logger.info(f"Created {len(output_files)} files in {output_dir}")
+    return output_files
+
+
+def count_sequences(fasta_file: Path) -> int:
+    """
+    Count number of sequences in a FASTA file.
+
+    Args:
+        fasta_file: Path to FASTA file
+
+    Returns:
+        Number of sequences
+    """
+    return sum(1 for _ in SeqIO.parse(fasta_file, 'fasta'))
+```
+
+#### 2.4 Feature Extraction Module
+
+**File**: `virnucpro/pipeline/features.py`
+
+Extract feature extraction functions from `units.py`:
+
+```python
+"""Feature extraction using DNABERT-S and ESM-2 transformers"""
+
+import torch
+from pathlib import Path
+from typing import Dict, List, Optional
+from Bio import SeqIO
+import logging
+
+logger = logging.getLogger('virnucpro.features')
+
+
+def extract_dnabert_features(
+    nucleotide_file: Path,
+    output_file: Path,
+    device: torch.device,
+    batch_size: int = 256
+) -> Path:
+    """
+    Extract DNA sequence embeddings using DNABERT-S.
+
+    Based on units.py:160-201
+
+    Args:
+        nucleotide_file: Input FASTA file with nucleotide sequences
+        output_file: Output .pt file for features
+        device: PyTorch device for computation
+        batch_size: Batch size for processing
+
+    Returns:
+        Path to saved feature file
+    """
+    from transformers import AutoTokenizer, AutoModel
+
+    logger.info(f"Extracting DNABERT-S features from {nucleotide_file}")
+
+    # Load model and tokenizer
+    model_name = "zhihan1996/DNABERT-S"
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    model = AutoModel.from_pretrained(model_name, trust_remote_code=True).to(device)
+    model.eval()
+
+    # Load sequences
+    sequences = []
+    seq_ids = []
+    for record in SeqIO.parse(nucleotide_file, 'fasta'):
+        sequences.append(str(record.seq))
+        seq_ids.append(record.id)
+
+    # Extract features in batches
+    all_embeddings = []
+
+    with torch.no_grad():
+        for i in range(0, len(sequences), batch_size):
+            batch_seqs = sequences[i:i + batch_size]
+
+            # Tokenize
+            inputs = tokenizer(
+                batch_seqs,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=512
+            ).to(device)
+
+            # Forward pass
+            outputs = model(**inputs)
+            hidden_states = outputs.last_hidden_state
+
+            # Mean pooling across sequence dimension
+            embeddings = hidden_states.mean(dim=1)  # (batch, 768)
+            all_embeddings.append(embeddings.cpu())
+
+            logger.debug(f"Processed batch {i // batch_size + 1}/{(len(sequences) + batch_size - 1) // batch_size}")
+
+    # Concatenate all batches
+    all_embeddings = torch.cat(all_embeddings, dim=0)
+
+    # Save to file
+    feature_dict = {
+        'nucleotide': seq_ids,
+        'data': all_embeddings
+    }
+    torch.save(feature_dict, output_file)
+
+    logger.info(f"Saved DNABERT-S features to {output_file} (shape: {all_embeddings.shape})")
+    return output_file
+
+
+def extract_esm_features(
+    protein_file: Path,
+    output_file: Path,
+    device: torch.device,
+    truncation_length: int = 1024,
+    toks_per_batch: int = 2048
+) -> Path:
+    """
+    Extract protein sequence embeddings using ESM-2.
+
+    Based on units.py:204-265
+
+    Args:
+        protein_file: Input FASTA file with protein sequences
+        output_file: Output .pt file for features
+        device: PyTorch device for computation
+        truncation_length: Maximum sequence length
+        toks_per_batch: Tokens per batch for batching
+
+    Returns:
+        Path to saved feature file
+    """
+    import esm
+
+    logger.info(f"Extracting ESM-2 features from {protein_file}")
+
+    # Load ESM-2 3B model
+    model, alphabet = esm.pretrained.esm2_t36_3B_UR50D()
+    model = model.to(device)
+    model.eval()
+    batch_converter = alphabet.get_batch_converter()
+
+    # Load sequences
+    sequences = []
+    for record in SeqIO.parse(protein_file, 'fasta'):
+        seq_str = str(record.seq)
+        # Truncate if needed
+        if len(seq_str) > truncation_length:
+            seq_str = seq_str[:truncation_length]
+        sequences.append((record.id, seq_str))
+
+    # Batch sequences by token count
+    batches = []
+    current_batch = []
+    current_tokens = 0
+
+    for seq_id, seq_str in sequences:
+        seq_len = len(seq_str)
+        if current_tokens + seq_len > toks_per_batch and current_batch:
+            batches.append(current_batch)
+            current_batch = []
+            current_tokens = 0
+
+        current_batch.append((seq_id, seq_str))
+        current_tokens += seq_len
+
+    if current_batch:
+        batches.append(current_batch)
+
+    # Extract features batch by batch
+    all_embeddings = []
+    all_ids = []
+
+    with torch.no_grad():
+        for batch_idx, batch in enumerate(batches):
+            # Convert batch
+            batch_labels, batch_strs, batch_tokens = batch_converter(batch)
+            batch_tokens = batch_tokens.to(device)
+
+            # Forward pass
+            results = model(batch_tokens, repr_layers=[36])
+            representations = results["representations"][36]  # Layer 36
+
+            # Mean pool over sequence (excluding special tokens)
+            for i, (seq_id, seq_str) in enumerate(batch):
+                seq_len = len(seq_str)
+                # Mean pool positions 1 to seq_len+1 (skip BOS token)
+                embedding = representations[i, 1:seq_len + 1].mean(dim=0)  # (2560,)
+                all_embeddings.append(embedding.cpu())
+                all_ids.append(seq_id)
+
+            logger.debug(f"Processed batch {batch_idx + 1}/{len(batches)}")
+
+    # Stack all embeddings
+    all_embeddings = torch.stack(all_embeddings)
+
+    # Save to file
+    feature_dict = {
+        'proteins': all_ids,
+        'data': all_embeddings
+    }
+    torch.save(feature_dict, output_file)
+
+    logger.info(f"Saved ESM-2 features to {output_file} (shape: {all_embeddings.shape})")
+    return output_file
+
+
+def merge_features(
+    nucleotide_feature_file: Path,
+    protein_feature_file: Path,
+    output_file: Path
+) -> Path:
+    """
+    Merge DNABERT-S and ESM-2 features by concatenation.
+
+    Based on units.py:290-324
+
+    Args:
+        nucleotide_feature_file: .pt file with DNABERT-S features (768-dim)
+        protein_feature_file: .pt file with ESM-2 features (2560-dim)
+        output_file: Output .pt file for merged features (3328-dim)
+
+    Returns:
+        Path to saved merged feature file
+
+    Raises:
+        ValueError: If sequence IDs don't match between files
+    """
+    logger.info(f"Merging features: {nucleotide_feature_file.name} + {protein_feature_file.name}")
+
+    # Load features
+    nuc_data = torch.load(nucleotide_feature_file)
+    pro_data = torch.load(protein_feature_file)
+
+    # Extract IDs and features
+    nuc_ids = nuc_data['nucleotide']
+    nuc_features = nuc_data['data']  # (N, 768)
+
+    pro_ids = pro_data['proteins']
+    pro_features = pro_data['data']  # (N, 2560)
+
+    # Verify IDs match
+    if nuc_ids != pro_ids:
+        raise ValueError(
+            f"Sequence ID mismatch between nucleotide and protein features.\n"
+            f"Nucleotide has {len(nuc_ids)} sequences, protein has {len(pro_ids)}"
+        )
+
+    # Concatenate features
+    merged_features = torch.cat([nuc_features, pro_features], dim=1)  # (N, 3328)
+
+    # Save merged features
+    merged_dict = {
+        'ids': nuc_ids,
+        'data': merged_features,
+        'labels': None  # No labels for prediction mode
+    }
+    torch.save(merged_dict, output_file)
+
+    logger.info(f"Saved merged features to {output_file} (shape: {merged_features.shape})")
+    return output_file
+```
+
+#### 2.5 Prediction Function Module
+
+**File**: `virnucpro/pipeline/predictor.py`
+
+Extract prediction function from `prediction.py`:
+
+```python
+"""Model prediction functionality"""
+
+import torch
+from torch.utils.data import DataLoader
+from pathlib import Path
+from typing import List, Tuple, Dict
+import logging
+
+from virnucpro.pipeline.models import MLPClassifier, PredictDataBatchDataset
+
+logger = logging.getLogger('virnucpro.predictor')
+
+
+def predict_sequences(
+    merged_feature_files: List[Path],
+    model_path: Path,
+    device: torch.device,
+    batch_size: int = 256,
+    num_workers: int = 4
+) -> List[Tuple[str, str, float, float]]:
+    """
+    Perform batch prediction on merged features.
+
+    Based on prediction.py:74-95
+
+    Args:
+        merged_feature_files: List of .pt files with merged features
+        model_path: Path to trained MLP model
+        device: PyTorch device
+        batch_size: Batch size for DataLoader
+        num_workers: Number of data loading workers
+
+    Returns:
+        List of tuples: (sequence_id, prediction, score_class0, score_class1)
+        where prediction is 'others' or 'virus'
+    """
+    logger.info(f"Loading model from {model_path}")
+
+    # Load model
+    model = torch.load(model_path, map_location=device, weights_only=False)
+    model.to(device)
+    model.eval()
+
+    # Create dataset and dataloader
+    dataset = PredictDataBatchDataset(merged_feature_files)
+    dataloader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        shuffle=False
+    )
+
+    logger.info(f"Running prediction on {len(dataset)} sequences")
+
+    # Perform prediction
+    results = []
+
+    with torch.no_grad():
+        for batch_data, batch_ids in dataloader:
+            batch_data = batch_data.to(device)
+
+            # Forward pass
+            logits = model(batch_data)
+
+            # Convert to probabilities
+            probabilities = torch.softmax(logits, dim=1)
+
+            # Get predictions and scores
+            pred_classes = torch.argmax(probabilities, dim=1)
+
+            # Process batch results
+            for i in range(len(batch_ids)):
+                seq_id = batch_ids[i]
+                pred_class = pred_classes[i].item()
+                score_0 = probabilities[i, 0].item()
+                score_1 = probabilities[i, 1].item()
+
+                # Map class to label
+                prediction = 'virus' if pred_class == 1 else 'others'
+
+                results.append((seq_id, prediction, score_0, score_1))
+
+    logger.info(f"Prediction complete: {len(results)} sequences processed")
+    return results
+
+
+def compute_consensus(
+    predictions: List[Tuple[str, str, float, float]]
+) -> Dict[str, Tuple[str, float, float]]:
+    """
+    Compute consensus predictions by grouping reading frames.
+
+    Based on prediction.py:183-191
+
+    Groups predictions by original sequence ID (removes F1-F3, R1-R3 suffixes)
+    and determines final classification based on highest scores.
+
+    Args:
+        predictions: List of (seq_id, prediction, score_0, score_1) tuples
+
+    Returns:
+        Dictionary mapping original_id -> (prediction, max_score_0, max_score_1)
+    """
+    logger.info("Computing consensus predictions")
+
+    # Group by original sequence ID
+    grouped = {}
+
+    for seq_id, prediction, score_0, score_1 in predictions:
+        # Remove frame indicator (F1-F3, R1-R3)
+        # Assumes format: original_id_chunk_N{F|R}{1-3}
+        if seq_id.endswith(('F1', 'F2', 'F3', 'R1', 'R2', 'R3')):
+            original_id = seq_id[:-2]  # Remove last 2 characters
+        else:
+            original_id = seq_id
+
+        if original_id not in grouped:
+            grouped[original_id] = []
+
+        grouped[original_id].append((score_0, score_1))
+
+    # Compute consensus for each group
+    consensus = {}
+
+    for original_id, scores in grouped.items():
+        # Find maximum scores across all frames
+        max_score_0 = max(s[0] for s in scores)
+        max_score_1 = max(s[1] for s in scores)
+
+        # Determine prediction based on max scores
+        is_virus = max_score_1 >= max_score_0
+        prediction = 'virus' if is_virus else 'others'
+
+        consensus[original_id] = (prediction, max_score_0, max_score_1)
+
+    logger.info(f"Consensus computed for {len(consensus)} original sequences")
+    return consensus
+```
 
 ### Success Criteria
 
@@ -1269,12 +1754,17 @@ def split_fasta_chunk(input_file: Path, output_file: Path, chunk_size: int):
 - [x] Sequence utils import successfully: `python -c "from virnucpro.utils.sequence import translate_dna, identify_seq"`
 - [x] Reverse complement works: `python -c "from virnucpro.utils.sequence import reverse_complement; assert reverse_complement('ATCG') == 'CGAT'"`
 - [x] Translation produces 6 frames: `python -c "from virnucpro.utils.sequence import translate_dna; assert len(translate_dna('ATGATGATGATG')) == 6"`
+- [x] File utils import successfully: `python -c "from virnucpro.utils.file_utils import split_fasta_file, count_sequences"`
+- [x] Feature extraction imports: `python -c "from virnucpro.pipeline.features import extract_dnabert_features, extract_esm_features, merge_features"`
+- [x] Predictor imports: `python -c "from virnucpro.pipeline.predictor import predict_sequences, compute_consensus"`
 
 #### Manual Verification:
 - [ ] Refactored code matches original behavior exactly
 - [ ] All functions have proper docstrings
 - [ ] Logging is added at appropriate points
 - [ ] No circular imports between modules
+- [ ] Feature extraction produces correct tensor shapes (768 for DNABERT-S, 2560 for ESM-2, 3328 merged)
+- [ ] File splitting creates correct number of files with expected sequence counts
 
 **Implementation Note**: After completing this phase and all automated verification passes, pause here for manual confirmation that the refactored modules work correctly before proceeding to Phase 3.
 
@@ -2267,36 +2757,333 @@ def run_prediction(
                 {'files': [str(chunked_file)]}
             )
 
-        # Stage 2: Translation
-        # Example with file-level progress:
-        # with progress.create_file_bar(len(files), desc="Extracting features") as pbar:
-        #     for file in files:
-        #         extract_features(file)
-        #         pbar.update(1)
-        #         pbar.set_postfix_str(f"Current: {file.name}")
-
-        # TODO: Implement remaining stages with checkpointing and progress bars
-
-        # Final: Cleanup if requested
-        if cleanup_intermediate:
-            logger.info("Cleaning up intermediate files...")
-            # TODO: Implement cleanup logic
+        # Stage 2-8: Remaining stages documented in section 4.3 below
+        # [Implementation details in 4.3 Complete Pipeline Orchestration]
 
         logger.info("Pipeline completed successfully!")
 
     except Exception as e:
         # Mark current stage as failed
-        # (determine current stage from state)
         logger.exception("Pipeline failed")
         raise
 ```
 
+#### 4.3 Complete Pipeline Orchestration
+
+**Update**: `virnucpro/pipeline/prediction.py` - Complete remaining stages
+
+Add the following stages after Stage 1 (Chunking) in the `run_prediction()` function:
+
+```python
+        # Stage 2: Six-Frame Translation
+        if not checkpoint_manager.can_skip_stage(state, PipelineStage.TRANSLATION):
+            logger.info("=== Stage 2: Six-Frame Translation ===")
+            checkpoint_manager.mark_stage_started(state, PipelineStage.TRANSLATION)
+
+            from virnucpro.utils.sequence import identify_seq
+            from Bio import SeqIO
+
+            # Process chunked sequences
+            records = list(SeqIO.parse(chunked_file, 'fasta'))
+
+            nuc_records = []
+            pro_records = []
+
+            with progress.create_sequence_bar(len(records), desc="Translating sequences") as pbar:
+                for record in records:
+                    # Translate in all 6 frames, filter stop codons
+                    orf_results = identify_seq(record.id, str(record.seq))
+
+                    for orf in orf_results:
+                        # Create nucleotide record
+                        from Bio.SeqRecord import SeqRecord
+                        from Bio.Seq import Seq
+
+                        nuc_rec = SeqRecord(
+                            Seq(orf['nucleotide']),
+                            id=orf['seqid'],
+                            description=""
+                        )
+                        nuc_records.append(nuc_rec)
+
+                        # Create protein record
+                        pro_rec = SeqRecord(
+                            Seq(orf['protein']),
+                            id=orf['seqid'],
+                            description=""
+                        )
+                        pro_records.append(pro_rec)
+
+                    pbar.update(1)
+
+            # Write output files
+            with open(nucleotide_file, 'w') as f:
+                SeqIO.write(nuc_records, f, 'fasta')
+            with open(protein_file, 'w') as f:
+                SeqIO.write(pro_records, f, 'fasta')
+
+            logger.info(f"Generated {len(nuc_records)} ORFs from {len(records)} chunks")
+
+            checkpoint_manager.mark_stage_completed(
+                state,
+                PipelineStage.TRANSLATION,
+                {'files': [str(nucleotide_file), str(protein_file)]}
+            )
+
+        # Stage 3 & 4: File Splitting
+        nuc_split_dir = output_dir / "nucleotide_split"
+        pro_split_dir = output_dir / "protein_split"
+        sequences_per_file = config.get('prediction.sequences_per_file', 10000)
+
+        # Stage 3: Nucleotide Splitting
+        if not checkpoint_manager.can_skip_stage(state, PipelineStage.NUCLEOTIDE_SPLITTING):
+            logger.info("=== Stage 3: Nucleotide File Splitting ===")
+            checkpoint_manager.mark_stage_started(state, PipelineStage.NUCLEOTIDE_SPLITTING)
+
+            from virnucpro.utils.file_utils import split_fasta_file
+
+            nuc_files = split_fasta_file(
+                nucleotide_file,
+                nuc_split_dir,
+                sequences_per_file=sequences_per_file,
+                prefix="nucleotide"
+            )
+
+            checkpoint_manager.mark_stage_completed(
+                state,
+                PipelineStage.NUCLEOTIDE_SPLITTING,
+                {'files': [str(f) for f in nuc_files]}
+            )
+
+        # Stage 4: Protein Splitting
+        if not checkpoint_manager.can_skip_stage(state, PipelineStage.PROTEIN_SPLITTING):
+            logger.info("=== Stage 4: Protein File Splitting ===")
+            checkpoint_manager.mark_stage_started(state, PipelineStage.PROTEIN_SPLITTING)
+
+            from virnucpro.utils.file_utils import split_fasta_file
+
+            pro_files = split_fasta_file(
+                protein_file,
+                pro_split_dir,
+                sequences_per_file=sequences_per_file,
+                prefix="protein"
+            )
+
+            checkpoint_manager.mark_stage_completed(
+                state,
+                PipelineStage.PROTEIN_SPLITTING,
+                {'files': [str(f) for f in pro_files]}
+            )
+
+        # Get file lists from checkpoint if skipped
+        nuc_files = [Path(f) for f in state['stages']['nucleotide_splitting']['outputs']['files']]
+        pro_files = [Path(f) for f in state['stages']['protein_splitting']['outputs']['files']]
+
+        # Stage 5: DNABERT-S Feature Extraction
+        nuc_feature_dir = output_dir / "nucleotide_features"
+        nuc_feature_dir.mkdir(exist_ok=True)
+
+        if not checkpoint_manager.can_skip_stage(state, PipelineStage.NUCLEOTIDE_FEATURES):
+            logger.info("=== Stage 5: DNABERT-S Feature Extraction ===")
+            checkpoint_manager.mark_stage_started(state, PipelineStage.NUCLEOTIDE_FEATURES)
+
+            from virnucpro.pipeline.features import extract_dnabert_features
+
+            nuc_feature_files = []
+            with progress.create_file_bar(len(nuc_files), desc="DNABERT-S features") as pbar:
+                for nuc_file in nuc_files:
+                    output_file = nuc_feature_dir / f"{nuc_file.stem}_DNABERT_S.pt"
+                    extract_dnabert_features(nuc_file, output_file, device, batch_size)
+                    nuc_feature_files.append(output_file)
+                    pbar.update(1)
+
+            checkpoint_manager.mark_stage_completed(
+                state,
+                PipelineStage.NUCLEOTIDE_FEATURES,
+                {'files': [str(f) for f in nuc_feature_files]}
+            )
+
+        # Stage 6: ESM-2 Feature Extraction
+        pro_feature_dir = output_dir / "protein_features"
+        pro_feature_dir.mkdir(exist_ok=True)
+
+        if not checkpoint_manager.can_skip_stage(state, PipelineStage.PROTEIN_FEATURES):
+            logger.info("=== Stage 6: ESM-2 Feature Extraction ===")
+            checkpoint_manager.mark_stage_started(state, PipelineStage.PROTEIN_FEATURES)
+
+            from virnucpro.pipeline.features import extract_esm_features
+
+            pro_feature_files = []
+            truncation_len = config.get('features.esm.truncation_seq_length', 1024)
+            toks_per_batch = config.get('features.esm.toks_per_batch', 2048)
+
+            with progress.create_file_bar(len(pro_files), desc="ESM-2 features") as pbar:
+                for pro_file in pro_files:
+                    output_file = pro_feature_dir / f"{pro_file.stem}_ESM.pt"
+                    extract_esm_features(pro_file, output_file, device, truncation_len, toks_per_batch)
+                    pro_feature_files.append(output_file)
+                    pbar.update(1)
+
+            checkpoint_manager.mark_stage_completed(
+                state,
+                PipelineStage.PROTEIN_FEATURES,
+                {'files': [str(f) for f in pro_feature_files]}
+            )
+
+        # Get feature file lists from checkpoint if skipped
+        nuc_feature_files = [Path(f) for f in state['stages']['nucleotide_features']['outputs']['files']]
+        pro_feature_files = [Path(f) for f in state['stages']['protein_features']['outputs']['files']]
+
+        # Stage 7: Feature Merging
+        merged_dir = output_dir / "merged_features"
+        merged_dir.mkdir(exist_ok=True)
+
+        if not checkpoint_manager.can_skip_stage(state, PipelineStage.FEATURE_MERGING):
+            logger.info("=== Stage 7: Feature Merging ===")
+            checkpoint_manager.mark_stage_started(state, PipelineStage.FEATURE_MERGING)
+
+            from virnucpro.pipeline.features import merge_features
+
+            merged_files = []
+            pairs = zip(sorted(nuc_feature_files), sorted(pro_feature_files))
+
+            with progress.create_file_bar(len(nuc_feature_files), desc="Merging features") as pbar:
+                for idx, (nuc_feat, pro_feat) in enumerate(pairs):
+                    output_file = merged_dir / f"merged_{idx}.pt"
+                    merge_features(nuc_feat, pro_feat, output_file)
+                    merged_files.append(output_file)
+                    pbar.update(1)
+
+            checkpoint_manager.mark_stage_completed(
+                state,
+                PipelineStage.FEATURE_MERGING,
+                {'files': [str(f) for f in merged_files]}
+            )
+
+        # Get merged files from checkpoint if skipped
+        merged_files = [Path(f) for f in state['stages']['feature_merging']['outputs']['files']]
+
+        # Stage 8: Prediction
+        results_file = output_dir / "prediction_results.txt"
+        consensus_file = output_dir / "prediction_results_highestscore.csv"
+
+        if not checkpoint_manager.can_skip_stage(state, PipelineStage.PREDICTION):
+            logger.info("=== Stage 8: Model Prediction ===")
+            checkpoint_manager.mark_stage_started(state, PipelineStage.PREDICTION)
+
+            from virnucpro.pipeline.predictor import predict_sequences
+
+            predictions = predict_sequences(
+                merged_files,
+                model_path,
+                device,
+                batch_size,
+                num_workers
+            )
+
+            # Save per-frame predictions
+            with open(results_file, 'w') as f:
+                f.write("Sequence_ID\tPrediction\tScore_Others\tScore_Virus\n")
+                for seq_id, pred, score_0, score_1 in predictions:
+                    f.write(f"{seq_id}\t{pred}\t{score_0:.6f}\t{score_1:.6f}\n")
+
+            logger.info(f"Saved predictions to {results_file}")
+
+            checkpoint_manager.mark_stage_completed(
+                state,
+                PipelineStage.PREDICTION,
+                {
+                    'files': [str(results_file)],
+                    'num_predictions': len(predictions)
+                }
+            )
+
+        # Stage 9: Consensus Scoring
+        if not checkpoint_manager.can_skip_stage(state, PipelineStage.CONSENSUS):
+            logger.info("=== Stage 9: Consensus Scoring ===")
+            checkpoint_manager.mark_stage_started(state, PipelineStage.CONSENSUS)
+
+            from virnucpro.pipeline.predictor import compute_consensus
+
+            # Load predictions if we skipped the prediction stage
+            if state['stages']['prediction']['status'] == 'completed':
+                predictions = []
+                with open(results_file, 'r') as f:
+                    next(f)  # Skip header
+                    for line in f:
+                        parts = line.strip().split('\t')
+                        seq_id, pred, score_0, score_1 = parts
+                        predictions.append((seq_id, pred, float(score_0), float(score_1)))
+
+            consensus = compute_consensus(predictions)
+
+            # Save consensus results
+            with open(consensus_file, 'w') as f:
+                f.write("Sequence_ID,Prediction,Max_Score_Others,Max_Score_Virus\n")
+                for seq_id, (pred, max_score_0, max_score_1) in consensus.items():
+                    f.write(f"{seq_id},{pred},{max_score_0:.6f},{max_score_1:.6f}\n")
+
+            logger.info(f"Saved consensus predictions to {consensus_file}")
+
+            checkpoint_manager.mark_stage_completed(
+                state,
+                PipelineStage.CONSENSUS,
+                {
+                    'files': [str(consensus_file)],
+                    'num_sequences': len(consensus)
+                }
+            )
+
+        # Cleanup intermediate files if requested
+        if cleanup_intermediate:
+            logger.info("Cleaning up intermediate files...")
+            import shutil
+
+            # Define intermediate directories to clean
+            cleanup_dirs = [
+                nuc_split_dir,
+                pro_split_dir,
+                nuc_feature_dir,
+                pro_feature_dir,
+                merged_dir,
+                checkpoint_dir
+            ]
+
+            # Define intermediate files to clean
+            cleanup_files = [
+                chunked_file,
+                nucleotide_file,
+                protein_file
+            ]
+
+            for dir_path in cleanup_dirs:
+                if dir_path.exists():
+                    shutil.rmtree(dir_path)
+                    logger.debug(f"Removed {dir_path}")
+
+            for file_path in cleanup_files:
+                if file_path.exists():
+                    file_path.unlink()
+                    logger.debug(f"Removed {file_path}")
+
+            logger.info("Cleanup complete")
+```
+
+**Key Implementation Details**:
+
+1. **Checkpointing Integration**: Each stage checks `can_skip_stage()` before running
+2. **Progress Bars**: Each stage uses appropriate progress bar type (sequence, file, etc.)
+3. **File Management**: Intermediate files organized in subdirectories
+4. **Error Recovery**: State saved after each stage completes
+5. **Output Retrieval**: Stages that can be skipped retrieve file lists from checkpoint
+6. **Cleanup Logic**: Removes all intermediate files/dirs except final results
+
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Checkpoint module imports: `python -c "from virnucpro.core.checkpoint import CheckpointManager, PipelineStage"`
-- [ ] Can create checkpoint: `python -c "from virnucpro.core.checkpoint import CheckpointManager; import tempfile; from pathlib import Path; cm = CheckpointManager(Path(tempfile.mkdtemp()), {})"`
-- [ ] State persistence works: Create checkpoint, save state, load state, verify match
+- [x] Checkpoint module imports: `python -c "from virnucpro.core.checkpoint import CheckpointManager, PipelineStage"`
+- [x] Can create checkpoint: `python -c "from virnucpro.core.checkpoint import CheckpointManager; import tempfile; from pathlib import Path; cm = CheckpointManager(Path(tempfile.mkdtemp()), {})"`
+- [x] State persistence works: Create checkpoint, save state, load state, verify match
 
 #### Manual Verification:
 - [ ] Checkpoint files are created in expected location
