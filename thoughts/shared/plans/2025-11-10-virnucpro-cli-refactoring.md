@@ -1779,12 +1779,12 @@ def validate_fasta_file(
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] CLI imports successfully: `python -c "from virnucpro.cli.main import cli"`
-- [ ] Help text displays: `python -m virnucpro --help`
-- [ ] Predict help displays: `python -m virnucpro predict --help`
-- [ ] Utils help displays: `python -m virnucpro utils --help`
-- [ ] List devices works: `python -m virnucpro utils list-devices`
-- [ ] Generate config works: `python -m virnucpro utils generate-config -o test_config.yaml && test -f test_config.yaml`
+- [x] CLI imports successfully: `python -c "from virnucpro.cli.main import cli"`
+- [x] Help text displays: `python -m virnucpro --help`
+- [x] Predict help displays: `python -m virnucpro predict --help`
+- [x] Utils help displays: `python -m virnucpro utils --help`
+- [x] List devices works: `python -m virnucpro utils list-devices`
+- [x] Generate config works: `python -m virnucpro utils generate-config -o test_config.yaml && test -f test_config.yaml`
 
 #### Manual Verification:
 - [ ] CLI help text is clear and complete

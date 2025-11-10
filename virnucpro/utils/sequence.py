@@ -128,11 +128,11 @@ def identify_seq(seqid: str, sequence: str, refseq_pro_list: Optional[List[str]]
 
         if strand == "+":
             # Forward strand
-            selected_seq = sequence[num-1:num-1 + seq_len]
+            selected_seq = sequence[num-1:num + seq_len]
             seqid_final = seqid + 'F' + str(num)
         else:
             # Reverse strand
-            selected_seq = reverse_complement(sequence)[num-3-1:num-3-1 + seq_len]
+            selected_seq = reverse_complement(sequence)[num-3-1:num-3 + seq_len]
             seqid_final = seqid + 'R' + str(num - 3)
 
         final_list.append({
