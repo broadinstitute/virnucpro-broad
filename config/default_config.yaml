@@ -1,0 +1,97 @@
+# VirNucPro Default Configuration
+
+# Version of this config schema
+version: "2.0.0"
+
+# Prediction settings
+prediction:
+  # Batch size for DataLoader
+  batch_size: 256
+
+  # Number of worker processes for data loading
+  num_workers: 4
+
+  # Number of sequences per intermediate file
+  sequences_per_file: 10000
+
+  # Default model type if not specified
+  default_model_type: "500"
+
+  # Model file paths (relative to project root)
+  models:
+    "300": "300_model.pth"
+    "500": "500_model.pth"
+
+# Device settings
+device:
+  # Default device: "auto", "cpu", "cuda", or "cuda:N"
+  default: "auto"
+
+  # Fallback to CPU if requested GPU unavailable
+  fallback_to_cpu: true
+
+# Feature extraction settings
+features:
+  dnabert:
+    model_name: "zhihan1996/DNABERT-S"
+    trust_remote_code: true
+
+  esm:
+    model_name: "esm2_t36_3B_UR50D"
+    truncation_seq_length: 1024
+    toks_per_batch: 2048
+    representation_layer: 36
+
+# Checkpointing settings
+checkpointing:
+  # Enable checkpointing by default
+  enabled: true
+
+  # Checkpoint directory name (relative to output dir)
+  checkpoint_dir: ".checkpoints"
+
+  # Keep checkpoint history for debugging
+  keep_history: 5
+
+# File management
+files:
+  # Clean intermediate files after successful completion
+  auto_cleanup: true
+
+  # Always keep these file types
+  keep_files:
+    - "prediction_results.txt"
+    - "prediction_results_highestscore.csv"
+
+# Logging settings
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR
+  default_level: "INFO"
+
+  # Log format
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+  # Auto-create log file in output directory
+  auto_log_file: true
+
+# Progress reporting settings
+progress:
+  # Show progress bars by default
+  enabled: true
+
+  # Progress bar width (in characters)
+  bar_width: 100
+
+  # Update interval (in seconds) for progress bars
+  update_interval: 0.1
+
+# Validation settings
+validation:
+  # Check for ambiguous bases and warn
+  warn_ambiguous_bases: true
+
+  # Maximum ambiguous base percentage before warning
+  max_ambiguous_percent: 5.0
+
+  # Check for duplicate sequence IDs
+  check_duplicate_ids: true
