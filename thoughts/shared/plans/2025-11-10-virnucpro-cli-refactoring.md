@@ -1265,10 +1265,10 @@ def split_fasta_chunk(input_file: Path, output_file: Path, chunk_size: int):
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Models module imports successfully: `python -c "from virnucpro.pipeline.models import MLPClassifier, PredictDataBatchDataset"`
-- [ ] Sequence utils import successfully: `python -c "from virnucpro.utils.sequence import translate_dna, identify_seq"`
-- [ ] Reverse complement works: `python -c "from virnucpro.utils.sequence import reverse_complement; assert reverse_complement('ATCG') == 'CGAT'"`
-- [ ] Translation produces 6 frames: `python -c "from virnucpro.utils.sequence import translate_dna; assert len(translate_dna('ATGATGATGATG')) == 6"`
+- [x] Models module imports successfully: `python -c "from virnucpro.pipeline.models import MLPClassifier, PredictDataBatchDataset"`
+- [x] Sequence utils import successfully: `python -c "from virnucpro.utils.sequence import translate_dna, identify_seq"`
+- [x] Reverse complement works: `python -c "from virnucpro.utils.sequence import reverse_complement; assert reverse_complement('ATCG') == 'CGAT'"`
+- [x] Translation produces 6 frames: `python -c "from virnucpro.utils.sequence import translate_dna; assert len(translate_dna('ATGATGATGATG')) == 6"`
 
 #### Manual Verification:
 - [ ] Refactored code matches original behavior exactly
