@@ -7,6 +7,9 @@ import torch
 
 from virnucpro.core.checkpoint import CheckpointManager, PipelineStage
 from virnucpro.core.config import Config
+from virnucpro.pipeline.parallel import detect_cuda_devices
+from virnucpro.pipeline.parallel_esm import assign_files_round_robin, process_esm_files_worker
+from virnucpro.pipeline.work_queue import BatchQueueManager
 # Import other pipeline components as they're refactored
 
 logger = logging.getLogger('virnucpro.pipeline.prediction')
@@ -25,8 +28,10 @@ def run_prediction(
     cleanup_intermediate: bool,
     resume: bool,
     show_progress: bool,
-    config: Config
-):
+    config: Config,
+    toks_per_batch: int = None,
+    quiet: bool = False
+) -> int:
     """
     Main prediction pipeline orchestration.
 
@@ -44,6 +49,11 @@ def run_prediction(
         resume: Whether to resume from checkpoint
         show_progress: Whether to show progress bars
         config: Configuration object
+        toks_per_batch: Tokens per batch for ESM-2 processing (optional)
+        quiet: Disable dashboard and verbose logging (optional)
+
+    Returns:
+        Exit code: 0 for success, 1 for total failure, 2 for partial success
     """
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -212,7 +222,7 @@ def run_prediction(
             use_parallel = False
             if parallel:
                 from virnucpro.pipeline.parallel import detect_cuda_devices, assign_files_round_robin, process_dnabert_files_worker
-                from multiprocessing import Pool
+                import multiprocessing
 
                 available_gpus = detect_cuda_devices()
                 if len(available_gpus) > 1:
@@ -240,7 +250,10 @@ def run_prediction(
                     for device_id, file_subset in zip(available_gpus, worker_file_assignments)
                 ]
 
-                with Pool(processes=len(available_gpus)) as pool:
+                # Use 'spawn' start method for CUDA compatibility
+                # Fork method causes "Cannot re-initialize CUDA in forked subprocess" error
+                ctx = multiprocessing.get_context('spawn')
+                with ctx.Pool(processes=len(available_gpus)) as pool:
                     with progress.create_file_bar(len(files_to_process), desc="DNABERT-S extraction (parallel)") as pbar:
                         results = pool.starmap(process_dnabert_files_worker, worker_args)
                         for worker_output in results:
@@ -298,26 +311,65 @@ def run_prediction(
             from virnucpro.pipeline.features import extract_esm_features
 
             protein_feature_files = []
+            failed_files = []
 
-            # Extract ESM-2 features
+            # Extract ESM-2 features with multi-GPU support
             logger.info("Extracting ESM-2 features from protein sequences")
             truncation_length = config.get('features.esm.truncation_seq_length', 1024)
-            toks_per_batch = config.get('features.esm.toks_per_batch', 2048)
+            if toks_per_batch is None:
+                toks_per_batch = config.get('features.esm.toks_per_batch', 2048)
 
-            with progress.create_file_bar(len(protein_files), desc="ESM-2 extraction") as pbar:
-                for pro_file in protein_files:
-                    # Construct output filename: output_0.fa -> output_0_ESM.pt
-                    output_file = pro_file.parent / f"{pro_file.stem}_ESM.pt"
-                    extract_esm_features(
-                        pro_file,
-                        output_file,
-                        device,
-                        truncation_length=truncation_length,
-                        toks_per_batch=toks_per_batch
-                    )
-                    protein_feature_files.append(output_file)
-                    pbar.update(1)
-                    pbar.set_postfix_str(f"Current: {pro_file.name}")
+            # Detect available GPUs
+            cuda_devices = detect_cuda_devices()
+            num_gpus = len(cuda_devices) if cuda_devices else 1
+            use_parallel = num_gpus > 1 and len(protein_files) > 1 and parallel
+
+            if use_parallel:
+                logger.info(f"Using {num_gpus} GPUs for ESM-2 extraction")
+
+                # Assign files round-robin across GPUs
+                file_assignments = assign_files_round_robin(protein_files, num_gpus)
+
+                # Process with queue manager
+                queue_manager = BatchQueueManager(num_gpus, process_esm_files_worker)
+                processed, failed = queue_manager.process_files(
+                    file_assignments,
+                    toks_per_batch=toks_per_batch,
+                    output_dir=protein_files[0].parent
+                )
+
+                protein_feature_files.extend(processed)
+                failed_files.extend(failed)
+
+                # Log failures
+                if failed:
+                    failed_file_path = output_dir / "failed_files.txt"
+                    with open(failed_file_path, 'w') as f:
+                        for file_path, error in failed:
+                            f.write(f"{file_path}|ESM-2|{error}\n")
+                    logger.warning(f"Failed to process {len(failed)} files, see {failed_file_path}")
+            else:
+                logger.info("Using single GPU for ESM-2 extraction")
+                device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+                with progress.create_file_bar(len(protein_files), desc="ESM-2 extraction") as pbar:
+                    for pro_file in protein_files:
+                        # Construct output filename: output_0.fa -> output_0_ESM.pt
+                        output_file = pro_file.parent / f"{pro_file.stem}_ESM.pt"
+                        try:
+                            extract_esm_features(
+                                pro_file,
+                                output_file,
+                                device,
+                                truncation_length=truncation_length,
+                                toks_per_batch=toks_per_batch
+                            )
+                            protein_feature_files.append(output_file)
+                        except Exception as e:
+                            logger.error(f"Failed to process {pro_file.name}: {e}")
+                            failed_files.append((pro_file, str(e)))
+                        pbar.update(1)
+                        pbar.set_postfix_str(f"Current: {pro_file.name}")
 
             checkpoint_manager.mark_stage_completed(
                 state,
@@ -327,6 +379,7 @@ def run_prediction(
         else:
             # Load from checkpoint
             protein_feature_files = [Path(f) for f in state['stages'][PipelineStage.PROTEIN_FEATURES.name]['outputs']['protein_features']]
+            failed_files = []
 
         # Stage 7: Feature Merging
         merged_dir = output_dir / f"{input_file.stem}_merged"
@@ -452,8 +505,15 @@ def run_prediction(
 
         logger.info("Pipeline completed successfully!")
 
+        # Determine exit code based on failures
+        if failed_files:
+            logger.warning(f"Pipeline completed with {len(failed_files)} failures")
+            return 2  # Partial success
+        else:
+            return 0  # Complete success
+
     except Exception as e:
         # Mark current stage as failed
         # (determine current stage from state)
         logger.exception("Pipeline failed")
-        raise
+        return 1  # Total failure
