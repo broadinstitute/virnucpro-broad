@@ -39,50 +39,47 @@ def extract_dnabert_features(
     model = AutoModel.from_pretrained(model_name, trust_remote_code=True).to(device)
     model.eval()
 
-    # Load sequences
-    sequences = []
-    seq_ids = []
-    for record in SeqIO.parse(nucleotide_file, 'fasta'):
-        sequences.append(str(record.seq))
-        seq_ids.append(record.id)
+    # Load all sequences
+    nucleotide = []
+    data = []
 
-    # Extract features in batches
-    all_embeddings = []
+    records = list(SeqIO.parse(nucleotide_file, 'fasta'))
 
     with torch.no_grad():
-        for i in range(0, len(sequences), batch_size):
-            batch_seqs = sequences[i:i + batch_size]
+        # Process in batches
+        for i in range(0, len(records), batch_size):
+            batch_records = records[i:i + batch_size]
+            batch_seqs = [str(record.seq) for record in batch_records]
+            batch_labels = [record.id for record in batch_records]
 
-            # Tokenize
-            inputs = tokenizer(
-                batch_seqs,
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-                max_length=512
-            ).to(device)
+            # Tokenize batch with padding
+            inputs = tokenizer(batch_seqs, return_tensors='pt', padding=True)
+            input_ids = inputs["input_ids"].to(device)
+            attention_mask = inputs.get("attention_mask", None)
+            if attention_mask is not None:
+                attention_mask = attention_mask.to(device)
 
-            # Forward pass
-            outputs = model(**inputs)
-            hidden_states = outputs.last_hidden_state
+            # Forward pass - model returns tuple, take first element
+            if attention_mask is not None:
+                hidden_states = model(input_ids, attention_mask=attention_mask)[0]
+            else:
+                hidden_states = model(input_ids)[0]
 
-            # Mean pooling across sequence dimension
-            embeddings = hidden_states.mean(dim=1)  # (batch, 768)
-            all_embeddings.append(embeddings.cpu())
+            # Mean pool each sequence in batch, excluding padding tokens
+            if attention_mask is not None:
+                embedding_means = (hidden_states * attention_mask.unsqueeze(-1)).sum(dim=1) / attention_mask.sum(dim=1, keepdim=True)
+            else:
+                embedding_means = torch.mean(hidden_states, dim=1)
 
-            logger.debug(f"Processed batch {i // batch_size + 1}/{(len(sequences) + batch_size - 1) // batch_size}")
+            for label, embedding_mean in zip(batch_labels, embedding_means):
+                result = {"label": label, "mean_representation": embedding_mean.cpu().tolist()}
+                nucleotide.append(label)
+                data.append(result)
 
-    # Concatenate all batches
-    all_embeddings = torch.cat(all_embeddings, dim=0)
+    # Save to file in original format
+    torch.save({'nucleotide': nucleotide, 'data': data}, output_file)
 
-    # Save to file
-    feature_dict = {
-        'nucleotide': seq_ids,
-        'data': all_embeddings
-    }
-    torch.save(feature_dict, output_file)
-
-    logger.info(f"Saved DNABERT-S features to {output_file} (shape: {all_embeddings.shape})")
+    logger.info(f"Saved DNABERT-S features to {output_file} ({len(data)} sequences)")
     return output_file
 
 
@@ -145,9 +142,9 @@ def extract_esm_features(
     if current_batch:
         batches.append(current_batch)
 
-    # Extract features batch by batch
-    all_embeddings = []
-    all_ids = []
+    # Extract features batch by batch (matching original format)
+    proteins = []
+    data = []
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(batches):
@@ -161,25 +158,18 @@ def extract_esm_features(
 
             # Mean pool over sequence (excluding special tokens)
             for i, (seq_id, seq_str) in enumerate(batch):
-                seq_len = len(seq_str)
-                # Mean pool positions 1 to seq_len+1 (skip BOS token)
-                embedding = representations[i, 1:seq_len + 1].mean(dim=0)  # (2560,)
-                all_embeddings.append(embedding.cpu())
-                all_ids.append(seq_id)
+                truncate_len = min(truncation_length, len(seq_str))
+                # Mean pool positions 1 to truncate_len+1 (skip BOS token)
+                embedding = representations[i, 1:truncate_len + 1].mean(dim=0).clone().to('cpu')  # (2560,)
+                proteins.append(seq_id)
+                data.append(embedding)
 
             logger.debug(f"Processed batch {batch_idx + 1}/{len(batches)}")
 
-    # Stack all embeddings
-    all_embeddings = torch.stack(all_embeddings)
+    # Save to file in original format (list of tensors, not stacked)
+    torch.save({'proteins': proteins, 'data': data}, output_file)
 
-    # Save to file
-    feature_dict = {
-        'proteins': all_ids,
-        'data': all_embeddings
-    }
-    torch.save(feature_dict, output_file)
-
-    logger.info(f"Saved ESM-2 features to {output_file} (shape: {all_embeddings.shape})")
+    logger.info(f"Saved ESM-2 features to {output_file} ({len(data)} sequences)")
     return output_file
 
 
@@ -210,30 +200,45 @@ def merge_features(
     nuc_data = torch.load(nucleotide_feature_file)
     pro_data = torch.load(protein_feature_file)
 
-    # Extract IDs and features
-    nuc_ids = nuc_data['nucleotide']
-    nuc_features = nuc_data['data']  # (N, 768)
+    # Create dictionaries for lookup (matching original implementation)
+    nucleotide_data_dict = {}
+    protein_data_dict = {}
 
-    pro_ids = pro_data['proteins']
-    pro_features = pro_data['data']  # (N, 2560)
+    # Convert DNABERT-S data from list of dicts to tensors
+    for nucleotide, data in zip(nuc_data['nucleotide'], nuc_data['data']):
+        nucleotide_data_dict[nucleotide] = torch.tensor(data['mean_representation'])
 
-    # Verify IDs match
-    if nuc_ids != pro_ids:
-        raise ValueError(
-            f"Sequence ID mismatch between nucleotide and protein features.\n"
-            f"Nucleotide has {len(nuc_ids)} sequences, protein has {len(pro_ids)}"
-        )
+    # ESM data is already tensors
+    for protein, data in zip(pro_data['proteins'], pro_data['data']):
+        protein_data_dict[protein] = data
 
-    # Concatenate features
-    merged_features = torch.cat([nuc_features, pro_features], dim=1)  # (N, 3328)
+    # Merge features
+    merged_data = []
+    for item in nuc_data['nucleotide']:
+        if item in protein_data_dict and item in nucleotide_data_dict:
+            protein_feature = protein_data_dict[item]
+            nucleotide_feature = nucleotide_data_dict[item]
 
-    # Save merged features
+            merged_feature = torch.cat((nucleotide_feature, protein_feature), dim=-1)
+            merged_data.append(merged_feature)
+        else:
+            logger.warning(f"Warning: {item} not found in both datasets")
+
+    # Handle empty merged data
+    if not merged_data:
+        logger.warning(f"No matching sequences between {nucleotide_feature_file.name} and {protein_feature_file.name}")
+        torch.save({'ids': nuc_data['nucleotide'], 'data': torch.empty((0, 3328))}, output_file)
+        return output_file
+
+    # Stack into tensor
+    merged_data = torch.stack(merged_data)
+
+    # Save merged features (no labels for prediction mode)
     merged_dict = {
-        'ids': nuc_ids,
-        'data': merged_features,
-        'labels': None  # No labels for prediction mode
+        'ids': nuc_data['nucleotide'],
+        'data': merged_data
     }
     torch.save(merged_dict, output_file)
 
-    logger.info(f"Saved merged features to {output_file} (shape: {merged_features.shape})")
+    logger.info(f"Saved merged features to {output_file} (shape: {merged_data.shape})")
     return output_file

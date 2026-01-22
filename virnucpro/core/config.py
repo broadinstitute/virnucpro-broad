@@ -1,5 +1,28 @@
 """Configuration management for VirNucPro"""
 
+# Configuration Schema Documentation:
+#
+# features.dnabert.batch_size (int, default: 256)
+#   Batch size for DNABERT-S feature extraction. Determines how many
+#   sequences are processed in parallel on GPU. Higher values increase
+#   GPU utilization but require more VRAM. Recommended values:
+#   - 4GB+ GPU: 256 (default)
+#   - 2-4GB GPU: 128
+#   - <2GB GPU: 64
+#
+# features.esm.toks_per_batch (int, default: 2048)
+#   Maximum tokens per batch for ESM-2 extraction.
+#
+# parallelization.enabled (bool, default: false)
+#   Enable multi-GPU parallel processing. When true, feature extraction
+#   uses all available GPUs via multiprocessing. Users should enable this
+#   with --parallel CLI flag for better GPU resource management.
+#
+# parallelization.num_workers (int or "auto", default: "auto")
+#   Number of parallel workers for feature extraction. When set to "auto",
+#   uses the number of detected GPUs. Can be set to specific integer to
+#   limit worker count (useful in shared GPU environments).
+
 import yaml
 from pathlib import Path
 from typing import Any, Dict, Optional

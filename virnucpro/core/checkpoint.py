@@ -5,7 +5,7 @@ import hashlib
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Any
-from enum import Enum
+from enum import Enum, IntEnum
 import logging
 
 logger = logging.getLogger('virnucpro.checkpoint')
@@ -19,17 +19,17 @@ class StageStatus(Enum):
     FAILED = "failed"
 
 
-class PipelineStage(Enum):
-    """Pipeline stages for prediction"""
-    CHUNKING = "chunking"
-    TRANSLATION = "translation"
-    NUCLEOTIDE_SPLITTING = "nucleotide_splitting"
-    PROTEIN_SPLITTING = "protein_splitting"
-    NUCLEOTIDE_FEATURES = "nucleotide_features"
-    PROTEIN_FEATURES = "protein_features"
-    FEATURE_MERGING = "feature_merging"
-    PREDICTION = "prediction"
-    CONSENSUS = "consensus"
+class PipelineStage(IntEnum):
+    """Pipeline stages for prediction (ordered)"""
+    CHUNKING = 1
+    TRANSLATION = 2
+    NUCLEOTIDE_SPLITTING = 3
+    PROTEIN_SPLITTING = 4
+    NUCLEOTIDE_FEATURES = 5
+    PROTEIN_FEATURES = 6
+    FEATURE_MERGING = 7
+    PREDICTION = 8
+    CONSENSUS = 9
 
 
 class CheckpointManager:
@@ -111,7 +111,7 @@ class CheckpointManager:
                 "model_path": str(self.pipeline_config.get('model_path'))
             },
             "stages": {
-                stage.value: {
+                stage.name: {
                     "status": StageStatus.NOT_STARTED.value,
                     "started_at": None,
                     "completed_at": None,
@@ -149,17 +149,17 @@ class CheckpointManager:
         stages = list(PipelineStage)
 
         for stage in stages:
-            stage_state = state['stages'][stage.value]
+            stage_state = state['stages'][stage.name]
             status = StageStatus(stage_state['status'])
 
             # Resume from failed or in-progress stages
             if status in [StageStatus.FAILED, StageStatus.IN_PROGRESS]:
-                logger.info(f"Resuming from stage: {stage.value} (status: {status.value})")
+                logger.info(f"Resuming from stage: {stage.name} (status: {status.value})")
                 return stage
 
             # Resume from first not-started stage
             if status == StageStatus.NOT_STARTED:
-                logger.info(f"Starting from stage: {stage.value}")
+                logger.info(f"Starting from stage: {stage.name}")
                 return stage
 
         # All stages completed
@@ -168,12 +168,12 @@ class CheckpointManager:
 
     def mark_stage_started(self, state: Dict, stage: PipelineStage):
         """Mark a stage as started"""
-        stage_state = state['stages'][stage.value]
+        stage_state = state['stages'][stage.name]
         stage_state['status'] = StageStatus.IN_PROGRESS.value
         stage_state['started_at'] = datetime.utcnow().isoformat()
         self.save_state(state)
 
-        logger.info(f"Stage started: {stage.value}")
+        logger.info(f"Stage started: {stage.name}")
 
     def mark_stage_completed(
         self,
@@ -189,7 +189,7 @@ class CheckpointManager:
             stage: Completed stage
             outputs: Output files/data from stage
         """
-        stage_state = state['stages'][stage.value]
+        stage_state = state['stages'][stage.name]
         started_at = stage_state.get('started_at')
 
         stage_state['status'] = StageStatus.COMPLETED.value
@@ -207,20 +207,20 @@ class CheckpointManager:
 
         self.save_state(state)
 
-        logger.info(f"Stage completed: {stage.value}")
+        logger.info(f"Stage completed: {stage.name}")
         if stage_state.get('duration_seconds'):
             logger.info(f"  Duration: {stage_state['duration_seconds']:.1f}s")
 
     def mark_stage_failed(self, state: Dict, stage: PipelineStage, error: str):
         """Mark a stage as failed"""
-        stage_state = state['stages'][stage.value]
+        stage_state = state['stages'][stage.name]
         stage_state['status'] = StageStatus.FAILED.value
         stage_state['failed_at'] = datetime.utcnow().isoformat()
         stage_state['error'] = error
 
         self.save_state(state)
 
-        logger.error(f"Stage failed: {stage.value} - {error}")
+        logger.error(f"Stage failed: {stage.name} - {error}")
 
     def can_skip_stage(self, state: Dict, stage: PipelineStage) -> bool:
         """
@@ -233,7 +233,7 @@ class CheckpointManager:
         Returns:
             True if stage can be skipped
         """
-        stage_state = state['stages'][stage.value]
+        stage_state = state['stages'][stage.name]
         status = StageStatus(stage_state['status'])
 
         # Can only skip completed stages
@@ -246,11 +246,11 @@ class CheckpointManager:
             for file_path in outputs['files']:
                 if not Path(file_path).exists():
                     logger.warning(
-                        f"Output file missing for {stage.value}: {file_path}"
+                        f"Output file missing for {stage.name}: {file_path}"
                     )
                     return False
 
-        logger.info(f"Skipping completed stage: {stage.value}")
+        logger.info(f"Skipping completed stage: {stage.name}")
         return True
 
 

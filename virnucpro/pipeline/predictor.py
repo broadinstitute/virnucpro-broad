@@ -36,8 +36,36 @@ def predict_sequences(
     """
     logger.info(f"Loading model from {model_path}")
 
-    # Load model
-    model = torch.load(model_path, map_location=device, weights_only=False)
+    # Handle model loading with class location changes
+    # The model was saved with classes in __main__, but they're now in virnucpro.pipeline.models
+    import sys
+
+    # Save original __main__ attributes
+    original_main = sys.modules['__main__']
+    original_attrs = {}
+
+    # Temporarily inject our classes into __main__ for unpickling
+    try:
+        # Save any existing attributes with the same names
+        for attr in ['MLPClassifier', 'PredictDataBatchDataset']:
+            if hasattr(original_main, attr):
+                original_attrs[attr] = getattr(original_main, attr)
+
+        # Inject our classes
+        setattr(original_main, 'MLPClassifier', MLPClassifier)
+        setattr(original_main, 'PredictDataBatchDataset', PredictDataBatchDataset)
+
+        # Now load the model normally
+        model = torch.load(model_path, map_location=device, weights_only=False)
+
+    finally:
+        # Restore original attributes
+        for attr in ['MLPClassifier', 'PredictDataBatchDataset']:
+            if attr in original_attrs:
+                setattr(original_main, attr, original_attrs[attr])
+            elif hasattr(original_main, attr):
+                delattr(original_main, attr)
+
     model.to(device)
     model.eval()
 

@@ -35,7 +35,7 @@ def split_fasta_file(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     output_files = []
-    current_file_idx = 0
+    current_file_idx = 0  # Start at 0, will increment to 1 before first use (matches vanilla)
     current_count = 0
     current_handle = None
     current_path = None
@@ -49,6 +49,8 @@ def split_fasta_file(
                 if current_handle:
                     current_handle.close()
 
+                # Increment before use to match vanilla (1-based indexing)
+                current_file_idx += 1
                 current_path = output_dir / f"{prefix}_{current_file_idx}.fa"
                 current_handle = open(current_path, 'w')
                 output_files.append(current_path)
@@ -61,7 +63,6 @@ def split_fasta_file(
             # Check if file is complete
             if current_count >= sequences_per_file:
                 current_count = 0
-                current_file_idx += 1
 
     finally:
         if current_handle:

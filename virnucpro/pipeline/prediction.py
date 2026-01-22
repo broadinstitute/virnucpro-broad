@@ -18,6 +18,8 @@ def run_prediction(
     expected_length: int,
     output_dir: Path,
     device: torch.device,
+    dnabert_batch_size: int,
+    parallel: bool,
     batch_size: int,
     num_workers: int,
     cleanup_intermediate: bool,
@@ -34,6 +36,8 @@ def run_prediction(
         expected_length: Expected sequence length
         output_dir: Output directory
         device: PyTorch device
+        dnabert_batch_size: Batch size for DNABERT-S extraction
+        parallel: Enable multi-GPU parallel processing
         batch_size: Batch size for DataLoader
         num_workers: Number of data loading workers
         cleanup_intermediate: Whether to clean intermediate files
@@ -203,24 +207,79 @@ def run_prediction(
             logger.info("=== Stage 5: Nucleotide Feature Extraction ===")
             checkpoint_manager.mark_stage_started(state, PipelineStage.NUCLEOTIDE_FEATURES)
 
-            from virnucpro.pipeline.features import extract_dnabert_features
-
             nucleotide_feature_files = []
 
-            # Extract DNABERT-S features
-            logger.info("Extracting DNABERT-S features from nucleotide sequences")
-            with progress.create_file_bar(len(nucleotide_files), desc="DNABERT-S extraction") as pbar:
+            use_parallel = False
+            if parallel:
+                from virnucpro.pipeline.parallel import detect_cuda_devices, assign_files_round_robin, process_dnabert_files_worker
+                from multiprocessing import Pool
+
+                available_gpus = detect_cuda_devices()
+                if len(available_gpus) > 1:
+                    use_parallel = True
+                    logger.info(f"Using parallel processing with {len(available_gpus)} GPUs")
+                else:
+                    logger.info("Only 1 GPU available, falling back to sequential processing")
+
+            if use_parallel:
+                logger.info("Extracting DNABERT-S features in parallel across GPUs")
+
+                files_to_process = []
                 for nuc_file in nucleotide_files:
-                    output_file = nuc_file.with_suffix('').with_suffix('_DNABERT_S.pt')
-                    extract_dnabert_features(
-                        nuc_file,
-                        output_file,
-                        device,
-                        batch_size=batch_size
+                    output_file = nuc_file.parent / f"{nuc_file.stem}_DNABERT_S.pt"
+                    if not output_file.exists():
+                        files_to_process.append(nuc_file)
+                    else:
+                        nucleotide_feature_files.append(output_file)
+                        logger.info(f"Skipping {nuc_file.name} (output already exists)")
+
+                worker_file_assignments = assign_files_round_robin(files_to_process, len(available_gpus))
+
+                worker_args = [
+                    (file_subset, device_id, dnabert_batch_size, nucleotide_files[0].parent)
+                    for device_id, file_subset in zip(available_gpus, worker_file_assignments)
+                ]
+
+                with Pool(processes=len(available_gpus)) as pool:
+                    with progress.create_file_bar(len(files_to_process), desc="DNABERT-S extraction (parallel)") as pbar:
+                        results = pool.starmap(process_dnabert_files_worker, worker_args)
+                        for worker_output in results:
+                            nucleotide_feature_files.extend(worker_output)
+                        pbar.update(len(files_to_process))
+
+                # Validate that we have feature files
+                if not nucleotide_feature_files:
+                    raise RuntimeError(
+                        f"No nucleotide feature files produced or found. Expected {len(nucleotide_files)} files. "
+                        f"Check that input files are not empty and feature extraction completed successfully."
                     )
-                    nucleotide_feature_files.append(output_file)
-                    pbar.update(1)
-                    pbar.set_postfix_str(f"Current: {nuc_file.name}")
+            else:
+                from virnucpro.pipeline.features import extract_dnabert_features
+
+                logger.info("Extracting DNABERT-S features from nucleotide sequences")
+
+                # Filter out files with existing outputs for checkpoint resume
+                files_to_process = []
+                for nuc_file in nucleotide_files:
+                    output_file = nuc_file.parent / f"{nuc_file.stem}_DNABERT_S.pt"
+                    if not output_file.exists() or output_file.stat().st_size == 0:
+                        files_to_process.append(nuc_file)
+                    else:
+                        nucleotide_feature_files.append(output_file)
+                        logger.info(f"Skipping {nuc_file.name} (output already exists)")
+
+                with progress.create_file_bar(len(files_to_process), desc="DNABERT-S extraction") as pbar:
+                    for nuc_file in files_to_process:
+                        output_file = nuc_file.parent / f"{nuc_file.stem}_DNABERT_S.pt"
+                        extract_dnabert_features(
+                            nuc_file,
+                            output_file,
+                            device,
+                            batch_size=dnabert_batch_size
+                        )
+                        nucleotide_feature_files.append(output_file)
+                        pbar.update(1)
+                        pbar.set_postfix_str(f"Current: {nuc_file.name}")
 
             checkpoint_manager.mark_stage_completed(
                 state,
@@ -247,7 +306,8 @@ def run_prediction(
 
             with progress.create_file_bar(len(protein_files), desc="ESM-2 extraction") as pbar:
                 for pro_file in protein_files:
-                    output_file = pro_file.with_suffix('').with_suffix('_ESM.pt')
+                    # Construct output filename: output_0.fa -> output_0_ESM.pt
+                    output_file = pro_file.parent / f"{pro_file.stem}_ESM.pt"
                     extract_esm_features(
                         pro_file,
                         output_file,
@@ -282,8 +342,9 @@ def run_prediction(
 
             with progress.create_file_bar(len(nucleotide_feature_files), desc="Merging features") as pbar:
                 for nuc_feat, pro_feat in zip(nucleotide_feature_files, protein_feature_files):
-                    # Generate output filename
-                    merged_file = merged_dir / nuc_feat.name.replace('_DNABERT_S.pt', '_merged.pt')
+                    # Generate output filename: output_0_DNABERT_S.pt -> output_0_merged.pt
+                    base_name = nuc_feat.stem.replace('_DNABERT_S', '')
+                    merged_file = merged_dir / f"{base_name}_merged.pt"
 
                     merge_features(nuc_feat, pro_feat, merged_file)
                     merged_feature_files.append(merged_file)

@@ -1,0 +1,5 @@
+Sequence_ID	Prediction	score1	score2
+synthetic_seq_1_chunk_1R1	virus	0.12100612	0.8789939
+synthetic_seq_1_chunk_1R2	virus	0.0011595711	0.9988405
+synthetic_seq_2_chunk_1R1	others	0.5501341	0.4498659
+synthetic_seq_2_chunk_1R2	virus	0.06045397	0.93954605

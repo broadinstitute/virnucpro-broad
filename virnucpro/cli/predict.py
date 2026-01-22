@@ -48,10 +48,17 @@ logger = logging.getLogger('virnucpro.cli.predict')
 @click.option('--no-progress',
               is_flag=True,
               help='Disable progress bars (useful for logging to files)')
+@click.option('--dnabert-batch-size',
+              type=int,
+              help='Batch size for DNABERT-S feature extraction (default: from config)')
+@click.option('--parallel',
+              is_flag=True,
+              help='Enable multi-GPU parallel processing for feature extraction')
 @click.pass_context
 def predict(ctx, input_file, model_type, model_path, expected_length,
             output_dir, device, batch_size, num_workers,
-            keep_intermediate, resume, force, no_progress):
+            keep_intermediate, resume, force, no_progress,
+            dnabert_batch_size, parallel):
     """
     Predict viral sequences from FASTA input.
 
@@ -120,6 +127,9 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
         if num_workers is None:
             num_workers = config.get('prediction.num_workers', 4)
 
+        if dnabert_batch_size is None:
+            dnabert_batch_size = config.get('features.dnabert.batch_size', 256)
+
         # Validate and get device
         fallback_to_cpu = config.get('device.fallback_to_cpu', True)
         device_obj = validate_and_get_device(device, fallback_to_cpu=fallback_to_cpu)
@@ -136,6 +146,8 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
         logger.info(f"  Device: {device_obj}")
         logger.info(f"  Batch size: {batch_size}")
         logger.info(f"  Workers: {num_workers}")
+        logger.info(f"  DNABERT batch size: {dnabert_batch_size}")
+        logger.info(f"  Parallel processing: {'enabled' if parallel else 'disabled'}")
         logger.info(f"  Resume: {resume}")
         logger.info(f"  Cleanup intermediate files: {cleanup}")
         logger.info(f"  Progress bars: {'disabled' if no_progress else 'enabled'}")
@@ -151,6 +163,8 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
             expected_length=expected_length,
             output_dir=output_dir,
             device=device_obj,
+            dnabert_batch_size=dnabert_batch_size,
+            parallel=parallel,
             batch_size=batch_size,
             num_workers=num_workers,
             cleanup_intermediate=cleanup,

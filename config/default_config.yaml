@@ -35,12 +35,19 @@ features:
   dnabert:
     model_name: "zhihan1996/DNABERT-S"
     trust_remote_code: true
+    batch_size: 256
 
   esm:
     model_name: "esm2_t36_3B_UR50D"
     truncation_seq_length: 1024
     toks_per_batch: 2048
     representation_layer: 36
+
+# Parallelization settings
+parallelization:
+  enabled: false
+  # Number of workers: "auto" uses GPU count when enabled
+  num_workers: auto
 
 # Checkpointing settings
 checkpointing:

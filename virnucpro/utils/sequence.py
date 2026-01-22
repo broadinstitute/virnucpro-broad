@@ -5,6 +5,8 @@ from Bio.Seq import Seq
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 import logging
+import tempfile
+import shutil
 
 logger = logging.getLogger('virnucpro.sequence')
 
@@ -144,9 +146,130 @@ def identify_seq(seqid: str, sequence: str, refseq_pro_list: Optional[List[str]]
     return final_list
 
 
+def _determine_max_sequence_length(input_file: Path) -> Tuple[int, int]:
+    """
+    Pre-scan input sequences to determine maximum length for skip-chunking decision.
+
+    Args:
+        input_file: Input FASTA file path
+
+    Returns:
+        Tuple of (max_length, sequence_count)
+    """
+    max_length = 0
+    sequence_count = 0
+
+    try:
+        for record in SeqIO.parse(input_file, 'fasta'):
+            max_length = max(max_length, len(record.seq))
+            sequence_count += 1
+    except Exception as error:
+        logger.error(f"Pre-scan failed: {error}")
+        raise
+
+    return (max_length, sequence_count)
+
+
+def _copy_with_chunk_suffix(input_file: Path, output_file: Path, sequence_count: int):
+    """
+    Copy sequences with chunk_1 suffix when chunking is skipped.
+
+    Preserves pipeline contract: downstream stages (6-frame translation, consensus scoring)
+    expect chunk naming pattern {original_id}_chunk_{N} for frame suffix grouping.
+
+    Args:
+        input_file: Input FASTA file path
+        output_file: Output FASTA file path
+        sequence_count: Number of sequences (for logging)
+    """
+    try:
+        # Atomic write pattern: write to temp file, then move to avoid partial writes on failure
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, dir=output_file.parent) as tmp_handle:
+            for record in SeqIO.parse(input_file, 'fasta'):
+                record.id = f"{record.id}_chunk_1"
+                # Strip description to match chunk format expected by downstream stages (translation/consensus)
+                record.description = ""
+                SeqIO.write(record, tmp_handle, 'fasta')
+        shutil.move(tmp_handle.name, output_file)
+        logger.info(f"Rewrote {sequence_count} sequences with chunk_1 suffix")
+    except Exception as error:
+        logger.error(f"Skip failed during file rewrite: {error}")
+        raise
+
+
+def _chunk_with_overlaps(input_file: Path, output_file: Path, chunk_size: int):
+    """
+    Chunk sequences with overlapping strategy to capture all sequence information.
+
+    Overlap distribution algorithm ensures uniform chunk sizes while minimizing
+    information loss at chunk boundaries.
+
+    Args:
+        input_file: Input FASTA file path
+        output_file: Output FASTA file path
+        chunk_size: Target size for each chunk (300 or 500bp matching model)
+    """
+    total_sequences = 0
+    total_chunks = 0
+
+    try:
+        with open(output_file, 'w') as out_handle:
+            for record in SeqIO.parse(input_file, 'fasta'):
+                sequence = record.seq
+                seq_length = len(sequence)
+
+                # Calculate number of chunks needed
+                num_chunks = -(-seq_length // chunk_size)  # Ceiling division
+
+                # Calculate overlap distribution
+                total_chunk_length = num_chunks * chunk_size
+                repeat_length = total_chunk_length - seq_length
+                repeat_region = repeat_length / num_chunks
+                lower_int = int(repeat_region)
+                upper_int = lower_int + 1
+
+                # Distribute overlap across chunks
+                low_up_numbers = [lower_int] * (num_chunks - 1)
+                total_low_up_numbers = sum(low_up_numbers)
+                need_to_add_up_nums = repeat_length - total_low_up_numbers
+                final_low_up_numbers = (
+                    [upper_int] * need_to_add_up_nums +
+                    [lower_int] * (num_chunks - 1 - need_to_add_up_nums) +
+                    [0]
+                )
+
+                # Generate chunks
+                move_step = 0
+                for a, b in zip(range(0, seq_length, chunk_size), final_low_up_numbers):
+                    if a > 1:
+                        chunk = record[a-move_step:a-move_step + chunk_size]
+                    else:
+                        chunk = record[a:a + chunk_size]
+
+                    new_record = chunk
+                    new_record.id = f"{record.id}_chunk_{a // chunk_size + 1}"
+                    # Strip description to match chunk format expected by downstream stages (translation/consensus)
+                    new_record.description = ""
+
+                    SeqIO.write(new_record, out_handle, 'fasta')
+                    move_step += b
+                    total_chunks += 1
+
+                total_sequences += 1
+
+        logger.info(f"Created {total_chunks} chunks from {total_sequences} sequences")
+    except Exception as error:
+        logger.error(f"Chunking failed during file write: {error}")
+        raise
+
+
 def split_fasta_chunk(input_file: Path, output_file: Path, chunk_size: int):
     """
     Split FASTA sequences into overlapping chunks of specified size.
+
+    Optimization: skips chunking when ALL sequences are <= chunk_size. Conservative
+    all-or-nothing decision maintains output format uniformity required by downstream
+    stages (6-frame translation, consensus scoring).
 
     Uses overlapping strategy to ensure all sequence information is captured
     in fixed-size chunks.
@@ -156,54 +279,16 @@ def split_fasta_chunk(input_file: Path, output_file: Path, chunk_size: int):
     Args:
         input_file: Input FASTA file path
         output_file: Output FASTA file path
-        chunk_size: Target size for each chunk
+        chunk_size: Target size for each chunk (300 or 500bp matching model)
     """
+    max_length, sequence_count = _determine_max_sequence_length(input_file)
+
+    # Conservative decision: if ANY sequence exceeds chunk_size, chunk ALL to maintain
+    # uniform output format. Downstream stages expect consistent chunk structure.
+    if max_length <= chunk_size:
+        logger.info(f"Skipping chunking: {sequence_count} sequences, max length {max_length}bp <= {chunk_size}bp threshold")
+        _copy_with_chunk_suffix(input_file, output_file, sequence_count)
+        return
+
     logger.info(f"Chunking sequences to {chunk_size}bp: {input_file} -> {output_file}")
-
-    total_sequences = 0
-    total_chunks = 0
-
-    with open(output_file, 'w') as out_handle:
-        for record in SeqIO.parse(input_file, 'fasta'):
-            sequence = record.seq
-            seq_length = len(sequence)
-
-            # Calculate number of chunks needed
-            num_chunks = -(-seq_length // chunk_size)  # Ceiling division
-
-            # Calculate overlap distribution
-            total_chunk_length = num_chunks * chunk_size
-            repeat_length = total_chunk_length - seq_length
-            repeat_region = repeat_length / num_chunks
-            lower_int = int(repeat_region)
-            upper_int = lower_int + 1
-
-            # Distribute overlap across chunks
-            low_up_numbers = [lower_int] * (num_chunks - 1)
-            total_low_up_numbers = sum(low_up_numbers)
-            need_to_add_up_nums = repeat_length - total_low_up_numbers
-            final_low_up_numbers = (
-                [upper_int] * need_to_add_up_nums +
-                [lower_int] * (num_chunks - 1 - need_to_add_up_nums) +
-                [0]
-            )
-
-            # Generate chunks
-            move_step = 0
-            for a, b in zip(range(0, seq_length, chunk_size), final_low_up_numbers):
-                if a > 1:
-                    chunk = record[a-move_step:a-move_step + chunk_size]
-                else:
-                    chunk = record[a:a + chunk_size]
-
-                new_record = chunk
-                new_record.id = f"{record.id}_chunk_{a // chunk_size + 1}"
-                new_record.description = ""
-
-                SeqIO.write(new_record, out_handle, 'fasta')
-                move_step += b
-                total_chunks += 1
-
-            total_sequences += 1
-
-    logger.info(f"Created {total_chunks} chunks from {total_sequences} sequences")
+    _chunk_with_overlaps(input_file, output_file, chunk_size)
