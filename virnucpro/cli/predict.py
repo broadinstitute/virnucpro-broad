@@ -54,11 +54,22 @@ logger = logging.getLogger('virnucpro.cli.predict')
 @click.option('--parallel',
               is_flag=True,
               help='Enable multi-GPU parallel processing for feature extraction')
+@click.option('--gpus',
+              type=str,
+              default=None,
+              help='Comma-separated GPU IDs to use (e.g., "0,1,2"). Overrides CUDA_VISIBLE_DEVICES.')
+@click.option('--esm-batch-size',
+              type=int,
+              default=None,
+              help='Batch size for ESM-2 processing (tokens per batch). Reduce if encountering OOM errors.')
+@click.option('--verbose/--quiet',
+              default=True,
+              help='Show/hide progress dashboard and detailed logs.')
 @click.pass_context
 def predict(ctx, input_file, model_type, model_path, expected_length,
             output_dir, device, batch_size, num_workers,
             keep_intermediate, resume, force, no_progress,
-            dnabert_batch_size, parallel):
+            dnabert_batch_size, parallel, gpus, esm_batch_size, verbose):
     """
     Predict viral sequences from FASTA input.
 
@@ -88,6 +99,12 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
     config = ctx.obj['config']
 
     logger.info(f"VirNucPro Prediction - Input: {input_file}")
+
+    # Handle GPU selection
+    if gpus:
+        import os
+        os.environ['CUDA_VISIBLE_DEVICES'] = gpus
+        logger.info(f"Using GPUs: {gpus}")
 
     # Validate and prepare parameters
     try:
@@ -147,17 +164,20 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
         logger.info(f"  Batch size: {batch_size}")
         logger.info(f"  Workers: {num_workers}")
         logger.info(f"  DNABERT batch size: {dnabert_batch_size}")
+        if esm_batch_size:
+            logger.info(f"  ESM-2 batch size: {esm_batch_size}")
         logger.info(f"  Parallel processing: {'enabled' if parallel else 'disabled'}")
         logger.info(f"  Resume: {resume}")
         logger.info(f"  Cleanup intermediate files: {cleanup}")
         logger.info(f"  Progress bars: {'disabled' if no_progress else 'enabled'}")
+        logger.info(f"  Verbose mode: {'enabled' if verbose else 'disabled'}")
 
         # Import and run prediction pipeline
         from virnucpro.pipeline.prediction import run_prediction
 
         logger.info("Starting prediction pipeline...")
 
-        run_prediction(
+        exit_code = run_prediction(
             input_file=Path(input_file),
             model_path=Path(model_path),
             expected_length=expected_length,
@@ -170,11 +190,18 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
             cleanup_intermediate=cleanup,
             resume=resume,
             show_progress=not no_progress,
-            config=config
+            config=config,
+            toks_per_batch=esm_batch_size,
+            quiet=not verbose
         )
 
-        logger.info("Prediction completed successfully!")
+        if exit_code == 0:
+            logger.info("Prediction completed successfully!")
+        elif exit_code == 2:
+            logger.warning("Prediction completed with some failures - check failed_files.txt")
         logger.info(f"Results saved to: {output_dir}")
+
+        sys.exit(exit_code)
 
     except Exception as e:
         logger.error(f"Prediction failed: {e}")
