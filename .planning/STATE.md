@@ -10,28 +10,28 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 1 of 6 (ESM-2 Multi-GPU Foundation)
-Plan: 1 of 4 (ESM-2 Multi-GPU Foundation)
+Plan: 2 of 4 (ESM-2 Multi-GPU Foundation)
 Status: In progress
-Last activity: 2026-01-22 — Completed 01-01-PLAN.md (ESM-2 Multi-GPU Foundation)
+Last activity: 2026-01-22 — Completed 01-02-PLAN.md (GPU Monitoring & Dashboard)
 
-Progress: [█░░░░░░░░░] 6.7% (1/15 plans)
+Progress: [█░░░░░░░░░] 13.3% (2/15 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
-- Average duration: 2.9 minutes
-- Total execution time: 0.05 hours
+- Total plans completed: 2
+- Average duration: 2.6 minutes
+- Total execution time: 0.09 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1     | 1     | 2.9m  | 2.9m     |
+| 1     | 2     | 5.2m  | 2.6m     |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (2.9m)
-- Trend: First plan (baseline established)
+- Last 5 plans: 01-01 (2.9m), 01-02 (2.4m)
+- Trend: Consistent velocity (~2.5-3.0 minutes per plan)
 
 *Updated after each plan completion*
 
@@ -52,6 +52,11 @@ Recent decisions affecting current work:
 - spawn-context-default: Use spawn context by default for multiprocessing (prevents CUDA re-init errors)
 - batch-size-increase-with-bf16: Increase toks_per_batch from 2048 to 3072 when BF16 enabled
 
+**From 01-02 execution:**
+- cuda-api-direct-access: Use torch.cuda.mem_get_info() directly instead of parsing nvidia-smi for lower overhead
+- rich-with-fallback: Use Rich library for live progress display with automatic TTY detection and logging fallback
+- background-monitoring-thread: Implement daemon thread for periodic memory logging without blocking GPU workers
+
 ### Pending Todos
 
 None yet.
@@ -68,6 +73,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-22 22:53 UTC
-Stopped at: Completed 01-01-PLAN.md execution
+Last session: 2026-01-22 23:00 UTC
+Stopped at: Completed 01-02-PLAN.md execution
 Resume file: None
