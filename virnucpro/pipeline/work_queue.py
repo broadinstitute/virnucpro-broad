@@ -1,0 +1,197 @@
+"""Generic batch queue manager for multi-GPU work distribution"""
+
+import multiprocessing
+import inspect
+import logging
+from enum import Enum
+from pathlib import Path
+from typing import List, Callable, Tuple, Dict, Any
+import time
+
+logger = logging.getLogger('virnucpro.work_queue')
+
+
+class WorkerStatus(Enum):
+    """Status states for worker processes"""
+    IDLE = "idle"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class BatchQueueManager:
+    """
+    Generic batch queue manager for coordinating multi-GPU work.
+
+    Uses spawn context for CUDA safety and SimpleQueue to avoid deadlocks.
+    Validates worker function signatures and tracks worker status.
+
+    Example:
+        >>> def worker(files, device_id, output_dir):
+        ...     return (processed, failed)
+        >>> manager = BatchQueueManager(4, worker, spawn_context=True)
+        >>> assignments = assign_files_round_robin(files, 4)
+        >>> processed, failed = manager.process_files(assignments, output_dir=Path('/tmp'))
+    """
+
+    def __init__(
+        self,
+        num_workers: int,
+        worker_function: Callable,
+        spawn_context: bool = True
+    ):
+        """
+        Initialize batch queue manager.
+
+        Args:
+            num_workers: Number of worker processes (typically number of GPUs)
+            worker_function: Function to execute in workers
+            spawn_context: Use spawn context for CUDA safety (default: True)
+
+        Raises:
+            ValueError: If worker_function signature is invalid
+        """
+        # Validate worker function signature
+        sig = inspect.signature(worker_function)
+        params = list(sig.parameters.keys())
+        if len(params) < 2:
+            raise ValueError(
+                f"Worker function must accept at least (file_subset, device_id, **kwargs), "
+                f"got parameters: {params}"
+            )
+
+        self.num_workers = num_workers
+        self.worker_function = worker_function
+        self.ctx = multiprocessing.get_context('spawn') if spawn_context else multiprocessing
+        self.worker_status = {i: WorkerStatus.IDLE for i in range(num_workers)}
+
+        logger.info(f"Initialized BatchQueueManager with {num_workers} workers "
+                   f"({'spawn' if spawn_context else 'default'} context)")
+
+    def process_files(
+        self,
+        file_assignments: List[List[Path]],
+        **worker_kwargs
+    ) -> Tuple[List[Path], List[Tuple[Path, str]]]:
+        """
+        Process files across multiple workers in parallel.
+
+        Args:
+            file_assignments: List of file lists, one per worker
+            **worker_kwargs: Additional keyword arguments passed to worker function
+
+        Returns:
+            Tuple of (processed_files, failed_files)
+            - processed_files: List of successfully processed output file paths
+            - failed_files: List of (file_path, error_message) tuples
+
+        Raises:
+            RuntimeError: If systemic failure detected (3+ workers fail)
+        """
+        if len(file_assignments) != self.num_workers:
+            raise ValueError(
+                f"Expected {self.num_workers} file assignments, got {len(file_assignments)}"
+            )
+
+        # Track results
+        all_processed = []
+        all_failed = []
+        worker_failures = 0
+
+        logger.info(f"Starting parallel processing with {self.num_workers} workers")
+        for worker_id, files in enumerate(file_assignments):
+            logger.info(f"  Worker {worker_id}: {len(files)} files assigned")
+
+        # Create worker arguments: (file_subset, device_id, **worker_kwargs)
+        worker_args = []
+        for worker_id, file_subset in enumerate(file_assignments):
+            self.worker_status[worker_id] = WorkerStatus.PROCESSING
+            worker_args.append((file_subset, worker_id))
+
+        start_time = time.time()
+
+        try:
+            # Use spawn context pool for CUDA safety
+            with self.ctx.Pool(self.num_workers) as pool:
+                # Launch workers with starmap
+                results = pool.starmap(
+                    self._worker_wrapper,
+                    [(args[0], args[1], worker_kwargs) for args in worker_args]
+                )
+
+                # Collect results
+                for worker_id, result in enumerate(results):
+                    if result is None:
+                        # Worker failed critically
+                        self.worker_status[worker_id] = WorkerStatus.FAILED
+                        worker_failures += 1
+                        logger.error(f"Worker {worker_id} failed critically")
+                    else:
+                        processed, failed = result
+                        all_processed.extend(processed)
+                        all_failed.extend(failed)
+                        self.worker_status[worker_id] = WorkerStatus.COMPLETED
+                        logger.info(f"Worker {worker_id} completed: {len(processed)} processed, "
+                                   f"{len(failed)} failed")
+
+        except Exception as e:
+            logger.exception("Error during parallel processing")
+            raise
+
+        elapsed = time.time() - start_time
+
+        # Check for systemic failure
+        if worker_failures >= 3:
+            raise RuntimeError(
+                f"Systemic failure: {worker_failures}/{self.num_workers} workers failed. "
+                "Check GPU availability and CUDA setup."
+            )
+
+        logger.info(f"Parallel processing complete in {elapsed:.1f}s: "
+                   f"{len(all_processed)} processed, {len(all_failed)} failed")
+
+        return (all_processed, all_failed)
+
+    def _worker_wrapper(
+        self,
+        file_subset: List[Path],
+        device_id: int,
+        kwargs: Dict[str, Any]
+    ) -> Tuple[List[Path], List[Tuple[Path, str]]] | None:
+        """
+        Wrapper around worker function to handle exceptions.
+
+        Args:
+            file_subset: Files to process
+            device_id: CUDA device ID
+            kwargs: Additional keyword arguments
+
+        Returns:
+            Worker function result or None if critical failure
+        """
+        try:
+            return self.worker_function(file_subset, device_id, **kwargs)
+        except Exception as e:
+            logger.exception(f"Worker {device_id} critical failure")
+            return None
+
+    def get_worker_status(self) -> Dict[int, WorkerStatus]:
+        """
+        Get current status of all workers.
+
+        Returns:
+            Dictionary mapping worker ID to WorkerStatus
+        """
+        return self.worker_status.copy()
+
+    def is_complete(self) -> bool:
+        """
+        Check if all workers have completed or failed.
+
+        Returns:
+            True if all workers are in COMPLETED or FAILED state
+        """
+        return all(
+            status in (WorkerStatus.COMPLETED, WorkerStatus.FAILED)
+            for status in self.worker_status.values()
+        )
