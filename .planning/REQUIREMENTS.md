@@ -56,6 +56,15 @@ Requirements for GPU optimization release. Each maps to roadmap phases.
 - [ ] **COMPAT-02**: Can resume checkpoints from pre-optimization runs (backward compatible)
 - [ ] **COMPAT-03**: Single-GPU fallback mode works when only one GPU available
 
+### Testing
+
+- [ ] **TEST-01**: ESM-2 worker unit tests verify model loading, batching, and output format
+- [ ] **TEST-02**: ESM-2 multi-GPU integration test compares output against single-GPU baseline
+- [ ] **TEST-03**: DNABERT-S worker unit tests verify optimized batching matches vanilla output
+- [ ] **TEST-04**: Checkpoint unit tests verify atomic writes, corruption handling, and resume capability
+- [ ] **TEST-05**: Memory/attention unit tests verify FlashAttention integration and fragmentation prevention
+- [ ] **TEST-06**: End-to-end integration test compares full pipeline output (optimized vs vanilla)
+
 ## v2 Requirements
 
 Deferred to future optimization cycles. Tracked but not in current roadmap.
@@ -95,43 +104,50 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ESM-01 | TBD | Pending |
-| ESM-02 | TBD | Pending |
-| DNABERT-01 | TBD | Pending |
-| DNABERT-02 | TBD | Pending |
-| GPU-01 | TBD | Pending |
-| GPU-02 | TBD | Pending |
-| ATT-01 | TBD | Pending |
-| ATT-02 | TBD | Pending |
-| MEM-01 | TBD | Pending |
-| MEM-02 | TBD | Pending |
-| MEM-03 | TBD | Pending |
-| MEM-04 | TBD | Pending |
-| MEM-05 | TBD | Pending |
-| INFRA-01 | TBD | Pending |
-| INFRA-02 | TBD | Pending |
-| INFRA-03 | TBD | Pending |
-| INFRA-04 | TBD | Pending |
-| INFRA-05 | TBD | Pending |
-| MON-01 | TBD | Pending |
-| MON-02 | TBD | Pending |
-| MON-03 | TBD | Pending |
-| LOAD-01 | TBD | Pending |
-| LOAD-02 | TBD | Pending |
-| LOAD-03 | TBD | Pending |
-| PERF-01 | TBD | Pending |
-| PERF-02 | TBD | Pending |
-| SCALE-01 | TBD | Pending |
-| SCALE-02 | TBD | Pending |
-| COMPAT-01 | TBD | Pending |
-| COMPAT-02 | TBD | Pending |
-| COMPAT-03 | TBD | Pending |
+| ESM-01 | Phase 1 | Pending |
+| ESM-02 | Phase 1 | Pending |
+| DNABERT-01 | Phase 2 | Pending |
+| DNABERT-02 | Phase 2 | Pending |
+| GPU-01 | Phase 1 | Pending |
+| GPU-02 | Phase 2 | Pending |
+| ATT-01 | Phase 4 | Pending |
+| ATT-02 | Phase 4 | Pending |
+| MEM-01 | Phase 4 | Pending |
+| MEM-02 | Phase 4 | Pending |
+| MEM-03 | Phase 4 | Pending |
+| MEM-04 | Phase 4 | Pending |
+| MEM-05 | Phase 4 | Pending |
+| INFRA-01 | Phase 1 | Pending |
+| INFRA-02 | Phase 1 | Pending |
+| INFRA-03 | Phase 3 | Pending |
+| INFRA-04 | Phase 3 | Pending |
+| INFRA-05 | Phase 3 | Pending |
+| MON-01 | Phase 5 | Pending |
+| MON-02 | Phase 5 | Pending |
+| MON-03 | Phase 5 | Pending |
+| LOAD-01 | Phase 5 | Pending |
+| LOAD-02 | Phase 3 | Pending |
+| LOAD-03 | Phase 5 | Pending |
+| PERF-01 | Phase 6 | Pending |
+| PERF-02 | Phase 6 | Pending |
+| SCALE-01 | Phase 6 | Pending |
+| SCALE-02 | Phase 1 | Pending |
+| COMPAT-01 | Phase 1 | Pending |
+| COMPAT-02 | Phase 3 | Pending |
+| COMPAT-03 | Phase 1 | Pending |
+
+| TEST-01 | Phase 1 | Pending |
+| TEST-02 | Phase 1 | Pending |
+| TEST-03 | Phase 2 | Pending |
+| TEST-04 | Phase 3 | Pending |
+| TEST-05 | Phase 4 | Pending |
+| TEST-06 | Phase 6 | Pending |
 
 **Coverage:**
-- v1 requirements: 32 total
-- Mapped to phases: 0 (roadmap not yet created)
-- Unmapped: 32 ⚠️
+- v1 requirements: 37 total
+- Mapped to phases: 37 (100% coverage)
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-01-22*
-*Last updated: 2026-01-22 after initial definition*
+*Last updated: 2026-01-22 after adding testing requirements*
