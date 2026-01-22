@@ -10,28 +10,28 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 1 of 6 (ESM-2 Multi-GPU Foundation)
-Plan: 2 of 4 (ESM-2 Multi-GPU Foundation)
+Plan: 3 of 4 (ESM-2 Multi-GPU Foundation)
 Status: In progress
-Last activity: 2026-01-22 — Completed 01-02-PLAN.md (GPU Monitoring & Dashboard)
+Last activity: 2026-01-22 — Completed 01-03-PLAN.md (Pipeline Integration & CLI)
 
-Progress: [█░░░░░░░░░] 13.3% (2/15 plans)
+Progress: [██░░░░░░░░] 20.0% (3/15 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2
-- Average duration: 2.6 minutes
-- Total execution time: 0.09 hours
+- Total plans completed: 3
+- Average duration: 3.0 minutes
+- Total execution time: 0.15 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1     | 2     | 5.2m  | 2.6m     |
+| 1     | 3     | 9.1m  | 3.0m     |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (2.9m), 01-02 (2.4m)
-- Trend: Consistent velocity (~2.5-3.0 minutes per plan)
+- Last 5 plans: 01-01 (2.9m), 01-02 (2.4m), 01-03 (4.0m)
+- Trend: Consistent velocity (~2.5-4.0 minutes per plan)
 
 *Updated after each plan completion*
 
@@ -57,6 +57,11 @@ Recent decisions affecting current work:
 - rich-with-fallback: Use Rich library for live progress display with automatic TTY detection and logging fallback
 - background-monitoring-thread: Implement daemon thread for periodic memory logging without blocking GPU workers
 
+**From 01-03 execution:**
+- esm-batch-size-separate-flag: Use --esm-batch-size CLI flag instead of --batch-size to avoid confusion with prediction batch size
+- pipeline-exit-codes: Return exit codes from pipeline (0: success, 1: failure, 2: partial) to signal partial failures
+- failed-files-pipe-delimited: Log failed files to failed_files.txt with format {file_path}|ESM-2|{error_message}
+
 ### Pending Todos
 
 None yet.
@@ -73,6 +78,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-22 23:00 UTC
-Stopped at: Completed 01-02-PLAN.md execution
+Last session: 2026-01-22 23:07 UTC
+Stopped at: Completed 01-03-PLAN.md execution
 Resume file: None
