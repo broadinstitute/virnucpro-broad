@@ -1,6 +1,7 @@
 """Feature extraction using DNABERT-S and ESM-2 transformers"""
 
 import torch
+from torch.cuda.amp import autocast
 from pathlib import Path
 from typing import Dict, List, Optional
 from Bio import SeqIO
@@ -115,6 +116,19 @@ def extract_esm_features(
     model.eval()
     batch_converter = alphabet.get_batch_converter()
 
+    # Check for BF16 support
+    use_bf16 = False
+    if str(device).startswith('cuda'):
+        capability = torch.cuda.get_device_capability(device)
+        use_bf16 = capability[0] >= 8  # Ampere or newer
+        if use_bf16:
+            logger.info("Using BF16 mixed precision for memory efficiency")
+
+    # Increase batch size with BF16 if using default
+    if use_bf16 and toks_per_batch == 2048:
+        toks_per_batch = 3072  # Increase batch size with BF16
+        logger.info(f"Increased toks_per_batch to {toks_per_batch} with BF16")
+
     # Load sequences
     sequences = []
     for record in SeqIO.parse(protein_file, 'fasta'):
@@ -147,24 +161,26 @@ def extract_esm_features(
     data = []
 
     with torch.no_grad():
-        for batch_idx, batch in enumerate(batches):
-            # Convert batch
-            batch_labels, batch_strs, batch_tokens = batch_converter(batch)
-            batch_tokens = batch_tokens.to(device)
+        with autocast(device_type='cuda', dtype=torch.bfloat16, enabled=use_bf16):
+            for batch_idx, batch in enumerate(batches):
+                # Convert batch
+                batch_labels, batch_strs, batch_tokens = batch_converter(batch)
+                batch_tokens = batch_tokens.to(device)
 
-            # Forward pass
-            results = model(batch_tokens, repr_layers=[36])
-            representations = results["representations"][36]  # Layer 36
+                # Forward pass
+                results = model(batch_tokens, repr_layers=[36])
+                representations = results["representations"][36]  # Layer 36
 
-            # Mean pool over sequence (excluding special tokens)
-            for i, (seq_id, seq_str) in enumerate(batch):
-                truncate_len = min(truncation_length, len(seq_str))
-                # Mean pool positions 1 to truncate_len+1 (skip BOS token)
-                embedding = representations[i, 1:truncate_len + 1].mean(dim=0).clone().to('cpu')  # (2560,)
-                proteins.append(seq_id)
-                data.append(embedding)
+                # Mean pool over sequence (excluding special tokens)
+                for i, (seq_id, seq_str) in enumerate(batch):
+                    truncate_len = min(truncation_length, len(seq_str))
+                    # Mean pool positions 1 to truncate_len+1 (skip BOS token)
+                    # Convert to FP32 for storage compatibility
+                    embedding = representations[i, 1:truncate_len + 1].mean(dim=0).clone().float().to('cpu')  # (2560,)
+                    proteins.append(seq_id)
+                    data.append(embedding)
 
-            logger.debug(f"Processed batch {batch_idx + 1}/{len(batches)}")
+                logger.debug(f"Processed batch {batch_idx + 1}/{len(batches)}")
 
     # Save to file in original format (list of tensors, not stacked)
     torch.save({'proteins': proteins, 'data': data}, output_file)
