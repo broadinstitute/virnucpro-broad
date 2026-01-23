@@ -63,6 +63,10 @@ logger = logging.getLogger('virnucpro.cli.predict')
               type=int,
               default=None,
               help='Batch size for ESM-2 processing (tokens per batch). Reduce if encountering OOM errors.')
+@click.option('--threads', '-t',
+              type=int,
+              default=None,
+              help='Number of CPU threads for six-frame translation (default: all cores)')
 @click.option('--verbose/--quiet',
               default=True,
               help='Show/hide progress dashboard and detailed logs.')
@@ -70,7 +74,7 @@ logger = logging.getLogger('virnucpro.cli.predict')
 def predict(ctx, input_file, model_type, model_path, expected_length,
             output_dir, device, batch_size, num_workers,
             keep_intermediate, resume, force, no_progress,
-            dnabert_batch_size, parallel, gpus, esm_batch_size, verbose):
+            dnabert_batch_size, parallel, gpus, esm_batch_size, threads, verbose):
     """
     Predict viral sequences from FASTA input.
 
@@ -207,6 +211,7 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
             show_progress=not no_progress,
             config=config,
             toks_per_batch=esm_batch_size,
+            translation_threads=threads,
             quiet=not verbose
         )
 
