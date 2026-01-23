@@ -17,6 +17,11 @@ from virnucpro.core.checkpoint_validation import (
 
 logger = logging.getLogger('virnucpro.checkpoint')
 
+# Checkpoint version management
+# Version 1.0: Optimized checkpoints with atomic write and validation
+# Version 0.x: Pre-optimization checkpoints (backward compatible, read-only)
+CHECKPOINT_VERSION = "1.0"
+
 
 class StageStatus(Enum):
     """Pipeline stage status"""
@@ -70,6 +75,11 @@ def atomic_save(
     temp_file = output_file.with_suffix('.tmp')
 
     try:
+        # Embed version metadata if dict
+        if isinstance(checkpoint_dict, dict):
+            checkpoint_dict.setdefault('version', CHECKPOINT_VERSION)
+            checkpoint_dict.setdefault('status', 'in_progress')
+
         # Save to temporary file
         torch.save(checkpoint_dict, temp_file)
 
@@ -93,6 +103,12 @@ def atomic_save(
 
             logger.debug(f"Checkpoint validated successfully: {output_file}")
 
+        # Mark checkpoint as complete after successful save/validation
+        if isinstance(checkpoint_dict, dict) and 'status' in checkpoint_dict:
+            checkpoint_dict['status'] = 'complete'
+            torch.save(checkpoint_dict, temp_file)
+            temp_file.replace(output_file)
+
     except Exception as e:
         # Clean up temp file on any failure
         if temp_file.exists():
@@ -100,6 +116,80 @@ def atomic_save(
         raise RuntimeError(f"Failed to save checkpoint: {e}")
 
     return output_file
+
+
+def load_with_compatibility(
+    checkpoint_path: Path,
+    skip_validation: bool = False,
+    logger_instance: Optional[logging.Logger] = None
+) -> Dict[str, Any]:
+    """Load checkpoint with version compatibility checking.
+
+    Handles backward compatibility with pre-optimization checkpoints (version 0.x).
+    Raises error if checkpoint is from future version requiring upgrade.
+
+    Args:
+        checkpoint_path: Path to checkpoint file
+        skip_validation: Skip validation (--skip-checkpoint-validation flag)
+        logger_instance: Logger instance for diagnostic output
+
+    Returns:
+        Loaded checkpoint dict with version info
+
+    Raises:
+        CheckpointError: If checkpoint is corrupted or requires upgrade
+
+    Example:
+        >>> checkpoint = load_with_compatibility(Path("model.pt"))
+        >>> version = checkpoint.get('version', '0.x')
+        >>> print(f"Loading checkpoint version {version}")
+    """
+    log = logger_instance or logger
+
+    # Validate checkpoint if not skipped
+    if not skip_validation:
+        is_valid, error_msg = validate_checkpoint(
+            checkpoint_path,
+            skip_load=False,
+            logger_instance=log
+        )
+
+        if not is_valid:
+            error_type = 'corrupted' if 'corrupted:' in error_msg else 'incompatible'
+            raise CheckpointError(checkpoint_path, error_type, error_msg)
+
+    # Load checkpoint
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+    except Exception as e:
+        log.error(f"Failed to load checkpoint: {checkpoint_path}")
+        log.error(f"  Error: {str(e)}")
+        raise CheckpointError(checkpoint_path, 'corrupted', f"torch.load failed - {str(e)}")
+
+    # Check version compatibility
+    if isinstance(checkpoint, dict):
+        version = checkpoint.get('version', '0.x')
+        log.info(f"Loading checkpoint v{version}: {checkpoint_path.name}")
+
+        # Check for future versions requiring upgrade
+        if version.startswith('2.') or (version[0].isdigit() and int(version[0]) > 1):
+            error_msg = f"Checkpoint version {version} requires virnucpro >= {version[0]}.0.0 (upgrade required)"
+            log.error(f"Incompatible checkpoint version: {checkpoint_path}")
+            log.error(f"  Version: {version}")
+            log.error(f"  Current version: {CHECKPOINT_VERSION}")
+            raise CheckpointError(checkpoint_path, 'incompatible', error_msg)
+
+        # Handle version 0.x (pre-optimization) checkpoints
+        if version == '0.x':
+            log.warning(
+                f"Loading pre-optimization checkpoint (read-only mode): {checkpoint_path.name}"
+            )
+            log.warning("  This checkpoint will not be modified to preserve compatibility")
+
+    else:
+        log.warning(f"Checkpoint is not a dict (type: {type(checkpoint).__name__})")
+
+    return checkpoint
 
 
 def load_checkpoint_safe(
