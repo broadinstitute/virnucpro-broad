@@ -10,29 +10,29 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 1.1 of 6 (Parallel Translation)
-Plan: 1 of 3 (Parallel Translation Worker)
+Plan: 2 of 3 (Pipeline Integration)
 Status: In progress
-Last activity: 2026-01-23 — Completed 01.1-01-PLAN.md (Parallel Translation Worker)
+Last activity: 2026-01-23 — Completed 01.1-02-PLAN.md (Pipeline Integration)
 
-Progress: [████░░░░░░] 53.3% (8/15 plans)
+Progress: [█████░░░░░] 60.0% (9/15 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 8
-- Average duration: 4.4 minutes
-- Total execution time: 0.62 hours
+- Total plans completed: 9
+- Average duration: 4.2 minutes
+- Total execution time: 0.65 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1     | 7     | 33.6m | 4.8m     |
-| 1.1   | 1     | 2.1m  | 2.1m     |
+| 1.1   | 2     | 3.9m  | 2.0m     |
 
 **Recent Trend:**
-- Last 5 plans: 01-03 (4.0m), 01-04 (12.4m), 01-05 (4.5m), 01-07 (3.6m), 01.1-01 (2.1m)
-- Trend: Phase 1.1 efficient; CPU-only work is faster than GPU orchestration
+- Last 5 plans: 01-04 (12.4m), 01-05 (4.5m), 01-07 (3.6m), 01.1-01 (2.1m), 01.1-02 (1.8m)
+- Trend: Phase 1.1 very efficient; integration tasks are fast with clear patterns
 
 *Updated after each plan completion*
 
@@ -86,6 +86,11 @@ Recent decisions affecting current work:
 - imap-for-memory: Use Pool.imap() instead of Pool.map() for lazy evaluation with 22M sequences
 - optimal-settings-helper: Provide get_optimal_settings() to calculate num_workers, batch_size, chunksize based on data characteristics
 
+**From 01.1-02 execution:**
+- auto-parallel-multicore: Automatically use parallel translation when multiple cores available (num_workers > 1)
+- sequential-fallback: Maintain sequential translation as fallback for single-core systems and parallel failures
+- performance-metrics-logging: Log sequences/sec, total time, and ORF count for observability
+
 ### Pending Todos
 
 None yet.
@@ -109,6 +114,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-23 13:02 UTC
-Stopped at: Completed 01.1-01-PLAN.md execution (Parallel Translation Worker)
+Last session: 2026-01-23 13:07 UTC
+Stopped at: Completed 01.1-02-PLAN.md execution (Pipeline Integration)
 Resume file: None
