@@ -1,4 +1,12 @@
-"""DNABERT-S specific multiprocessing utilities for parallel feature extraction"""
+"""DNABERT-S specific multiprocessing utilities for parallel feature extraction
+
+This module implements parallel DNABERT-S processing following the same patterns as ESM-2.
+Key features:
+- Token-based batching (DNA bases treated as tokens)
+- BF16 mixed precision on Ampere+ GPUs
+- Spawn context multiprocessing for CUDA safety
+- Greedy bin-packing file assignment by sequence count for balanced GPU utilization
+"""
 
 import torch
 from torch.cuda.amp import autocast
@@ -10,10 +18,12 @@ import logging
 logger = logging.getLogger('virnucpro.parallel_dnabert')
 
 # Import base worker utilities
+# assign_files_by_sequences uses greedy bin-packing algorithm to distribute
+# files across workers based on sequence count (not file count) for balanced work
 from virnucpro.pipeline.base_worker import (
     BaseEmbeddingWorker,
     count_sequences,
-    assign_files_by_sequences,
+    assign_files_by_sequences,  # Bin-packing file assignment
     detect_bf16_support
 )
 from virnucpro.core.logging_setup import setup_worker_logging
