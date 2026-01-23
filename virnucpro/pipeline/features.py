@@ -7,6 +7,8 @@ from typing import Dict, List, Optional
 from Bio import SeqIO
 import logging
 
+from virnucpro.core.checkpoint import atomic_save
+
 logger = logging.getLogger('virnucpro.features')
 
 
@@ -77,8 +79,9 @@ def extract_dnabert_features(
                 nucleotide.append(label)
                 data.append(result)
 
-    # Save to file in original format
-    torch.save({'nucleotide': nucleotide, 'data': data}, output_file)
+    # Save to file using atomic write
+    checkpoint_dict = {'nucleotide': nucleotide, 'data': data}
+    atomic_save(checkpoint_dict, output_file, validate_after_save=False)
 
     logger.info(f"Saved DNABERT-S features to {output_file} ({len(data)} sequences)")
     return output_file
@@ -182,8 +185,9 @@ def extract_esm_features(
 
                 logger.debug(f"Processed batch {batch_idx + 1}/{len(batches)}")
 
-    # Save to file in original format (list of tensors, not stacked)
-    torch.save({'proteins': proteins, 'data': data}, output_file)
+    # Save to file using atomic write (list of tensors, not stacked)
+    checkpoint_dict = {'proteins': proteins, 'data': data}
+    atomic_save(checkpoint_dict, output_file, validate_after_save=False)
 
     logger.info(f"Saved ESM-2 features to {output_file} ({len(data)} sequences)")
     return output_file
@@ -248,28 +252,19 @@ def merge_features(
     # Handle empty merged data
     if not merged_data:
         logger.warning(f"No matching sequences between {nucleotide_feature_file.name} and {protein_feature_file.name}")
-        torch.save({'ids': nuc_data['nucleotide'], 'data': torch.empty((0, 3328))}, output_file)
+        empty_dict = {'ids': nuc_data['nucleotide'], 'data': torch.empty((0, 3328))}
+        atomic_save(empty_dict, output_file, validate_after_save=False)
         return output_file
 
     # Stack into tensor
     merged_data = torch.stack(merged_data)
 
-    # Save merged features (no labels for prediction mode)
+    # Save merged features using atomic write (no labels for prediction mode)
     merged_dict = {
         'ids': nuc_data['nucleotide'],
         'data': merged_data
     }
-
-    # Atomic write: save to temp file first, then rename
-    temp_file = output_file.with_suffix('.tmp')
-    try:
-        torch.save(merged_dict, temp_file)
-        temp_file.rename(output_file)
-    except Exception as e:
-        # Clean up temp file on failure
-        if temp_file.exists():
-            temp_file.unlink()
-        raise
+    atomic_save(merged_dict, output_file, validate_after_save=False)
 
     logger.info(f"Saved merged features to {output_file} (shape: {merged_data.shape})")
     return output_file
