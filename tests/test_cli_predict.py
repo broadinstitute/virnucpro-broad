@@ -210,3 +210,89 @@ class TestPredictAutoDetection:
             assert mock_run_prediction.called
             call_kwargs = mock_run_prediction.call_args[1]
             assert call_kwargs['parallel'] is False, "parallel should NOT be enabled without CUDA"
+
+    def test_unified_threads_parameter(self, runner, mock_context):
+        """Test that --threads parameter controls both translation and merge"""
+        with patch('virnucpro.cli.predict.detect_cuda_devices') as mock_detect_gpus, \
+             patch('virnucpro.pipeline.prediction.run_prediction') as mock_run_prediction, \
+             patch('virnucpro.cli.predict.Path') as mock_path_class, \
+             patch('virnucpro.cli.predict.validate_and_get_device') as mock_validate_device:
+
+            # Mock detect_cuda_devices
+            mock_detect_gpus.return_value = [0]
+
+            # Mock Path to return existing model file
+            mock_path_obj = MagicMock()
+            mock_path_obj.exists.return_value = True
+            mock_path_obj.stem = 'test_input'
+            mock_path_class.return_value = mock_path_obj
+
+            # Mock device validation
+            mock_validate_device.return_value = MagicMock()
+
+            # Mock run_prediction to return success
+            mock_run_prediction.return_value = 0
+
+            from virnucpro.cli.predict import predict
+
+            # Test with --threads parameter
+            with runner.isolated_filesystem():
+                # Create dummy input file (using real Path from stdlib)
+                from pathlib import Path as StdPath
+                StdPath('test.fasta').write_text('>seq1\nATCG\n')
+
+                # Invoke predict with --threads 4 and --force to skip prompts
+                result = runner.invoke(
+                    predict,
+                    ['test.fasta', '--threads', '4', '--force'],
+                    obj=mock_context.obj
+                )
+
+                # Verify run_prediction was called with both translation_threads and merge_threads set to 4
+                assert mock_run_prediction.called, f"run_prediction not called. Exit code: {result.exit_code}, Output: {result.output}"
+                call_kwargs = mock_run_prediction.call_args[1]
+                assert call_kwargs['translation_threads'] == 4, "translation_threads should be 4"
+                assert call_kwargs['merge_threads'] == 4, "merge_threads should be 4"
+
+    def test_merge_threads_alias_backward_compatibility(self, runner, mock_context):
+        """Test that --merge-threads (deprecated) still works as alias"""
+        with patch('virnucpro.cli.predict.detect_cuda_devices') as mock_detect_gpus, \
+             patch('virnucpro.pipeline.prediction.run_prediction') as mock_run_prediction, \
+             patch('virnucpro.cli.predict.Path') as mock_path_class, \
+             patch('virnucpro.cli.predict.validate_and_get_device') as mock_validate_device:
+
+            # Mock detect_cuda_devices
+            mock_detect_gpus.return_value = [0]
+
+            # Mock Path to return existing model file
+            mock_path_obj = MagicMock()
+            mock_path_obj.exists.return_value = True
+            mock_path_obj.stem = 'test_input'
+            mock_path_class.return_value = mock_path_obj
+
+            # Mock device validation
+            mock_validate_device.return_value = MagicMock()
+
+            # Mock run_prediction to return success
+            mock_run_prediction.return_value = 0
+
+            from virnucpro.cli.predict import predict
+
+            # Test with --merge-threads parameter (deprecated alias)
+            with runner.isolated_filesystem():
+                # Create dummy input file (using real Path from stdlib)
+                from pathlib import Path as StdPath
+                StdPath('test.fasta').write_text('>seq1\nATCG\n')
+
+                # Invoke predict with --merge-threads 4 and --force to skip prompts
+                result = runner.invoke(
+                    predict,
+                    ['test.fasta', '--merge-threads', '4', '--force'],
+                    obj=mock_context.obj
+                )
+
+                # Verify run_prediction was called with both translation_threads and merge_threads set to 4
+                assert mock_run_prediction.called, f"run_prediction not called. Exit code: {result.exit_code}, Output: {result.output}"
+                call_kwargs = mock_run_prediction.call_args[1]
+                assert call_kwargs['translation_threads'] == 4, "translation_threads should be 4 via --merge-threads alias"
+                assert call_kwargs['merge_threads'] == 4, "merge_threads should be 4 via --merge-threads alias"
