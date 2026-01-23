@@ -574,6 +574,9 @@ def run_prediction(
             merged_dir.mkdir(parents=True, exist_ok=True)
 
             # Determine if we should use parallel merge
+            # Use parallel merge when workload benefits: multiple files to merge (including auto-split
+            # files from Phase 2) and multiple cores available. Auto-splitting creates multiple files
+            # from single input for GPU load balancing, and these benefit from parallel merge.
             num_merge_threads = merge_threads if merge_threads else os.cpu_count()
             use_parallel = num_merge_threads > 1 and len(nucleotide_feature_files) > 1
 
