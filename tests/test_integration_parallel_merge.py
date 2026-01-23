@@ -136,7 +136,7 @@ class TestParallelMergeIntegration(unittest.TestCase):
 
         print("\n=== Running sequential merge (1 worker) ===")
         start_seq = time.time()
-        merged_seq = parallel_merge_features(
+        merged_seq, failed_seq = parallel_merge_features(
             nuc_files,
             pro_files,
             output_seq,
@@ -150,7 +150,7 @@ class TestParallelMergeIntegration(unittest.TestCase):
 
         print(f"=== Running parallel merge (4 workers) ===")
         start_par = time.time()
-        merged_par = parallel_merge_features(
+        merged_par, failed_par = parallel_merge_features(
             nuc_files,
             pro_files,
             output_par,
@@ -161,6 +161,8 @@ class TestParallelMergeIntegration(unittest.TestCase):
         # Both should succeed
         self.assertEqual(len(merged_seq), 4, "Sequential should merge all 4 file pairs")
         self.assertEqual(len(merged_par), 4, "Parallel should merge all 4 file pairs")
+        self.assertEqual(len(failed_seq), 0, "Sequential should have no failures")
+        self.assertEqual(len(failed_par), 0, "Parallel should have no failures")
 
         # Compare outputs file by file
         for seq_file, par_file in zip(sorted(merged_seq), sorted(merged_par)):
@@ -205,7 +207,7 @@ class TestParallelMergeIntegration(unittest.TestCase):
 
         print("\n=== Performance test: Sequential merge (1 worker) ===")
         start_seq = time.time()
-        merged_seq = parallel_merge_features(
+        merged_seq, failed_seq = parallel_merge_features(
             nuc_files,
             pro_files,
             output_seq,
@@ -219,7 +221,7 @@ class TestParallelMergeIntegration(unittest.TestCase):
 
         print(f"=== Performance test: Parallel merge (4 workers) ===")
         start_par = time.time()
-        merged_par = parallel_merge_features(
+        merged_par, failed_par = parallel_merge_features(
             nuc_files,
             pro_files,
             output_par,
@@ -258,7 +260,7 @@ class TestParallelMergeIntegration(unittest.TestCase):
 
         # Test with explicit num_workers parameter
         print("\n=== Testing merge_threads parameter (num_workers=2) ===")
-        merged = parallel_merge_features(
+        merged, failed = parallel_merge_features(
             nuc_files,
             pro_files,
             output_dir,
@@ -324,7 +326,7 @@ class TestParallelMergeIntegration(unittest.TestCase):
         output_dir.mkdir()
 
         print("\n=== Testing partial failure handling ===")
-        merged = parallel_merge_features(
+        merged, failed = parallel_merge_features(
             nuc_files,
             pro_files,
             output_dir,
@@ -358,7 +360,7 @@ class TestParallelMergeIntegration(unittest.TestCase):
         # First run: merge all files
         print("First run: merging all files")
         start = time.time()
-        merged1 = parallel_merge_features(
+        merged1, failed1 = parallel_merge_features(
             nuc_files,
             pro_files,
             output_dir,
@@ -371,7 +373,7 @@ class TestParallelMergeIntegration(unittest.TestCase):
         # Second run: should skip all files (already exist)
         print("Second run: should skip existing files")
         start = time.time()
-        merged2 = parallel_merge_features(
+        merged2, failed2 = parallel_merge_features(
             nuc_files,
             pro_files,
             output_dir,
@@ -398,7 +400,7 @@ class TestParallelMergeIntegration(unittest.TestCase):
         print(f"\n=== Testing auto worker detection (cpu_count={os.cpu_count()}) ===")
 
         # Run without specifying num_workers
-        merged = parallel_merge_features(
+        merged, failed = parallel_merge_features(
             nuc_files,
             pro_files,
             output_dir
@@ -434,7 +436,7 @@ class TestParallelMergeIntegration(unittest.TestCase):
                 output_dir.mkdir()
 
                 start = time.time()
-                merged = parallel_merge_features(
+                merged, failed = parallel_merge_features(
                     nuc_files,
                     pro_files,
                     output_dir,
@@ -479,7 +481,7 @@ class TestParallelMergeIntegration(unittest.TestCase):
 
         # Run merge - should use imap() for lazy evaluation
         start = time.time()
-        merged = parallel_merge_features(
+        merged, failed = parallel_merge_features(
             nuc_files,
             pro_files,
             output_dir,
