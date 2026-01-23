@@ -214,8 +214,24 @@ def run_prediction(
             checkpoint_manager.mark_stage_started(state, PipelineStage.NUCLEOTIDE_SPLITTING)
 
             from virnucpro.utils.file_utils import split_fasta_file
+            from Bio import SeqIO
 
             sequences_per_file = config.get('prediction.sequences_per_file', 10000)
+
+            # For multi-GPU, ensure we create enough files for parallelization
+            if parallel:
+                available_gpus = detect_cuda_devices()
+                num_gpus = len(available_gpus) if available_gpus else 1
+                if num_gpus > 1:
+                    # Count sequences in nucleotide file
+                    total_sequences = sum(1 for _ in SeqIO.parse(nucleotide_file, 'fasta'))
+                    # Calculate sequences per file to create at least num_gpus * 2 files
+                    # This ensures good load balancing via bin-packing
+                    min_files = num_gpus * 2
+                    adjusted_sequences_per_file = max(100, total_sequences // min_files)
+                    if adjusted_sequences_per_file < sequences_per_file:
+                        sequences_per_file = adjusted_sequences_per_file
+                        logger.info(f"Adjusted sequences_per_file to {sequences_per_file} for multi-GPU load balancing ({total_sequences} sequences / {min_files} files)")
 
             # Split nucleotide file
             logger.info(f"Splitting nucleotide sequences into batches of {sequences_per_file}")
@@ -241,8 +257,23 @@ def run_prediction(
             checkpoint_manager.mark_stage_started(state, PipelineStage.PROTEIN_SPLITTING)
 
             from virnucpro.utils.file_utils import split_fasta_file
+            from Bio import SeqIO
 
             sequences_per_file = config.get('prediction.sequences_per_file', 10000)
+
+            # For multi-GPU, ensure we create enough files for parallelization
+            if parallel:
+                available_gpus = detect_cuda_devices()
+                num_gpus = len(available_gpus) if available_gpus else 1
+                if num_gpus > 1:
+                    # Count sequences in protein file
+                    total_sequences = sum(1 for _ in SeqIO.parse(protein_file, 'fasta'))
+                    # Calculate sequences per file to create at least num_gpus * 2 files
+                    min_files = num_gpus * 2
+                    adjusted_sequences_per_file = max(100, total_sequences // min_files)
+                    if adjusted_sequences_per_file < sequences_per_file:
+                        sequences_per_file = adjusted_sequences_per_file
+                        logger.info(f"Adjusted sequences_per_file to {sequences_per_file} for multi-GPU load balancing ({total_sequences} sequences / {min_files} files)")
 
             # Split protein file
             logger.info(f"Splitting protein sequences into batches of {sequences_per_file}")
