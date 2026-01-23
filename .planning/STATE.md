@@ -10,28 +10,28 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 1 of 6 (ESM-2 Multi-GPU Foundation)
-Plan: 6 of 6 (Gap Closure - BF16 Logging Visibility)
+Plan: 5 of 6 (Gap Closure - Multi-GPU Auto-Detection)
 Status: In progress
-Last activity: 2026-01-23 — Completed 01-06-PLAN.md (BF16 Logging Visibility)
+Last activity: 2026-01-23 — Completed 01-05-PLAN.md (Multi-GPU Auto-Detection)
 
-Progress: [████░░░░░░] 40.0% (6/15 plans)
+Progress: [███░░░░░░░] 33.3% (5/15 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 6
-- Average duration: 3.8 minutes
-- Total execution time: 0.38 hours
+- Total plans completed: 5
+- Average duration: 5.2 minutes
+- Total execution time: 0.43 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1     | 6     | 22.5m | 3.8m     |
+| 1     | 5     | 26.2m | 5.2m     |
 
 **Recent Trend:**
-- Last 5 plans: 01-02 (2.4m), 01-03 (4.0m), 01-04 (12.4m), 01-05 (0m), 01-06 (1m)
-- Trend: Gap closure plans (01-05, 01-06) very fast, focused fixes
+- Last 5 plans: 01-01 (2.9m), 01-02 (2.4m), 01-03 (4.0m), 01-04 (12.4m), 01-05 (4.5m)
+- Trend: Plan 01-04 was longer due to human verification; gap closure plans are efficient
 
 *Updated after each plan completion*
 
@@ -67,10 +67,11 @@ Recent decisions affecting current work:
 - python39-type-compatibility: Use Optional[Tuple[...]] instead of | operator for Python 3.9 compatibility
 - integration-test-subprocess: Use subprocess calls in integration tests to test exact CLI interface users invoke
 
-**From 01-06 execution:**
-- worker-logging-init: Initialize logging at worker function start with setup_worker_logging()
-- log-config-via-kwargs: Pass log_level and log_format to workers through BatchQueueManager kwargs
-- gpu-capability-main-log: Log GPU capabilities and BF16 status in main process before spawning workers
+**From 01-05 execution:**
+- gpu-auto-detection: Auto-detect available GPUs and enable parallel mode without user flags
+- early-cli-detection: Detect GPUs early in CLI before pipeline execution to set flags
+- zero-config-multi-gpu: Multi-GPU systems work without --gpus or --parallel flags (zero configuration)
+- preserve-user-control: Explicit --gpus flag overrides auto-detection (user control preserved)
 
 ### Pending Todos
 
@@ -88,6 +89,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-23 12:08 UTC
-Stopped at: Completed 01-06-PLAN.md execution (BF16 Logging Visibility gap closure)
+Last session: 2026-01-23 12:11 UTC
+Stopped at: Completed 01-05-PLAN.md execution (Multi-GPU Auto-Detection gap closure)
 Resume file: None
