@@ -42,7 +42,7 @@ def run_prediction(
         output_dir: Output directory
         device: PyTorch device
         dnabert_batch_size: Batch size for DNABERT-S extraction
-        parallel: Enable multi-GPU parallel processing
+        parallel: Enable multi-GPU parallel processing (auto-enabled by CLI on multi-GPU systems)
         batch_size: Batch size for DataLoader
         num_workers: Number of data loading workers
         cleanup_intermediate: Whether to clean intermediate files
