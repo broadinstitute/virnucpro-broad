@@ -51,7 +51,8 @@ logger = logging.getLogger('virnucpro.cli.predict')
               help='Disable progress bars (useful for logging to files)')
 @click.option('--dnabert-batch-size',
               type=int,
-              help='Batch size for DNABERT-S feature extraction (default: from config)')
+              default=None,
+              help='Token batch size for DNABERT-S processing (default: 2048, with BF16: 3072)')
 @click.option('--parallel',
               is_flag=True,
               help='Enable multi-GPU parallel processing for feature extraction')
@@ -62,7 +63,7 @@ logger = logging.getLogger('virnucpro.cli.predict')
 @click.option('--esm-batch-size',
               type=int,
               default=None,
-              help='Batch size for ESM-2 processing (tokens per batch). Reduce if encountering OOM errors.')
+              help='Token batch size for ESM-2 processing (default: 2048, with BF16: 3072). Reduce if encountering OOM errors.')
 @click.option('--threads', '-t',
               type=int,
               default=None,
@@ -163,8 +164,9 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
         if num_workers is None:
             num_workers = config.get('prediction.num_workers', 4)
 
+        # DNABERT-S batch size: tokens per batch (default 2048)
         if dnabert_batch_size is None:
-            dnabert_batch_size = config.get('features.dnabert.batch_size', 256)
+            dnabert_batch_size = config.get('features.dnabert.batch_size', 2048)
 
         # Validate and get device
         fallback_to_cpu = config.get('device.fallback_to_cpu', True)
@@ -212,7 +214,8 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
             config=config,
             toks_per_batch=esm_batch_size,
             translation_threads=threads,
-            quiet=not verbose
+            quiet=not verbose,
+            gpus=gpus
         )
 
         if exit_code == 0:
