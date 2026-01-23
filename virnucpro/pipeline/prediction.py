@@ -10,6 +10,7 @@ from virnucpro.core.checkpoint import CheckpointManager, PipelineStage
 from virnucpro.core.config import Config
 from virnucpro.pipeline.parallel import detect_cuda_devices
 from virnucpro.pipeline.parallel_esm import assign_files_round_robin, process_esm_files_worker
+from virnucpro.pipeline.parallel_dnabert import process_dnabert_files_worker, assign_files_by_sequences
 from virnucpro.pipeline.work_queue import BatchQueueManager
 # Import other pipeline components as they're refactored
 
@@ -32,7 +33,8 @@ def run_prediction(
     config: Config,
     toks_per_batch: int = None,
     translation_threads: int = None,
-    quiet: bool = False
+    quiet: bool = False,
+    gpus: str = None
 ) -> int:
     """
     Main prediction pipeline orchestration.
@@ -43,7 +45,7 @@ def run_prediction(
         expected_length: Expected sequence length
         output_dir: Output directory
         device: PyTorch device
-        dnabert_batch_size: Batch size for DNABERT-S extraction
+        dnabert_batch_size: Batch size for DNABERT-S extraction (tokens per batch, default: 2048)
         parallel: Enable multi-GPU parallel processing (auto-enabled by CLI on multi-GPU systems)
         batch_size: Batch size for DataLoader
         num_workers: Number of data loading workers
@@ -54,6 +56,7 @@ def run_prediction(
         toks_per_batch: Tokens per batch for ESM-2 processing (optional)
         translation_threads: Number of CPU threads for six-frame translation (optional, default: all cores)
         quiet: Disable dashboard and verbose logging (optional)
+        gpus: GPU IDs to use (comma-separated, optional)
 
     Returns:
         Exit code: 0 for success, 1 for total failure, 2 for partial success
@@ -259,28 +262,38 @@ def run_prediction(
             # Load from checkpoint
             protein_files = [Path(f) for f in state['stages'][PipelineStage.PROTEIN_SPLITTING.name]['outputs']['protein_files']]
 
-        # Stage 5: Nucleotide Feature Extraction
+        # Stage 5: Nucleotide Feature Extraction (DNABERT-S)
         if start_stage <= PipelineStage.NUCLEOTIDE_FEATURES or not checkpoint_manager.can_skip_stage(state, PipelineStage.NUCLEOTIDE_FEATURES):
-            logger.info("=== Stage 5: Nucleotide Feature Extraction ===")
+            logger.info("=== Stage 5: Nucleotide Feature Extraction (DNABERT-S) ===")
             checkpoint_manager.mark_stage_started(state, PipelineStage.NUCLEOTIDE_FEATURES)
 
             nucleotide_feature_files = []
 
-            use_parallel = False
-            if parallel:
-                from virnucpro.pipeline.parallel import assign_files_round_robin, process_dnabert_files_worker
-                import multiprocessing
+            # Detect available GPUs for parallel processing
+            available_gpus = detect_cuda_devices()
+            num_gpus = len(available_gpus) if available_gpus else 1
+            use_parallel = num_gpus > 1 and len(nucleotide_files) > 1 and parallel
 
-                available_gpus = detect_cuda_devices()
-                if len(available_gpus) > 1:
-                    use_parallel = True
-                    logger.info(f"Using parallel processing with {len(available_gpus)} GPUs")
+            # Log GPU capabilities
+            if torch.cuda.is_available() and available_gpus:
+                for gpu_id in available_gpus:
+                    device_name = torch.cuda.get_device_name(gpu_id)
+                    capability = torch.cuda.get_device_capability(gpu_id)
+                    compute_version = f"{capability[0]}.{capability[1]}"
+                    bf16_enabled = capability[0] >= 8
+                    logger.info(f"GPU {gpu_id} ({device_name}): Compute {compute_version}, BF16 {'enabled' if bf16_enabled else 'disabled'}")
+
+                # Log batch size based on BF16 status
+                if available_gpus and torch.cuda.get_device_capability(available_gpus[0])[0] >= 8:
+                    effective_batch = 3072 if dnabert_batch_size == 2048 else dnabert_batch_size
+                    logger.info(f"BF16 mixed precision available, using batch size {effective_batch}")
                 else:
-                    logger.info("Only 1 GPU available, falling back to sequential processing")
+                    logger.info(f"Using FP32 precision, batch size {dnabert_batch_size}")
 
             if use_parallel:
-                logger.info("Extracting DNABERT-S features in parallel across GPUs")
+                logger.info(f"Using {num_gpus} GPUs for DNABERT-S extraction")
 
+                # Filter out files with existing outputs for checkpoint resume
                 files_to_process = []
                 for nuc_file in nucleotide_files:
                     output_file = nuc_file.parent / f"{nuc_file.stem}_DNABERT_S.pt"
@@ -294,17 +307,19 @@ def run_prediction(
                 if not files_to_process:
                     logger.info("All nucleotide feature files already exist, skipping extraction")
                 else:
-                    worker_file_assignments = assign_files_round_robin(files_to_process, len(available_gpus))
+                    # Use bin-packing assignment by sequence count for balanced GPU utilization
+                    file_assignments = assign_files_by_sequences(files_to_process, num_gpus)
 
                     # Create progress queue for live updates
+                    import multiprocessing
                     import threading
                     ctx = multiprocessing.get_context('spawn')
                     progress_queue = ctx.Queue()
 
                     # Create and start dashboard
                     from virnucpro.pipeline.dashboard import monitor_progress, MultiGPUDashboard
-                    total_files_per_gpu = {i: len(worker_file_assignments[i]) for i in range(len(available_gpus))}
-                    dashboard = MultiGPUDashboard(len(available_gpus), total_files_per_gpu)
+                    total_files_per_gpu = {i: len(file_assignments[i]) for i in range(num_gpus)}
+                    dashboard = MultiGPUDashboard(num_gpus, total_files_per_gpu)
                     dashboard.start()
 
                     # Start progress monitor thread
@@ -317,18 +332,18 @@ def run_prediction(
                     monitor_thread.start()
 
                     try:
-                        # Process with queue manager
-                        queue_manager = BatchQueueManager(len(available_gpus), process_dnabert_files_worker, progress_queue=progress_queue)
+                        # Process with queue manager using DNABERT-S worker
+                        queue_manager = BatchQueueManager(num_gpus, process_dnabert_files_worker, progress_queue=progress_queue)
                         processed, failed = queue_manager.process_files(
-                            worker_file_assignments,
-                            batch_size=dnabert_batch_size,
+                            file_assignments,
+                            toks_per_batch=dnabert_batch_size,
                             output_dir=nucleotide_split_dir
                         )
                         nucleotide_feature_files.extend(processed)
 
                         # Log any failures
                         if failed:
-                            logger.warning(f"Failed to process {len(failed)} DNABERT files")
+                            logger.warning(f"Failed to process {len(failed)} DNABERT-S files")
                             for file_path, error in failed:
                                 logger.error(f"  {file_path}: {error}")
                     finally:
@@ -346,7 +361,7 @@ def run_prediction(
             else:
                 from virnucpro.pipeline.features import extract_dnabert_features
 
-                logger.info("Extracting DNABERT-S features from nucleotide sequences")
+                logger.info("Using single GPU for DNABERT-S extraction")
 
                 # Filter out files with existing outputs for checkpoint resume
                 files_to_process = []
