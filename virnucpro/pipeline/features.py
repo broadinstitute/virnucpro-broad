@@ -210,6 +210,11 @@ def merge_features(
     Raises:
         ValueError: If sequence IDs don't match between files
     """
+    # Skip if already merged (checkpoint support)
+    if output_file.exists() and output_file.stat().st_size > 0:
+        logger.info(f"Skipping merge - output exists: {output_file}")
+        return output_file
+
     logger.info(f"Merging features: {nucleotide_feature_file.name} + {protein_feature_file.name}")
 
     # Load features
@@ -254,7 +259,17 @@ def merge_features(
         'ids': nuc_data['nucleotide'],
         'data': merged_data
     }
-    torch.save(merged_dict, output_file)
+
+    # Atomic write: save to temp file first, then rename
+    temp_file = output_file.with_suffix('.tmp')
+    try:
+        torch.save(merged_dict, temp_file)
+        temp_file.rename(output_file)
+    except Exception as e:
+        # Clean up temp file on failure
+        if temp_file.exists():
+            temp_file.unlink()
+        raise
 
     logger.info(f"Saved merged features to {output_file} (shape: {merged_data.shape})")
     return output_file
