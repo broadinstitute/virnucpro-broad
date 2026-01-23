@@ -13,6 +13,7 @@ This roadmap transforms VirNucPro from a 45-hour single-GPU bottleneck into a su
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: ESM-2 Multi-GPU Foundation** - Parallelize ESM-2 across GPUs with file-level distribution
+- [ ] **Phase 1.1: Parallel Translation (INSERTED)** - Parallelize six-frame translation with CPU multiprocessing
 - [ ] **Phase 2: DNABERT-S Optimization** - Optimize DNABERT-S batching and queuing to match ESM-2
 - [ ] **Phase 3: Checkpoint Robustness** - Atomic writes, validation, backward compatibility
 - [ ] **Phase 4: Memory & Attention Optimization** - FlashAttention, prefetching, memory management
@@ -43,6 +44,23 @@ Plans:
 - [x] 01-05-PLAN.md — Fix multi-GPU auto-detection (gap closure)
 - [x] 01-06-PLAN.md — Fix BF16 logging visibility (gap closure)
 - [x] 01-07-PLAN.md — Add progress dashboard for GPU workers (gap closure)
+
+### Phase 1.1: Parallel Translation (INSERTED)
+**Goal**: Parallelize six-frame translation step to reduce processing time from >10 minutes to under 2 minutes for 22M sequences using CPU multiprocessing.
+**Depends on**: Phase 1
+**Requirements**: TBD
+**Success Criteria** (what must be TRUE):
+  1. Six-frame translation uses multiprocessing to parallelize across CPU cores
+  2. --threads CLI parameter controls number of worker processes (default: CPU count)
+  3. Processing 22M sequences completes in under 2 minutes on 8-core system
+  4. Translation output remains identical to single-threaded implementation
+  5. Memory usage stays reasonable (no explosive growth with worker count)
+**Plans**: 3 plans
+
+Plans:
+- [ ] 01.1-01-PLAN.md — Create parallel translation worker functions and orchestration
+- [ ] 01.1-02-PLAN.md — Integrate into pipeline with CLI support
+- [ ] 01.1-03-PLAN.md — Add comprehensive tests and validation
 
 ### Phase 2: DNABERT-S Optimization
 **Goal**: DNABERT-S feature extraction matches ESM-2's optimization level with improved batching, automatic queuing, and unified worker infrastructure.
@@ -101,42 +119,40 @@ Plans:
 **Requirements**: MON-01, MON-02, MON-03, LOAD-01, LOAD-03
 **Success Criteria** (what must be TRUE):
   1. nvitop logs GPU compute % and memory usage every 10 seconds during embedding stages
-  2. Throughput logging tracks sequences/second per GPU for performance debugging
-  3. Monitoring detects stalled workers and reports imbalanced load warnings
-  4. File assignment uses greedy bin packing by sequence count for balanced work distribution
-  5. Pipeline handles mixed GPU types and memory sizes without manual configuration
+  2. File assignment algorithm balances sequences based on estimated compute (length-aware)
+  3. GPU dashboard shows real-time utilization, file progress, and per-GPU throughput
+  4. Heterogeneous GPUs (e.g., 3090+4090) get work proportional to their compute capability
+  5. Unit tests verify load balancing algorithm fairly distributes sequences by compute time
 **Plans**: TBD
 
 Plans:
 - [ ] 05-01: TBD
 - [ ] 05-02: TBD
+- [ ] 05-03: TBD
 
 ### Phase 6: Performance Validation
-**Goal**: Pipeline completes one sample in under 10 hours, demonstrates >80% GPU utilization, and proves linear scaling (2x GPUs = 2x speedup).
+**Goal**: System benchmarking proves <10 hour processing time for typical samples and demonstrates linear GPU scaling up to 8 GPUs.
 **Depends on**: Phase 5
-**Requirements**: PERF-01, PERF-02, SCALE-01, TEST-06
+**Requirements**: PERF-01, PERF-02, SCALE-01, MON-03, TEST-06
 **Success Criteria** (what must be TRUE):
-  1. Pipeline processes one full sample (thousands of sequences) in under 10 hours on 4-GPU system
-  2. GPU utilization logs show >80% compute usage during ESM-2 and DNABERT-S embedding stages
-  3. Benchmark results show linear scaling: 2 GPUs = ~2x speedup, 4 GPUs = ~4x speedup, 8 GPUs = ~8x speedup
-  4. Performance report documents baseline (45 hours single GPU) vs optimized throughput
-  5. End-to-end integration test confirms full pipeline output matches vanilla baseline (predictions identical)
+  1. Benchmark suite runs on 1, 2, 4, 8 GPU configurations and reports speedup ratios
+  2. Processing one sample (thousands of sequences) completes in <10 hours on 4 GPUs
+  3. GPU utilization stays above 80% during embedding stages (measured via nvitop)
+  4. Speedup is near-linear: 2 GPUs = ~1.8x, 4 GPUs = ~3.5x, 8 GPUs = ~7x faster than single GPU
+  5. Performance report generated showing throughput, memory usage, and bottleneck analysis
+  6. Integration tests confirm optimized pipeline produces identical predictions to vanilla
 **Plans**: TBD
 
 Plans:
 - [ ] 06-01: TBD
 - [ ] 06-02: TBD
 
-## Progress
+## Completion Criteria
 
-**Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
-
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 1. ESM-2 Multi-GPU Foundation | 7/7 | Complete | 2026-01-23 |
-| 2. DNABERT-S Optimization | 0/TBD | Not started | - |
-| 3. Checkpoint Robustness | 0/TBD | Not started | - |
-| 4. Memory & Attention Optimization | 0/TBD | Not started | - |
-| 5. Load Balancing & Monitoring | 0/TBD | Not started | - |
-| 6. Performance Validation | 0/TBD | Not started | - |
+The optimization project is complete when:
+- [ ] Pipeline processes one sample in <10 hours on a 4-GPU system
+- [ ] GPU utilization exceeds 80% during embedding stages
+- [ ] All optimizations maintain backward compatibility
+- [ ] Performance scales near-linearly with GPU count
+- [ ] All tests pass including vanilla comparison
+- [ ] Documentation updated with optimization guide
