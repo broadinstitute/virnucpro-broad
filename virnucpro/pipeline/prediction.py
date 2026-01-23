@@ -243,29 +243,33 @@ def run_prediction(
                         nucleotide_feature_files.append(output_file)
                         logger.info(f"Skipping {nuc_file.name} (output already exists)")
 
-                worker_file_assignments = assign_files_round_robin(files_to_process, len(available_gpus))
+                # Skip parallel processing if no files to process
+                if not files_to_process:
+                    logger.info("All nucleotide feature files already exist, skipping extraction")
+                else:
+                    worker_file_assignments = assign_files_round_robin(files_to_process, len(available_gpus))
 
-                worker_args = [
-                    (file_subset, device_id, dnabert_batch_size, nucleotide_files[0].parent)
-                    for device_id, file_subset in zip(available_gpus, worker_file_assignments)
-                ]
+                    worker_args = [
+                        (file_subset, device_id, dnabert_batch_size, nucleotide_split_dir)
+                        for device_id, file_subset in zip(available_gpus, worker_file_assignments)
+                    ]
 
-                # Use 'spawn' start method for CUDA compatibility
-                # Fork method causes "Cannot re-initialize CUDA in forked subprocess" error
-                ctx = multiprocessing.get_context('spawn')
-                with ctx.Pool(processes=len(available_gpus)) as pool:
-                    with progress.create_file_bar(len(files_to_process), desc="DNABERT-S extraction (parallel)") as pbar:
-                        results = pool.starmap(process_dnabert_files_worker, worker_args)
-                        for worker_output in results:
-                            nucleotide_feature_files.extend(worker_output)
-                        pbar.update(len(files_to_process))
+                    # Use 'spawn' start method for CUDA compatibility
+                    # Fork method causes "Cannot re-initialize CUDA in forked subprocess" error
+                    ctx = multiprocessing.get_context('spawn')
+                    with ctx.Pool(processes=len(available_gpus)) as pool:
+                        with progress.create_file_bar(len(files_to_process), desc="DNABERT-S extraction (parallel)") as pbar:
+                            results = pool.starmap(process_dnabert_files_worker, worker_args)
+                            for worker_output in results:
+                                nucleotide_feature_files.extend(worker_output)
+                            pbar.update(len(files_to_process))
 
-                # Validate that we have feature files
-                if not nucleotide_feature_files:
-                    raise RuntimeError(
-                        f"No nucleotide feature files produced or found. Expected {len(nucleotide_files)} files. "
-                        f"Check that input files are not empty and feature extraction completed successfully."
-                    )
+                    # Validate that we have feature files
+                    if not nucleotide_feature_files:
+                        raise RuntimeError(
+                            f"No nucleotide feature files produced or found. Expected {len(nucleotide_files)} files. "
+                            f"Check that input files are not empty and feature extraction completed successfully."
+                        )
             else:
                 from virnucpro.pipeline.features import extract_dnabert_features
 
@@ -327,27 +331,31 @@ def run_prediction(
             if use_parallel:
                 logger.info(f"Using {num_gpus} GPUs for ESM-2 extraction")
 
-                # Assign files round-robin across GPUs
-                file_assignments = assign_files_round_robin(protein_files, num_gpus)
+                # Skip parallel processing if no files to process
+                if not protein_files:
+                    logger.info("No protein files to process, skipping ESM-2 extraction")
+                else:
+                    # Assign files round-robin across GPUs
+                    file_assignments = assign_files_round_robin(protein_files, num_gpus)
 
-                # Process with queue manager
-                queue_manager = BatchQueueManager(num_gpus, process_esm_files_worker)
-                processed, failed = queue_manager.process_files(
-                    file_assignments,
-                    toks_per_batch=toks_per_batch,
-                    output_dir=protein_files[0].parent
-                )
+                    # Process with queue manager
+                    queue_manager = BatchQueueManager(num_gpus, process_esm_files_worker)
+                    processed, failed = queue_manager.process_files(
+                        file_assignments,
+                        toks_per_batch=toks_per_batch,
+                        output_dir=protein_split_dir
+                    )
 
-                protein_feature_files.extend(processed)
-                failed_files.extend(failed)
+                    protein_feature_files.extend(processed)
+                    failed_files.extend(failed)
 
-                # Log failures
-                if failed:
-                    failed_file_path = output_dir / "failed_files.txt"
-                    with open(failed_file_path, 'w') as f:
-                        for file_path, error in failed:
-                            f.write(f"{file_path}|ESM-2|{error}\n")
-                    logger.warning(f"Failed to process {len(failed)} files, see {failed_file_path}")
+                    # Log failures
+                    if failed:
+                        failed_file_path = output_dir / "failed_files.txt"
+                        with open(failed_file_path, 'w') as f:
+                            for file_path, error in failed:
+                                f.write(f"{file_path}|ESM-2|{error}\n")
+                        logger.warning(f"Failed to process {len(failed)} files, see {failed_file_path}")
             else:
                 logger.info("Using single GPU for ESM-2 extraction")
                 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
