@@ -9,6 +9,7 @@ from virnucpro import __version__
 
 # Import command modules
 from virnucpro.cli import predict
+from virnucpro.cli import profile
 from virnucpro.cli import utils
 
 
@@ -72,6 +73,7 @@ def cli(ctx, verbose, quiet, log_file, config):
 
 # Register commands
 cli.add_command(predict.predict)
+cli.add_command(profile.profile)
 cli.add_command(utils.utils)
 
 
