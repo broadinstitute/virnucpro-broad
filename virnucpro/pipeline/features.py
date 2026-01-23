@@ -161,7 +161,7 @@ def extract_esm_features(
     data = []
 
     with torch.no_grad():
-        with autocast(device_type='cuda', dtype=torch.bfloat16, enabled=use_bf16):
+        with autocast(dtype=torch.bfloat16, enabled=use_bf16):
             for batch_idx, batch in enumerate(batches):
                 # Convert batch
                 batch_labels, batch_strs, batch_tokens = batch_converter(batch)
