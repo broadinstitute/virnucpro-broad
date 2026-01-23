@@ -34,7 +34,10 @@ def count_sequences(file_path: Path) -> int:
 
 def assign_files_round_robin(files: List[Path], num_workers: int) -> List[List[Path]]:
     """
-    Distribute files round-robin across workers.
+    Distribute files across workers using balanced bin-packing by sequence count.
+
+    Uses greedy bin-packing algorithm to balance work by sequence count,
+    not just file count, ensuring even GPU utilization.
 
     Args:
         files: List of file paths to process
@@ -46,7 +49,7 @@ def assign_files_round_robin(files: List[Path], num_workers: int) -> List[List[P
     Example:
         >>> files = [Path('a.fa'), Path('b.fa'), Path('c.fa'), Path('d.fa'), Path('e.fa')]
         >>> assign_files_round_robin(files, 2)
-        [[Path('a.fa'), Path('c.fa'), Path('e.fa')], [Path('b.fa'), Path('d.fa')]]
+        [[Path('a.fa'), Path('c.fa')], [Path('b.fa'), Path('d.fa'), Path('e.fa')]]
     """
     if num_workers <= 0:
         raise ValueError(f"num_workers must be positive, got {num_workers}")
@@ -54,15 +57,31 @@ def assign_files_round_robin(files: List[Path], num_workers: int) -> List[List[P
     if not files:
         return [[] for _ in range(num_workers)]
 
+    # Count sequences in each file
+    file_sizes = []
+    for file_path in files:
+        seq_count = count_sequences(file_path)
+        file_sizes.append((file_path, seq_count))
+
+    # Sort by sequence count (descending) for better bin-packing
+    file_sizes.sort(key=lambda x: x[1], reverse=True)
+
+    # Initialize bins (workers) with running totals
     worker_files = [[] for _ in range(num_workers)]
+    worker_totals = [0] * num_workers
 
-    for idx, file_path in enumerate(files):
-        worker_idx = idx % num_workers
-        worker_files[worker_idx].append(file_path)
+    # Greedy bin-packing: assign each file to worker with lowest current total
+    for file_path, seq_count in file_sizes:
+        # Find worker with minimum load
+        min_worker_idx = min(range(num_workers), key=lambda i: worker_totals[i])
 
-    logger.info(f"Assigned {len(files)} files to {num_workers} workers (round-robin)")
+        # Assign file to that worker
+        worker_files[min_worker_idx].append(file_path)
+        worker_totals[min_worker_idx] += seq_count
+
+    logger.info(f"Assigned {len(files)} files to {num_workers} workers (bin-packing)")
     for worker_idx, file_list in enumerate(worker_files):
-        total_seqs = sum(count_sequences(f) for f in file_list)
+        total_seqs = worker_totals[worker_idx]
         logger.info(f"  Worker {worker_idx}: {len(file_list)} files, {total_seqs} sequences")
 
     return worker_files
