@@ -13,7 +13,7 @@ This roadmap transforms VirNucPro from a 45-hour single-GPU bottleneck into a su
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: ESM-2 Multi-GPU Foundation** - Parallelize ESM-2 across GPUs with file-level distribution
-- [ ] **Phase 1.1: Parallel Translation (INSERTED)** - Parallelize six-frame translation with CPU multiprocessing
+- [x] **Phase 1.1: Parallel Translation (INSERTED)** - Parallelize six-frame translation with CPU multiprocessing
 - [ ] **Phase 2: DNABERT-S Optimization** - Optimize DNABERT-S batching and queuing to match ESM-2
 - [ ] **Phase 3: Checkpoint Robustness** - Atomic writes, validation, backward compatibility
 - [ ] **Phase 4: Memory & Attention Optimization** - FlashAttention, prefetching, memory management
@@ -58,9 +58,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 01.1-01-PLAN.md — Create parallel translation worker functions and orchestration
-- [ ] 01.1-02-PLAN.md — Integrate into pipeline with CLI support
-- [ ] 01.1-03-PLAN.md — Add comprehensive tests and validation
+- [x] 01.1-01-PLAN.md — Create parallel translation worker functions and orchestration
+- [x] 01.1-02-PLAN.md — Integrate into pipeline with CLI support
+- [x] 01.1-03-PLAN.md — Add comprehensive tests and validation
 
 ### Phase 2: DNABERT-S Optimization
 **Goal**: DNABERT-S feature extraction matches ESM-2's optimization level with improved batching, automatic queuing, and unified worker infrastructure.
