@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 2.1 of 6 (Parallel Embedding Merge)
-Plan: 3 of 3 (Integration Tests and Error Handling)
-Status: Phase complete
-Last activity: 2026-01-23 — Completed 02.1-03-PLAN.md
+Plan: 3 of 3 (Integration Tests and Performance Validation)
+Status: Phase complete and verified
+Last activity: 2026-01-23 — Phase 2.1 verified (5/5 must-haves) after orchestrator tuple unpacking fix
 
 Progress: [███████████] 100% (18/18 plans)
 
@@ -130,6 +130,9 @@ Recent decisions affecting current work:
 - tuple-return-partial-success: Return (merged_files, failed_pairs) tuple from parallel merge for partial completion tracking
 - specific-exception-handling: Catch FileNotFoundError, RuntimeError, Exception separately for better error diagnostics
 - performance-threshold-2x: Assert >= 2x speedup with 4 workers in tests (conservative threshold accounting for overhead)
+
+**Orchestrator correction (Phase 2.1):**
+- tuple-unpacking-integration: Fix prediction.py:582 to unpack tuple return from parallel_merge_with_progress (verifier gap closure)
 
 ### Pending Todos
 
