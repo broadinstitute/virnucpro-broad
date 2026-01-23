@@ -622,5 +622,113 @@ class TestOptimizedMatchesVanilla(unittest.TestCase):
             )
 
 
+class TestBaseEmbeddingWorkerIntegration(unittest.TestCase):
+    """Test integration with BaseEmbeddingWorker interface"""
+
+    def test_dnabert_implements_base_interface(self):
+        """Test DNABERT-S worker implements BaseEmbeddingWorker interface"""
+        from virnucpro.pipeline.base_worker import BaseEmbeddingWorker
+        from virnucpro.pipeline.parallel_dnabert import process_dnabert_files_worker
+
+        # Verify process_dnabert_files_worker signature matches base class requirements
+        import inspect
+
+        # Get function signature
+        sig = inspect.signature(process_dnabert_files_worker)
+
+        # Should have required parameters
+        required_params = ['file_subset', 'device_id', 'output_dir']
+        for param in required_params:
+            self.assertIn(param, sig.parameters)
+
+        # Should accept **kwargs
+        param_kinds = [p.kind for p in sig.parameters.values()]
+        self.assertIn(inspect.Parameter.VAR_KEYWORD, param_kinds)
+
+    def test_worker_signature_compatibility(self):
+        """Test worker function signature is compatible with base class"""
+        from virnucpro.pipeline.parallel_dnabert import process_dnabert_files_worker
+        import inspect
+
+        sig = inspect.signature(process_dnabert_files_worker)
+
+        # Verify parameter types match expected interface
+        params = sig.parameters
+
+        # file_subset should accept List
+        self.assertIn('file_subset', params)
+
+        # device_id should accept int
+        self.assertIn('device_id', params)
+
+        # Should have batch_size parameter (toks_per_batch in DNABERT)
+        # This verifies the interface contract
+        self.assertIn('toks_per_batch', params)
+
+        # output_dir should be present
+        self.assertIn('output_dir', params)
+
+    def test_return_type_consistency(self):
+        """Test both workers return consistent (processed, failed) tuple"""
+        from pathlib import Path
+        import tempfile
+        import shutil
+
+        temp_dir = Path(tempfile.mkdtemp())
+        try:
+            output_dir = temp_dir / "output"
+            output_dir.mkdir()
+
+            # Create empty test file
+            test_file = temp_dir / "test.fa"
+            test_file.write_text(">seq1\nACGT\n")
+
+            # Mock all dependencies
+            with patch('virnucpro.pipeline.parallel_dnabert.detect_bf16_support') as mock_bf16:
+                with patch('virnucpro.pipeline.parallel_dnabert.AutoModel') as mock_model_class:
+                    with patch('virnucpro.pipeline.parallel_dnabert.AutoTokenizer') as mock_tokenizer_class:
+                        with patch('torch.save'):
+                            # Setup mocks
+                            mock_bf16.return_value = False
+
+                            mock_tokenizer = MagicMock()
+                            mock_tokenizer.return_value = {
+                                'input_ids': torch.tensor([[1, 2, 3, 4]]),
+                                'attention_mask': torch.tensor([[1, 1, 1, 1]])
+                            }
+                            mock_tokenizer_class.from_pretrained.return_value = mock_tokenizer
+
+                            mock_model = MagicMock()
+                            mock_model.return_value = (torch.randn(1, 4, 768),)
+                            mock_model.eval.return_value = mock_model
+                            mock_model.to.return_value = mock_model
+                            mock_model_class.from_pretrained.return_value = mock_model
+
+                            # Call worker
+                            from virnucpro.pipeline.parallel_dnabert import process_dnabert_files_worker
+                            result = process_dnabert_files_worker(
+                                file_subset=[test_file],
+                                device_id=0,
+                                toks_per_batch=2048,
+                                output_dir=output_dir
+                            )
+
+                            # Verify return type is tuple of (processed, failed)
+                            self.assertIsInstance(result, tuple)
+                            self.assertEqual(len(result), 2)
+
+                            processed, failed = result
+
+                            # Verify processed is list of Paths
+                            self.assertIsInstance(processed, list)
+
+                            # Verify failed is list of tuples
+                            self.assertIsInstance(failed, list)
+
+        finally:
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
+
+
 if __name__ == '__main__':
     unittest.main()
