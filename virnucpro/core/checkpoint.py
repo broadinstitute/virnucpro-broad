@@ -44,6 +44,63 @@ class PipelineStage(IntEnum):
     CONSENSUS = 9
 
 
+def has_done_marker(checkpoint_path: Path) -> bool:
+    """Check if checkpoint has .done marker file indicating completion.
+
+    .done marker files enable quick resume checks without loading multi-GB checkpoints.
+    This is significantly faster than loading checkpoints to check embedded status field.
+
+    Args:
+        checkpoint_path: Path to checkpoint file
+
+    Returns:
+        True if {checkpoint_path}.done marker exists
+
+    Example:
+        >>> has_done_marker(Path("embeddings.pt"))
+        True  # embeddings.pt.done exists
+    """
+    done_marker = checkpoint_path.with_suffix(checkpoint_path.suffix + '.done')
+    return done_marker.exists()
+
+
+def create_done_marker(checkpoint_path: Path) -> None:
+    """Create .done marker file for checkpoint indicating successful completion.
+
+    Creates empty {checkpoint_path}.done marker file. Called internally by atomic_save
+    after successful validation, or manually for marking completed checkpoints.
+
+    Args:
+        checkpoint_path: Path to checkpoint file
+
+    Example:
+        >>> create_done_marker(Path("embeddings.pt"))
+        # Creates embeddings.pt.done
+    """
+    done_marker = checkpoint_path.with_suffix(checkpoint_path.suffix + '.done')
+    done_marker.touch()
+    logger.debug(f"Created .done marker: {done_marker}")
+
+
+def remove_done_marker(checkpoint_path: Path) -> None:
+    """Remove .done marker file for checkpoint.
+
+    Used when checkpoint becomes invalid or needs re-processing.
+    Safe to call if marker doesn't exist (no-op).
+
+    Args:
+        checkpoint_path: Path to checkpoint file
+
+    Example:
+        >>> remove_done_marker(Path("embeddings.pt"))
+        # Removes embeddings.pt.done if exists
+    """
+    done_marker = checkpoint_path.with_suffix(checkpoint_path.suffix + '.done')
+    if done_marker.exists():
+        done_marker.unlink()
+        logger.debug(f"Removed .done marker: {done_marker}")
+
+
 def atomic_save(
     checkpoint_dict: Dict[str, Any],
     output_file: Path,
@@ -54,6 +111,7 @@ def atomic_save(
 
     Uses temp-then-rename pattern to ensure checkpoint is never partially written.
     Optionally validates checkpoint after save to ensure integrity.
+    Creates .done marker file after successful save/validation for quick resume checks.
 
     Args:
         checkpoint_dict: Dictionary to save as checkpoint
@@ -108,6 +166,10 @@ def atomic_save(
             checkpoint_dict['status'] = 'complete'
             torch.save(checkpoint_dict, temp_file)
             temp_file.replace(output_file)
+
+        # Create .done marker after successful save (and validation if enabled)
+        # Marker is created ONLY after all validation passes
+        create_done_marker(output_file)
 
     except Exception as e:
         # Clean up temp file on any failure

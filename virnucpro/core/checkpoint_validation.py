@@ -384,24 +384,31 @@ def load_checkpoint_with_validation(
 def get_checkpoint_info(checkpoint_path: Path) -> Dict[str, Any]:
     """Get checkpoint metadata without full validation.
 
-    Quick inspection of checkpoint version and status for diagnostics.
+    Quick inspection of checkpoint version, status, and .done marker for diagnostics.
+    Checks .done marker for quick completion status without loading checkpoint.
 
     Args:
         checkpoint_path: Path to checkpoint file
 
     Returns:
-        Dict with keys: 'version', 'status', 'size_bytes', 'is_valid_zip'
+        Dict with keys: 'version', 'status', 'size_bytes', 'is_valid_zip', 'has_done_marker'
 
     Example:
         >>> info = get_checkpoint_info(Path("model.pt"))
         >>> print(f"Version: {info['version']}, Status: {info['status']}")
+        >>> print(f"Has .done marker: {info['has_done_marker']}")
     """
     info = {
         'version': 'unknown',
         'status': 'unknown',
         'size_bytes': 0,
-        'is_valid_zip': False
+        'is_valid_zip': False,
+        'has_done_marker': False
     }
+
+    # Check for .done marker (quick check without loading checkpoint)
+    done_marker = checkpoint_path.with_suffix(checkpoint_path.suffix + '.done')
+    info['has_done_marker'] = done_marker.exists()
 
     # Get file size
     try:
