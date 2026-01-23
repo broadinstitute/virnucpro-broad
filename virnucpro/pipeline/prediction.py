@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Optional
 import logging
+import time
 import torch
 
 from virnucpro.core.checkpoint import CheckpointManager, PipelineStage
@@ -30,6 +31,7 @@ def run_prediction(
     show_progress: bool,
     config: Config,
     toks_per_batch: int = None,
+    translation_threads: int = None,
     quiet: bool = False
 ) -> int:
     """
@@ -50,6 +52,7 @@ def run_prediction(
         show_progress: Whether to show progress bars
         config: Configuration object
         toks_per_batch: Tokens per batch for ESM-2 processing (optional)
+        translation_threads: Number of CPU threads for six-frame translation (optional, default: all cores)
         quiet: Disable dashboard and verbose logging (optional)
 
     Returns:
@@ -120,34 +123,78 @@ def run_prediction(
             logger.info("=== Stage 2: Six-Frame Translation ===")
             checkpoint_manager.mark_stage_started(state, PipelineStage.TRANSLATION)
 
-            from virnucpro.utils.sequence import identify_seq
-            from Bio import SeqIO
+            # Determine whether to use parallel translation
+            import os
+            cpu_count = os.cpu_count() or 1
+            use_parallel = False
+            num_workers = translation_threads if translation_threads else cpu_count
 
-            # Count sequences for progress bar
-            records = list(SeqIO.parse(chunked_file, 'fasta'))
-            num_sequences = len(records)
+            # Use parallel if explicitly requested or if multiple cores available
+            if num_workers > 1:
+                use_parallel = True
+                logger.info(f"Using parallel translation with {num_workers} workers")
+            else:
+                logger.info("Using sequential translation (single core)")
 
-            with progress.create_sequence_bar(num_sequences, desc="Translating sequences") as pbar:
-                with open(nucleotide_file, 'w') as dna_out, open(protein_file, 'w') as protein_out:
-                    for record in records:
-                        sequence = str(record.seq).upper()
-                        seqid = record.id
-                        result = identify_seq(seqid, sequence)
+            # Record start time for performance metrics
+            start_time = time.time()
+            sequences_processed = 0
+            sequences_with_orfs = 0
 
-                        if result:
-                            for item in result:
-                                if item.get('protein', '') != '':
-                                    sequence_name = item['seqid']
-                                    dna_sequence = item['nucleotide']
-                                    protein_sequence = item['protein']
+            if use_parallel:
+                from virnucpro.pipeline.parallel_translate import parallel_translate_with_progress
+                try:
+                    sequences_processed, sequences_with_orfs = parallel_translate_with_progress(
+                        chunked_file,
+                        nucleotide_file,
+                        protein_file,
+                        num_workers=num_workers,
+                        show_progress=show_progress
+                    )
+                except Exception as e:
+                    logger.error(f"Parallel translation failed: {e}")
+                    logger.info("Falling back to sequential translation")
+                    use_parallel = False
 
-                                    dna_out.write(f'>{sequence_name}\n')
-                                    dna_out.write(f'{dna_sequence}\n')
+            if not use_parallel:
+                # Sequential fallback
+                from virnucpro.utils.sequence import identify_seq
+                from Bio import SeqIO
 
-                                    protein_out.write(f'>{sequence_name}\n')
-                                    protein_out.write(f'{protein_sequence}\n')
+                # Count sequences for progress bar
+                records = list(SeqIO.parse(chunked_file, 'fasta'))
+                num_sequences = len(records)
 
-                        pbar.update(1)
+                with progress.create_sequence_bar(num_sequences, desc="Translating sequences") as pbar:
+                    with open(nucleotide_file, 'w') as dna_out, open(protein_file, 'w') as protein_out:
+                        for record in records:
+                            sequences_processed += 1
+                            sequence = str(record.seq).upper()
+                            seqid = record.id
+                            result = identify_seq(seqid, sequence)
+
+                            if result:
+                                sequences_with_orfs += 1
+                                for item in result:
+                                    if item.get('protein', '') != '':
+                                        sequence_name = item['seqid']
+                                        dna_sequence = item['nucleotide']
+                                        protein_sequence = item['protein']
+
+                                        dna_out.write(f'>{sequence_name}\n')
+                                        dna_out.write(f'{dna_sequence}\n')
+
+                                        protein_out.write(f'>{sequence_name}\n')
+                                        protein_out.write(f'{protein_sequence}\n')
+
+                            pbar.update(1)
+
+            # Calculate performance metrics
+            elapsed_time = time.time() - start_time
+            sequences_per_sec = sequences_processed / elapsed_time if elapsed_time > 0 else 0
+
+            logger.info(f"Translation complete: processed {sequences_processed:,} sequences in {elapsed_time:.1f}s ({sequences_per_sec:,.0f} seq/s)")
+            logger.info(f"Found {sequences_with_orfs:,} sequences with valid ORFs across 6 frames")
 
             checkpoint_manager.mark_stage_completed(
                 state,
