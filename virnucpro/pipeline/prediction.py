@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 import logging
 import time
+import os
 import torch
 
 from virnucpro.core.checkpoint import CheckpointManager, PipelineStage
@@ -11,6 +12,7 @@ from virnucpro.core.config import Config
 from virnucpro.pipeline.parallel import detect_cuda_devices
 from virnucpro.pipeline.parallel_esm import assign_files_round_robin, process_esm_files_worker
 from virnucpro.pipeline.parallel_dnabert import process_dnabert_files_worker, assign_files_by_sequences
+from virnucpro.pipeline.parallel_merge import parallel_merge_with_progress
 from virnucpro.pipeline.work_queue import BatchQueueManager
 # Import other pipeline components as they're refactored
 
@@ -33,6 +35,7 @@ def run_prediction(
     config: Config,
     toks_per_batch: int = None,
     translation_threads: int = None,
+    merge_threads: int = None,
     quiet: bool = False,
     gpus: str = None
 ) -> int:
@@ -55,6 +58,7 @@ def run_prediction(
         config: Configuration object
         toks_per_batch: Tokens per batch for ESM-2 processing (optional)
         translation_threads: Number of CPU threads for six-frame translation (optional, default: all cores)
+        merge_threads: Number of CPU threads for parallel embedding merge (optional, default: auto-detect)
         quiet: Disable dashboard and verbose logging (optional)
         gpus: GPU IDs to use (comma-separated, optional)
 
@@ -568,17 +572,35 @@ def run_prediction(
             from virnucpro.pipeline.features import merge_features
 
             merged_dir.mkdir(parents=True, exist_ok=True)
-            merged_feature_files = []
 
-            with progress.create_file_bar(len(nucleotide_feature_files), desc="Merging features") as pbar:
-                for nuc_feat, pro_feat in zip(nucleotide_feature_files, protein_feature_files):
-                    # Generate output filename: output_0_DNABERT_S.pt -> output_0_merged.pt
-                    base_name = nuc_feat.stem.replace('_DNABERT_S', '')
-                    merged_file = merged_dir / f"{base_name}_merged.pt"
+            # Determine if we should use parallel merge
+            num_merge_threads = merge_threads if merge_threads else os.cpu_count()
+            use_parallel = num_merge_threads > 1 and len(nucleotide_feature_files) > 1
 
-                    merge_features(nuc_feat, pro_feat, merged_file)
-                    merged_feature_files.append(merged_file)
-                    pbar.update(1)
+            if use_parallel:
+                logger.info(f"Using parallel merge with {num_merge_threads} workers")
+                merged_feature_files = parallel_merge_with_progress(
+                    nucleotide_feature_files,
+                    protein_feature_files,
+                    merged_dir,
+                    num_workers=num_merge_threads,
+                    show_progress=show_progress
+                )
+            else:
+                # Fallback to sequential merge for single file or single core
+                logger.info("Using sequential merge (single file or single core)")
+                merged_feature_files = []
+                with progress.create_file_bar(len(nucleotide_feature_files), desc="Merging features") as pbar:
+                    for nuc_feat, pro_feat in zip(nucleotide_feature_files, protein_feature_files):
+                        # Generate output filename: output_0_DNABERT_S.pt -> output_0_merged.pt
+                        base_name = nuc_feat.stem.replace('_DNABERT_S', '')
+                        merged_file = merged_dir / f"{base_name}_merged.pt"
+
+                        merge_features(nuc_feat, pro_feat, merged_file)
+                        merged_feature_files.append(merged_file)
+                        pbar.update(1)
+
+            logger.info(f"Merged {len(merged_feature_files)} feature files")
 
             checkpoint_manager.mark_stage_completed(
                 state,
