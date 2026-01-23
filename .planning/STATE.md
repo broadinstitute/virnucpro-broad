@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 3 of 6 (Checkpoint Robustness)
-Plan: 1 of 1
-Status: Plan complete
-Last activity: 2026-01-23 — Completed 03-01-PLAN.md (Checkpoint Validation & Atomic Write)
+Plan: 2 of 2
+Status: Phase complete
+Last activity: 2026-01-23 — Completed 03-02-PLAN.md (Checkpoint Version Management & Backward Compatibility)
 
-Progress: [███████████] 100% (21/21 plans)
+Progress: [███████████] 100% (22/22 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 21
+- Total plans completed: 22
 - Average duration: 3.6 minutes
-- Total execution time: 1.29 hours
+- Total execution time: 1.36 hours
 
 **By Phase:**
 
@@ -31,11 +31,11 @@ Progress: [███████████] 100% (21/21 plans)
 | 1.1   | 3     | 10.3m | 3.4m     |
 | 2     | 5     | 19.5m | 3.9m     |
 | 2.1   | 5     | 15.6m | 3.1m     |
-| 3     | 1     | 3.5m  | 3.5m     |
+| 3     | 2     | 7.2m  | 3.6m     |
 
 **Recent Trend:**
-- Last 5 plans: 02.1-02 (2.5m), 02.1-03 (4.2m), 02.1-04 (3.1m), 02.1-05 (2.1m), 03-01 (3.5m)
-- Trend: Phase 3 plan 1 complete; checkpoint validation and atomic write infrastructure established
+- Last 5 plans: 02.1-03 (4.2m), 02.1-04 (3.1m), 02.1-05 (2.1m), 03-01 (3.5m), 03-02 (3.7m)
+- Trend: Phase 3 complete; checkpoint robustness infrastructure established with version management and failed checkpoint tracking
 
 *Updated after each plan completion*
 
@@ -149,6 +149,13 @@ Recent decisions affecting current work:
 - path-replace-not-rename: Use Path.replace() instead of Path.rename() for atomic overwrite on all platforms
 - centralized-atomic-save: Consolidate atomic write pattern in checkpoint.py instead of duplicating across modules
 
+**From 03-02 execution:**
+- checkpoint-version-1.0: Version 1.0 for optimized checkpoints with atomic write and validation
+- version-0.x-pre-optimization: Treat checkpoints without version field as 0.x (backward compatible, read-only mode)
+- status-field-tracking: Track 'in_progress' vs 'complete' status in checkpoints for interrupted save detection
+- failed-checkpoint-logging: Log validation failures to failed_checkpoints.txt with pipe-delimited format {path}|{reason}|{timestamp}
+- checkpoint-exit-code-3: Exit code 3 for checkpoint-specific issues (0=success, 1=generic, 2=partial pipeline, 3=checkpoint)
+
 ### Pending Todos
 
 None yet.
@@ -177,8 +184,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-23 22:17 UTC
-Stopped at: Completed 03-01-PLAN.md execution (Checkpoint Validation & Atomic Write)
+Last session: 2026-01-23 22:26 UTC
+Stopped at: Completed 03-02-PLAN.md execution (Checkpoint Version Management & Backward Compatibility)
 Resume file: None
 
 ## Phase 2 Complete
@@ -238,8 +245,9 @@ All 5 plans executed successfully:
 
 **Checkpoint Robustness - Complete**
 
-Single plan executed successfully:
+All 2 plans executed successfully:
 - 03-01: Checkpoint validation utilities and atomic write pattern (3.5m)
+- 03-02: Checkpoint version management and backward compatibility (3.7m)
 
 **Key achievements:**
 - Multi-level checkpoint validation (file size → ZIP → load → keys)
@@ -247,12 +255,18 @@ Single plan executed successfully:
 - CheckpointError exception hierarchy for error categorization
 - Updated all 4 torch.save calls to use atomic write pattern
 - Validation distinguishes 'corrupted' vs 'incompatible' errors
-- Foundation for --skip-checkpoint-validation CLI flag
+- Version management system (v1.0) with backward compatibility (v0.x)
+- Failed checkpoint tracking with failed_checkpoints.txt logging
+- CLI control flags (--skip-checkpoint-validation, --force-resume)
+- validate-checkpoints subcommand for standalone integrity checks
 
-**Phase duration:** 3.5 minutes (1 plan)
-**Average per plan:** 3.5 minutes
+**Phase duration:** 7.2 minutes (2 plans)
+**Average per plan:** 3.6 minutes
 
 **Checkpoint corruption prevention:**
 Atomic write pattern prevents "8+ hours into resume attempt, discovers corrupted checkpoint" failure mode that research identified as critical for long-running jobs.
+
+**Version evolution:**
+Version management enables safe checkpoint format changes while maintaining backward compatibility with pre-optimization runs.
 
 Ready to proceed to Phase 4 (FlashAttention-2 Integration).
