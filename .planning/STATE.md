@@ -9,19 +9,19 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 
 ## Current Position
 
-Phase: 2.1 of 6 (Parallel Embedding Merge)
-Plan: 5 of 5 (Gap Closure Complete)
-Status: Phase complete and re-verified (7/7 must-haves)
-Last activity: 2026-01-23 — Phase 2.1 gap closure execution complete, all UAT issues resolved
+Phase: 3 of 6 (Checkpoint Robustness)
+Plan: 1 of 1
+Status: Plan complete
+Last activity: 2026-01-23 — Completed 03-01-PLAN.md (Checkpoint Validation & Atomic Write)
 
-Progress: [███████████] 100% (20/20 plans)
+Progress: [███████████] 100% (21/21 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 20
+- Total plans completed: 21
 - Average duration: 3.6 minutes
-- Total execution time: 1.23 hours
+- Total execution time: 1.29 hours
 
 **By Phase:**
 
@@ -31,10 +31,11 @@ Progress: [███████████] 100% (20/20 plans)
 | 1.1   | 3     | 10.3m | 3.4m     |
 | 2     | 5     | 19.5m | 3.9m     |
 | 2.1   | 5     | 15.6m | 3.1m     |
+| 3     | 1     | 3.5m  | 3.5m     |
 
 **Recent Trend:**
-- Last 5 plans: 02.1-01 (3.7m), 02.1-02 (2.5m), 02.1-03 (4.2m), 02.1-04 (3.1m), 02.1-05 (2.1m)
-- Trend: Phase 2.1 complete; gap closure execution resolved UAT issues with unified thread control and improved documentation
+- Last 5 plans: 02.1-02 (2.5m), 02.1-03 (4.2m), 02.1-04 (3.1m), 02.1-05 (2.1m), 03-01 (3.5m)
+- Trend: Phase 3 plan 1 complete; checkpoint validation and atomic write infrastructure established
 
 *Updated after each plan completion*
 
@@ -142,6 +143,12 @@ Recent decisions affecting current work:
 - workload-aware-merge-docs: Document that auto-split files from Phase 2 benefit from parallel merge (not input count based)
 - merge-strategy-logging: Log messages show file count explaining parallel vs sequential decision for transparency
 
+**From 03-01 execution:**
+- validate-after-save-optional: Validation after save is optional (default: True) to allow disabling for performance-critical paths
+- feature-checkpoints-unvalidated: Feature extraction checkpoints skip validation (validate_after_save=False) to avoid overhead on large files
+- path-replace-not-rename: Use Path.replace() instead of Path.rename() for atomic overwrite on all platforms
+- centralized-atomic-save: Consolidate atomic write pattern in checkpoint.py instead of duplicating across modules
+
 ### Pending Todos
 
 None yet.
@@ -162,16 +169,16 @@ None yet.
 
 **Phase 1 Critical:**
 - ✓ CUDA context initialization: Resolved via spawn context and deferred GPU initialization in workers (01-01)
+- ✓ Checkpoint corruption from partial writes: Resolved via atomic temp-then-rename pattern centralized in checkpoint.py (03-01)
 - Batch size variability can fragment memory even with available VRAM — implement sequence sorting and expandable segments from start
-- Checkpoint corruption from partial writes — use atomic temp-then-rename pattern
 
 **Phase 4 Research:**
 - FlashAttention-2 compatibility with fair-esm library (ESM-2) needs verification during planning — DNABERT-S integration is straightforward
 
 ## Session Continuity
 
-Last session: 2026-01-23 19:10 UTC
-Stopped at: Completed 02.1-04-PLAN.md execution (Unified Thread Control)
+Last session: 2026-01-23 22:17 UTC
+Stopped at: Completed 03-01-PLAN.md execution (Checkpoint Validation & Atomic Write)
 Resume file: None
 
 ## Phase 2 Complete
@@ -227,4 +234,25 @@ All 5 plans executed successfully:
 
 **Verification:** 7/7 must-haves verified (5 original + 2 UAT gap closure)
 
-Ready to proceed to next phase when defined.
+## Phase 3 Complete
+
+**Checkpoint Robustness - Complete**
+
+Single plan executed successfully:
+- 03-01: Checkpoint validation utilities and atomic write pattern (3.5m)
+
+**Key achievements:**
+- Multi-level checkpoint validation (file size → ZIP → load → keys)
+- Centralized atomic_save function for all PyTorch checkpoints
+- CheckpointError exception hierarchy for error categorization
+- Updated all 4 torch.save calls to use atomic write pattern
+- Validation distinguishes 'corrupted' vs 'incompatible' errors
+- Foundation for --skip-checkpoint-validation CLI flag
+
+**Phase duration:** 3.5 minutes (1 plan)
+**Average per plan:** 3.5 minutes
+
+**Checkpoint corruption prevention:**
+Atomic write pattern prevents "8+ hours into resume attempt, discovers corrupted checkpoint" failure mode that research identified as critical for long-running jobs.
+
+Ready to proceed to Phase 4 (FlashAttention-2 Integration).
