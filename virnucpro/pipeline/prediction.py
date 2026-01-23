@@ -221,7 +221,7 @@ def run_prediction(
 
             use_parallel = False
             if parallel:
-                from virnucpro.pipeline.parallel import detect_cuda_devices, assign_files_round_robin, process_dnabert_files_worker
+                from virnucpro.pipeline.parallel import assign_files_round_robin, process_dnabert_files_worker
                 import multiprocessing
 
                 available_gpus = detect_cuda_devices()
