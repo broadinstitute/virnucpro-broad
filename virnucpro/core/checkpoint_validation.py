@@ -8,10 +8,15 @@ import zipfile
 import logging
 from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
+from datetime import datetime
 
 import torch
 
 logger = logging.getLogger('virnucpro.checkpoint_validation')
+
+# Checkpoint exit code for pipeline failures
+# 0: success, 1: generic failure, 2: partial pipeline, 3: checkpoint issue
+CHECKPOINT_EXIT_CODE = 3
 
 
 class CheckpointError(Exception):
@@ -30,11 +35,95 @@ class CheckpointError(Exception):
         super().__init__(f"{error_type}: {message}")
 
 
+def log_failed_checkpoint(
+    checkpoint_path: Path,
+    reason: str,
+    checkpoint_dir: Optional[Path] = None,
+    timestamp: Optional[str] = None
+) -> None:
+    """Log failed checkpoint to tracking file for diagnostics.
+
+    Appends failed checkpoint information to failed_checkpoints.txt
+    in the checkpoint directory for resume operation logging.
+
+    Args:
+        checkpoint_path: Path to checkpoint that failed validation
+        reason: Error message or reason for failure
+        checkpoint_dir: Directory containing checkpoints (default: checkpoint_path.parent)
+        timestamp: ISO timestamp (default: current UTC time)
+
+    Example:
+        >>> log_failed_checkpoint(
+        ...     Path("checkpoints/model.pt"),
+        ...     "corrupted: file is 0 bytes"
+        ... )
+    """
+    if checkpoint_dir is None:
+        checkpoint_dir = checkpoint_path.parent
+
+    failed_log = checkpoint_dir / "failed_checkpoints.txt"
+
+    if timestamp is None:
+        timestamp = datetime.utcnow().isoformat()
+
+    # Format: {checkpoint_path}|{reason}|{timestamp}
+    log_entry = f"{checkpoint_path}|{reason}|{timestamp}\n"
+
+    try:
+        with open(failed_log, 'a') as f:
+            f.write(log_entry)
+        logger.debug(f"Logged failed checkpoint: {checkpoint_path.name}")
+    except Exception as e:
+        logger.warning(f"Failed to log checkpoint failure: {e}")
+
+
+def load_failed_checkpoints(
+    checkpoint_dir: Path
+) -> List[Tuple[str, str, str]]:
+    """Load list of failed checkpoints from tracking file.
+
+    Reads failed_checkpoints.txt and returns list of failures
+    for resume operation logging and diagnostics.
+
+    Args:
+        checkpoint_dir: Directory containing checkpoints
+
+    Returns:
+        List of (checkpoint_path, reason, timestamp) tuples
+
+    Example:
+        >>> failed = load_failed_checkpoints(Path("checkpoints"))
+        >>> for path, reason, timestamp in failed:
+        ...     print(f"{path}: {reason}")
+    """
+    failed_log = checkpoint_dir / "failed_checkpoints.txt"
+
+    if not failed_log.exists():
+        return []
+
+    failed_items = []
+    try:
+        with open(failed_log, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    parts = line.split('|', 2)
+                    if len(parts) == 3:
+                        failed_items.append((parts[0], parts[1], parts[2]))
+                    else:
+                        logger.warning(f"Malformed failed checkpoint entry: {line}")
+    except Exception as e:
+        logger.warning(f"Failed to load failed checkpoints: {e}")
+
+    return failed_items
+
+
 def validate_checkpoint(
     checkpoint_path: Path,
     required_keys: Optional[List[str]] = None,
     skip_load: bool = False,
-    logger_instance: Optional[logging.Logger] = None
+    logger_instance: Optional[logging.Logger] = None,
+    log_failures: bool = False
 ) -> Tuple[bool, str]:
     """Validate PyTorch checkpoint file integrity with multi-level checks.
 
@@ -49,6 +138,7 @@ def validate_checkpoint(
         required_keys: List of required keys in checkpoint dict (default: ['data'])
         skip_load: Skip torch.load validation (faster, less thorough)
         logger_instance: Logger instance for diagnostic output
+        log_failures: Log validation failures to failed_checkpoints.txt (default: False)
 
     Returns:
         Tuple of (is_valid, error_message)
@@ -56,7 +146,7 @@ def validate_checkpoint(
         - error_message: Empty string if valid, detailed error otherwise
 
     Example:
-        >>> is_valid, error = validate_checkpoint(Path("model.pt"))
+        >>> is_valid, error = validate_checkpoint(Path("model.pt"), log_failures=True)
         >>> if not is_valid:
         ...     print(f"Validation failed: {error}")
     """
@@ -69,14 +159,23 @@ def validate_checkpoint(
     try:
         file_size = checkpoint_path.stat().st_size
     except FileNotFoundError:
-        return False, "corrupted: file does not exist"
+        error_msg = "corrupted: file does not exist"
+        if log_failures:
+            log_failed_checkpoint(checkpoint_path, error_msg)
+        return False, error_msg
     except Exception as e:
-        return False, f"corrupted: cannot access file - {str(e)}"
+        error_msg = f"corrupted: cannot access file - {str(e)}"
+        if log_failures:
+            log_failed_checkpoint(checkpoint_path, error_msg)
+        return False, error_msg
 
     if file_size == 0:
         log.error(f"Checkpoint validation failed: {checkpoint_path}")
         log.error(f"  Reason: File is 0 bytes")
-        return False, "corrupted: file is 0 bytes"
+        error_msg = "corrupted: file is 0 bytes"
+        if log_failures:
+            log_failed_checkpoint(checkpoint_path, error_msg)
+        return False, error_msg
 
     log.debug(f"Checkpoint size: {file_size:,} bytes")
 
@@ -86,7 +185,10 @@ def validate_checkpoint(
         log.error(f"Checkpoint validation failed: {checkpoint_path}")
         log.error(f"  Reason: Not a valid ZIP archive")
         log.error(f"  File size: {file_size} bytes")
-        return False, "corrupted: not a valid ZIP archive"
+        error_msg = "corrupted: not a valid ZIP archive"
+        if log_failures:
+            log_failed_checkpoint(checkpoint_path, error_msg)
+        return False, error_msg
 
     log.debug(f"Checkpoint is valid ZIP archive")
 
@@ -98,7 +200,10 @@ def validate_checkpoint(
             log.error(f"Checkpoint load failed: {checkpoint_path}")
             log.error(f"  Error: {str(e)}")
             log.error(f"  File size: {file_size} bytes")
-            return False, f"corrupted: torch.load failed - {str(e)}"
+            error_msg = f"corrupted: torch.load failed - {str(e)}"
+            if log_failures:
+                log_failed_checkpoint(checkpoint_path, error_msg)
+            return False, error_msg
 
         log.debug(f"Checkpoint loaded successfully")
 
@@ -106,14 +211,20 @@ def validate_checkpoint(
         if not isinstance(checkpoint, dict):
             log.error(f"Checkpoint validation failed: {checkpoint_path}")
             log.error(f"  Reason: Checkpoint is not a dict (type: {type(checkpoint).__name__})")
-            return False, f"incompatible: checkpoint is not a dict (got {type(checkpoint).__name__})"
+            error_msg = f"incompatible: checkpoint is not a dict (got {type(checkpoint).__name__})"
+            if log_failures:
+                log_failed_checkpoint(checkpoint_path, error_msg)
+            return False, error_msg
 
         missing_keys = set(required_keys) - set(checkpoint.keys())
         if missing_keys:
             log.error(f"Checkpoint validation failed: {checkpoint_path}")
             log.error(f"  Reason: Missing required keys: {missing_keys}")
             log.error(f"  Keys found: {list(checkpoint.keys())}")
-            return False, f"incompatible: missing required keys {missing_keys}"
+            error_msg = f"incompatible: missing required keys {missing_keys}"
+            if log_failures:
+                log_failed_checkpoint(checkpoint_path, error_msg)
+            return False, error_msg
 
         # Log tensor information for diagnostics
         for key in required_keys:
