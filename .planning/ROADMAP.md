@@ -15,6 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: ESM-2 Multi-GPU Foundation** - Parallelize ESM-2 across GPUs with file-level distribution
 - [x] **Phase 1.1: Parallel Translation (INSERTED)** - Parallelize six-frame translation with CPU multiprocessing
 - [x] **Phase 2: DNABERT-S Optimization** - Optimize DNABERT-S batching and queuing to match ESM-2
+- [ ] **Phase 2.1: Parallel Embedding Merge (INSERTED)** - Parallelize embedding merge with multi-processing/multi-threading
 - [ ] **Phase 3: Checkpoint Robustness** - Atomic writes, validation, backward compatibility
 - [ ] **Phase 4: Memory & Attention Optimization** - FlashAttention, prefetching, memory management
 - [ ] **Phase 5: Load Balancing & Monitoring** - Efficient work distribution and GPU utilization visibility
@@ -71,17 +72,35 @@ Plans:
   2. Batch sizes for both DNABERT-S and ESM-2 are optimized via profiling (2-4x increase from baseline)
   3. DNABERT-S and ESM-2 use the same worker pool pattern for consistency
   4. Unit tests verify DNABERT-S optimized batching produces identical output to vanilla implementation
-**Plans**: 4 plans
+**Plans**: 5 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Create BaseEmbeddingWorker abstraction and DNABERT-S parallel worker
-- [ ] 02-02-PLAN.md — Refactor ESM-2 to use base class and test DNABERT-S worker
-- [ ] 02-03-PLAN.md — Integrate into pipeline with CLI support and profiling tools
-- [ ] 02-04-PLAN.md — Integration tests and optimization documentation
+- [x] 02-01-PLAN.md — Create BaseEmbeddingWorker abstraction and DNABERT-S parallel worker
+- [x] 02-02-PLAN.md — Add BF16 optimization and performance validation
+- [x] 02-03-PLAN.md — Integrate into pipeline with CLI support and profiling tools
+- [x] 02-04-PLAN.md — Add batch size profiling utilities
+- [x] 02-05-PLAN.md — Integration tests and optimization documentation
+
+### Phase 2.1: Parallel Embedding Merge (INSERTED)
+**Goal**: Parallelize embedding merge step using CPU multiprocessing to reduce merge time from sequential bottleneck to parallel throughput.
+**Depends on**: Phase 2
+**Requirements**: None (uses standard library multiprocessing)
+**Success Criteria** (what must be TRUE):
+  1. Multiple file pairs merge simultaneously using all CPU cores
+  2. Merge throughput scales linearly with CPU core count
+  3. Sequential fallback works for single-core systems
+  4. Progress reporting shows file merge status in real-time
+  5. Merged output is identical to sequential implementation
+**Plans**: 3 plans
+
+Plans:
+- [ ] 02.1-01-PLAN.md — Create parallel merge worker functions and orchestration
+- [ ] 02.1-02-PLAN.md — Integrate into pipeline with CLI support
+- [ ] 02.1-03-PLAN.md — Add integration tests and performance validation
 
 ### Phase 3: Checkpoint Robustness
 **Goal**: Checkpoint system prevents corruption, validates integrity, supports resume from pre-optimization runs, and maintains backward compatibility.
-**Depends on**: Phase 2
+**Depends on**: Phase 2.1
 **Requirements**: INFRA-03, INFRA-04, INFRA-05, COMPAT-02, LOAD-02, TEST-04
 **Success Criteria** (what must be TRUE):
   1. All checkpoint writes use atomic temp-then-rename pattern (no partial files)
