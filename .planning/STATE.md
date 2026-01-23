@@ -9,19 +9,19 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 
 ## Current Position
 
-Phase: 2 of 6 (DNABERT-S Optimization)
-Plan: 5 of 5 (Integration Tests and Documentation)
-Status: Phase complete and verified
-Last activity: 2026-01-23 — Phase 2 verified (4/4 must-haves) and approved by user
+Phase: 2.1 of 6 (Parallel Embedding Merge)
+Plan: 1 of 2 (Parallel Merge Worker Functions)
+Status: In progress
+Last activity: 2026-01-23 — Completed 02.1-01-PLAN.md
 
-Progress: [██████████] 100% (15/15 plans)
+Progress: [██████████░] 94% (16/17 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 15
-- Average duration: 4.1 minutes
-- Total execution time: 1.02 hours
+- Total plans completed: 16
+- Average duration: 4.0 minutes
+- Total execution time: 1.08 hours
 
 **By Phase:**
 
@@ -30,10 +30,11 @@ Progress: [██████████] 100% (15/15 plans)
 | 1     | 7     | 33.6m | 4.8m     |
 | 1.1   | 3     | 10.3m | 3.4m     |
 | 2     | 5     | 19.5m | 3.9m     |
+| 2.1   | 1     | 3.7m  | 3.7m     |
 
 **Recent Trend:**
-- Last 5 plans: 02-01 (2.9m), 02-02 (3.3m), 02-03 (2.7m), 02-04 (2.6m), 02-05 (8.0m)
-- Trend: Phase 2 complete; final plan included checkpoint and bug fixes
+- Last 5 plans: 02-02 (3.3m), 02-03 (2.7m), 02-04 (2.6m), 02-05 (8.0m), 02.1-01 (3.7m)
+- Trend: Phase 2.1 started; CPU parallelization for merge operations
 
 *Updated after each plan completion*
 
@@ -114,6 +115,12 @@ Recent decisions affecting current work:
 - batch-size-bf16-3072: DNABERT-S batch size is 3072 tokens with BF16 on Ampere+ GPUs (not 2048)
 - no-multi-file-requirement: Parallel processing works with single large file via auto-splitting (no minimum file count)
 
+**From 02.1-01 execution:**
+- spawn-context-merge: Use spawn context for merge workers matching Phase 1.1 pattern for consistency and Python 3.14 compatibility
+- chunksize-dynamic: Calculate chunksize dynamically (max(1, num_files // (workers * 4))) to balance overhead vs parallelism
+- checkpoint-and-atomic: Add checkpoint skip and atomic write to merge_features() for resume capability and corruption prevention
+- batch-size-one: Default batch_size=1 for merge (each file pair is substantial work, batching available for 100+ files)
+
 ### Pending Todos
 
 None yet.
@@ -124,6 +131,11 @@ None yet.
   - Reason: Six-frame translation taking >10 minutes on 22M sequences is a bottleneck
   - Scope: Add CPU multiprocessing to translation step, add --threads CLI parameter
   - Impact: Reduces non-GPU bottleneck before proceeding to Phase 2 DNABERT optimization
+
+- **Phase 2.1 inserted after Phase 2** (2026-01-23): Parallel Embedding Merge (URGENT)
+  - Reason: Embedding merge step is a bottleneck after GPU-optimized extraction
+  - Scope: Add multi-processing/multi-threading to embedding merge operations
+  - Impact: Eliminates post-extraction bottleneck before checkpoint robustness work
 
 ### Blockers/Concerns
 
@@ -137,8 +149,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-23 16:50 UTC
-Stopped at: Completed 02-05-PLAN.md execution (Integration Tests and Documentation) - Phase 2 complete
+Last session: 2026-01-23 17:42 UTC
+Stopped at: Completed 02.1-01-PLAN.md execution (Parallel Merge Worker Functions)
 Resume file: None
 
 ## Phase 2 Complete
