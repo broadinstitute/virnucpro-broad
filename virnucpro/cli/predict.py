@@ -7,6 +7,7 @@ import logging
 
 from virnucpro.core.device import validate_and_get_device
 from virnucpro.core.config import Config
+from virnucpro.pipeline.parallel import detect_cuda_devices
 
 logger = logging.getLogger('virnucpro.cli.predict')
 
@@ -110,6 +111,15 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
         if ',' in gpus and not parallel:
             parallel = True
             logger.info("  Parallel processing: auto-enabled for multiple GPUs")
+    else:
+        # Auto-detect available GPUs when --gpus not specified
+        cuda_devices = detect_cuda_devices()
+        if len(cuda_devices) > 1:
+            # Auto-enable parallel mode for multi-GPU systems
+            gpus = ','.join(str(d) for d in cuda_devices)
+            parallel = True
+            logger.info(f"Detected {len(cuda_devices)} GPUs, enabling parallel processing")
+            logger.info(f"Using GPUs: {gpus}")
 
     # Validate and prepare parameters
     try:
