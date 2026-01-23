@@ -94,68 +94,73 @@ class TestMultiGPUIntegration(unittest.TestCase):
             "Single and multi-GPU runs should have same exit code"
         )
 
-        # Compare merged feature outputs
-        single_features_path = output_single / "merged" / "merged_features.pt"
-        multi_features_path = output_multi / "merged" / "merged_features.pt"
+        # Compare prediction results
+        # Pipeline creates: {output_dir}/{input_stem}_merged/ with prediction_results.txt
+        merged_dir_single = output_single / "test_sequences_small_merged"
+        merged_dir_multi = output_multi / "test_sequences_small_merged"
 
-        # Check if files exist
-        if not single_features_path.exists():
-            # Try alternative location
-            single_features_path = output_single / "merged_features.pt"
-        if not multi_features_path.exists():
-            multi_features_path = output_multi / "merged_features.pt"
-
+        # Check if merged directories exist
         self.assertTrue(
-            single_features_path.exists(),
-            f"Single GPU output not found at {single_features_path}"
+            merged_dir_single.exists(),
+            f"Single GPU merged directory not found at {merged_dir_single}"
         )
         self.assertTrue(
-            multi_features_path.exists(),
-            f"Multi GPU output not found at {multi_features_path}"
+            merged_dir_multi.exists(),
+            f"Multi GPU merged directory not found at {merged_dir_multi}"
         )
 
-        # Load and compare features
-        single_features = torch.load(single_features_path)
-        multi_features = torch.load(multi_features_path)
+        # Check for prediction results files
+        single_results = merged_dir_single / "prediction_results.txt"
+        multi_results = merged_dir_multi / "prediction_results.txt"
 
-        # Check equivalence (within floating point tolerance for BF16)
-        # Features might be in different keys depending on format
-        if isinstance(single_features, dict) and 'data' in single_features:
-            single_data = single_features['data']
-            multi_data = multi_features['data']
-        elif isinstance(single_features, torch.Tensor):
-            single_data = single_features
-            multi_data = multi_features
-        else:
-            # Try to find tensor data in dict
-            single_data = next(v for v in single_features.values() if isinstance(v, torch.Tensor))
-            multi_data = next(v for v in multi_features.values() if isinstance(v, torch.Tensor))
+        self.assertTrue(
+            single_results.exists(),
+            f"Single GPU prediction results not found at {single_results}"
+        )
+        self.assertTrue(
+            multi_results.exists(),
+            f"Multi GPU prediction results not found at {multi_results}"
+        )
 
-        print(f"\nSingle GPU tensor shape: {single_data.shape}")
-        print(f"Multi GPU tensor shape: {multi_data.shape}")
+        # Load and compare prediction results
+        import pandas as pd
+        single_df = pd.read_csv(single_results, sep='\t')
+        multi_df = pd.read_csv(multi_results, sep='\t')
 
-        # Verify shapes match
+        print(f"\nSingle GPU predictions: {len(single_df)} sequences")
+        print(f"Multi GPU predictions: {len(multi_df)} sequences")
+
+        # Verify same number of predictions
         self.assertEqual(
-            single_data.shape,
-            multi_data.shape,
-            "Single and multi-GPU outputs should have same shape"
+            len(single_df),
+            len(multi_df),
+            "Single and multi-GPU should predict same number of sequences"
         )
 
-        # Verify values match within tolerance
-        try:
-            torch.testing.assert_close(
-                single_data,
-                multi_data,
-                rtol=1e-4,  # Slightly looser for BF16
-                atol=1e-4,
-                msg="Multi-GPU output should match single-GPU within tolerance"
-            )
-            print("✓ Outputs match within tolerance")
-        except AssertionError as e:
-            # Calculate max difference for debugging
-            max_diff = torch.max(torch.abs(single_data - multi_data)).item()
-            print(f"✗ Max difference: {max_diff}")
-            raise
+        # Verify same sequence IDs
+        self.assertTrue(
+            (single_df['Sequence_ID'] == multi_df['Sequence_ID']).all(),
+            "Single and multi-GPU should process same sequences in same order"
+        )
+
+        # Verify predictions match
+        self.assertTrue(
+            (single_df['Prediction'] == multi_df['Prediction']).all(),
+            "Single and multi-GPU should make same predictions"
+        )
+
+        # Verify scores match within tolerance
+        import numpy as np
+        score1_match = np.allclose(single_df['score1'], multi_df['score1'], rtol=1e-4, atol=1e-4)
+        score2_match = np.allclose(single_df['score2'], multi_df['score2'], rtol=1e-4, atol=1e-4)
+
+        if not score1_match or not score2_match:
+            max_diff_s1 = np.max(np.abs(single_df['score1'] - multi_df['score1']))
+            max_diff_s2 = np.max(np.abs(single_df['score2'] - multi_df['score2']))
+            print(f"✗ Score differences - score1: {max_diff_s1:.6f}, score2: {max_diff_s2:.6f}")
+            self.fail("Prediction scores differ between single and multi-GPU")
+
+        print("✓ Predictions and scores match within tolerance")
 
         # Log performance
         speedup = time_single / time_multi if time_multi > 0 else 0
