@@ -127,6 +127,11 @@ class TestMultiGPUIntegration(unittest.TestCase):
         single_df = pd.read_csv(single_results, sep='\t')
         multi_df = pd.read_csv(multi_results, sep='\t')
 
+        # Convert score columns to numeric
+        for col in ['score1', 'score2']:
+            single_df[col] = pd.to_numeric(single_df[col])
+            multi_df[col] = pd.to_numeric(multi_df[col])
+
         print(f"\nSingle GPU predictions: {len(single_df)} sequences")
         print(f"Multi GPU predictions: {len(multi_df)} sequences")
 
