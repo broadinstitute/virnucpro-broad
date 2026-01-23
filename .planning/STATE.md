@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 2.1 of 6 (Parallel Embedding Merge)
-Plan: 4 of 4 (Gap Closure - Unified Thread Control)
-Status: Phase complete with all UAT gaps resolved
-Last activity: 2026-01-23 — Completed 02.1-04 gap closure (unified thread parameter)
+Plan: 5 of 5 (Gap Closure Complete)
+Status: Phase complete and re-verified (7/7 must-haves)
+Last activity: 2026-01-23 — Phase 2.1 gap closure execution complete, all UAT issues resolved
 
-Progress: [███████████] 100% (19/19 plans)
+Progress: [███████████] 100% (20/20 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 19
-- Average duration: 3.8 minutes
-- Total execution time: 1.21 hours
+- Total plans completed: 20
+- Average duration: 3.6 minutes
+- Total execution time: 1.23 hours
 
 **By Phase:**
 
@@ -30,11 +30,11 @@ Progress: [███████████] 100% (19/19 plans)
 | 1     | 7     | 33.6m | 4.8m     |
 | 1.1   | 3     | 10.3m | 3.4m     |
 | 2     | 5     | 19.5m | 3.9m     |
-| 2.1   | 4     | 13.5m | 3.4m     |
+| 2.1   | 5     | 15.6m | 3.1m     |
 
 **Recent Trend:**
-- Last 5 plans: 02-05 (8.0m), 02.1-01 (3.7m), 02.1-02 (2.5m), 02.1-03 (4.2m), 02.1-04 (3.1m)
-- Trend: Phase 2.1 complete with UAT gap closure; thread parameters unified for simplified UX
+- Last 5 plans: 02.1-01 (3.7m), 02.1-02 (2.5m), 02.1-03 (4.2m), 02.1-04 (3.1m), 02.1-05 (2.1m)
+- Trend: Phase 2.1 complete; gap closure execution resolved UAT issues with unified thread control and improved documentation
 
 *Updated after each plan completion*
 
@@ -138,6 +138,10 @@ Recent decisions affecting current work:
 - unified-threads-parameter: Consolidated --threads and --merge-threads into single --threads CLI parameter for simpler UX
 - alias-for-backward-compatibility: --merge-threads remains as alias to --threads for existing user scripts
 
+**From 02.1-05 execution:**
+- workload-aware-merge-docs: Document that auto-split files from Phase 2 benefit from parallel merge (not input count based)
+- merge-strategy-logging: Log messages show file count explaining parallel vs sequential decision for transparency
+
 ### Pending Todos
 
 None yet.
@@ -196,11 +200,12 @@ All 5 plans executed successfully:
 
 **Parallel Embedding Merge - Complete with UAT Gap Closure**
 
-All 4 plans executed successfully:
+All 5 plans executed successfully:
 - 02.1-01: Parallel merge worker functions (3.7m)
 - 02.1-02: Pipeline integration and CLI control (2.5m)
 - 02.1-03: Integration tests and error handling (4.2m)
 - 02.1-04: CLI threads parameter unification (3.1m) [GAP CLOSURE]
+- 02.1-05: Workload-aware merge documentation (2.1m) [GAP CLOSURE]
 
 **Key achievements:**
 - CPU multiprocessing for embedding merge with 6-7x expected speedup
@@ -211,11 +216,15 @@ All 4 plans executed successfully:
 - Atomic writes for corruption prevention
 - Enhanced error handling with partial failure support
 - Comprehensive integration tests validating correctness and performance
+- Workload-aware merge strategy documentation and improved logging
 
 **UAT gaps resolved:**
 - CLI parameter unification (--threads controls both translation and merge with --merge-threads as backward-compatible alias)
+- Merge strategy clarity (documentation and logging explain auto-split files benefit from parallel merge)
 
-**Phase duration:** 13.5 minutes (4 plans)
-**Average per plan:** 3.4 minutes
+**Phase duration:** 15.6 minutes (5 plans)
+**Average per plan:** 3.1 minutes
+
+**Verification:** 7/7 must-haves verified (5 original + 2 UAT gap closure)
 
 Ready to proceed to next phase when defined.

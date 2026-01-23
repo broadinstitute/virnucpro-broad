@@ -97,8 +97,8 @@ Plans:
 - [x] 02.1-01-PLAN.md — Create parallel merge worker functions and orchestration
 - [x] 02.1-02-PLAN.md — Integrate into pipeline with CLI support
 - [x] 02.1-03-PLAN.md — Add integration tests and performance validation
-- [ ] 02.1-04-PLAN.md — Unify thread control parameters (gap closure)
-- [ ] 02.1-05-PLAN.md — Fix workload-aware merge strategy (gap closure)
+- [x] 02.1-04-PLAN.md — Unify thread control parameters (gap closure)
+- [x] 02.1-05-PLAN.md — Fix workload-aware merge strategy (gap closure)
 
 ### Phase 3: Checkpoint Robustness
 **Goal**: Checkpoint system prevents corruption, validates integrity, supports resume from pre-optimization runs, and maintains backward compatibility.
