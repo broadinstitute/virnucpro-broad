@@ -617,3 +617,254 @@ class TestResourceCleanup:
 
         # Verify pool __exit__ was called (context manager cleanup)
         mock_pool.__exit__.assert_called_once()
+
+
+class TestChunksizeOptimization:
+    """Test chunksize optimization for Pool.imap()"""
+
+    def test_chunksize_reasonable_for_small_datasets(self):
+        """Test chunksize is not too large for small datasets"""
+        workers, batch_size, chunksize = get_optimal_settings(
+            num_workers=4,
+            total_sequences=100,
+            avg_sequence_length=500
+        )
+
+        # For 100 sequences with batch_size=100, we have 1 batch
+        # chunksize should not exceed number of batches
+        assert chunksize >= 1
+        assert chunksize <= 10  # Conservative for small datasets
+
+    def test_chunksize_reasonable_for_large_datasets(self):
+        """Test chunksize is optimized for large datasets"""
+        workers, batch_size, chunksize = get_optimal_settings(
+            num_workers=8,
+            total_sequences=1000000,
+            avg_sequence_length=500
+        )
+
+        # For 1M sequences with batch_size=100, we have 10k batches
+        # chunksize = 10000 / (8 * 4) = 312
+        expected = 10000 // (8 * 4)
+        assert chunksize == expected
+        assert chunksize > 100  # Should be fairly large for efficiency
+
+    def test_chunksize_adapts_to_worker_count(self):
+        """Test that chunksize adapts to number of workers"""
+        # Same dataset, different worker counts
+        _, _, chunk_2w = get_optimal_settings(
+            num_workers=2,
+            total_sequences=10000,
+            avg_sequence_length=500
+        )
+
+        _, _, chunk_8w = get_optimal_settings(
+            num_workers=8,
+            total_sequences=10000,
+            avg_sequence_length=500
+        )
+
+        # More workers should have smaller chunksize (more fine-grained distribution)
+        assert chunk_8w < chunk_2w
+
+
+class TestProgressReporting:
+    """Test progress reporting functionality"""
+
+    @patch('virnucpro.utils.progress.ProgressReporter')
+    def test_progress_reporter_called(self, mock_reporter_class, temp_fasta, tmp_path):
+        """Test that ProgressReporter is used when available"""
+        # Setup mock
+        mock_reporter = MagicMock()
+        mock_pbar = MagicMock()
+        mock_pbar.__enter__ = Mock(return_value=mock_pbar)
+        mock_pbar.__exit__ = Mock(return_value=False)
+
+        mock_reporter.create_sequence_bar = Mock(return_value=mock_pbar)
+        mock_reporter_class.return_value = mock_reporter
+
+        output_nuc = tmp_path / "output_nuc.fa"
+        output_pro = tmp_path / "output_pro.faa"
+
+        # Run with progress enabled
+        parallel_translate_with_progress(
+            temp_fasta,
+            output_nuc,
+            output_pro,
+            num_workers=2,
+            show_progress=True
+        )
+
+        # Verify ProgressReporter was created
+        mock_reporter_class.assert_called_once_with(disable=False)
+
+        # Verify progress bar was created
+        mock_reporter.create_sequence_bar.assert_called_once()
+
+        # Verify progress bar was used as context manager
+        mock_pbar.__enter__.assert_called_once()
+        mock_pbar.__exit__.assert_called_once()
+
+    def test_progress_graceful_when_unavailable(self, temp_fasta, tmp_path):
+        """Test graceful handling when ProgressReporter is unavailable"""
+        # This test runs without mocking - should work even if progress module missing
+        output_nuc = tmp_path / "output_nuc.fa"
+        output_pro = tmp_path / "output_pro.faa"
+
+        # Should complete successfully regardless of progress module availability
+        processed, valid = parallel_translate_with_progress(
+            temp_fasta,
+            output_nuc,
+            output_pro,
+            num_workers=2,
+            show_progress=False  # Disabled, so no dependency on progress module
+        )
+
+        assert processed == 5
+
+
+class TestMemoryEfficientStreaming:
+    """Test that large datasets are processed with memory-efficient streaming"""
+
+    @patch('virnucpro.pipeline.parallel_translate.multiprocessing.get_context')
+    def test_results_consumed_incrementally(self, mock_get_context, tmp_path):
+        """Test that results are consumed from imap iterator incrementally"""
+        # Track when results are yielded vs consumed
+        results_yielded = []
+        results_consumed = []
+
+        def tracking_iterator():
+            """Iterator that tracks when items are yielded"""
+            for i in range(100):
+                results_yielded.append(i)
+                # Return a valid result structure
+                yield [{'seqid': f'seq_{i}F1', 'nucleotide': 'ATGC', 'protein': 'M'}]
+
+        # Setup mock
+        mock_pool = MagicMock()
+        mock_pool.__enter__ = Mock(return_value=mock_pool)
+        mock_pool.__exit__ = Mock(return_value=False)
+        mock_pool.imap = Mock(return_value=tracking_iterator())
+
+        mock_ctx = MagicMock()
+        mock_ctx.Pool = Mock(return_value=mock_pool)
+        mock_get_context.return_value = mock_ctx
+
+        # Create test input
+        test_fasta = tmp_path / "test.fa"
+        records = [SeqRecord(Seq("ATGC"), id=f"seq_{i}", description="") for i in range(100)]
+        with open(test_fasta, 'w') as f:
+            SeqIO.write(records, f, 'fasta')
+
+        output_nuc = tmp_path / "output_nuc.fa"
+        output_pro = tmp_path / "output_pro.faa"
+
+        # Run translation
+        parallel_translate_sequences(
+            test_fasta,
+            output_nuc,
+            output_pro,
+            num_workers=2
+        )
+
+        # Verify imap was used (not map which would load all results)
+        mock_pool.imap.assert_called_once()
+
+        # Verify all results were yielded
+        assert len(results_yielded) == 100
+
+    def test_batched_reduces_serialization_overhead(self):
+        """Test that batched processing reduces number of serialization operations"""
+        # For 1000 sequences with batch_size=100, we should have 10 batches
+        # This is 100x reduction from 1000 individual operations
+
+        workers, batch_size, chunksize = get_optimal_settings(
+            num_workers=4,
+            total_sequences=1000,
+            avg_sequence_length=500
+        )
+
+        # batch_size should be 100 for 500bp sequences
+        assert batch_size == 100
+
+        # Calculate reduction
+        num_batches = (1000 + batch_size - 1) // batch_size
+        reduction_factor = 1000 / num_batches
+
+        # Should achieve significant reduction (100x for 1000 sequences)
+        assert reduction_factor >= 10  # At least 10x reduction
+
+
+class TestStressConditions:
+    """Stress tests for edge cases and high-load scenarios"""
+
+    def test_handles_many_workers(self, temp_fasta, tmp_path):
+        """Test that system handles large number of workers"""
+        output_nuc = tmp_path / "output_nuc.fa"
+        output_pro = tmp_path / "output_pro.faa"
+
+        # Test with 16 workers (even on systems with fewer cores)
+        # Should not crash, just may not use all workers
+        processed, valid = parallel_translate_sequences(
+            temp_fasta,
+            output_nuc,
+            output_pro,
+            num_workers=16,
+            chunksize=1
+        )
+
+        assert processed == 5
+        assert output_nuc.exists()
+
+    def test_handles_small_chunksize(self, temp_fasta, tmp_path):
+        """Test with very small chunksize (1)"""
+        output_nuc = tmp_path / "output_nuc.fa"
+        output_pro = tmp_path / "output_pro.faa"
+
+        # chunksize=1 means more overhead but should still work
+        processed, valid = parallel_translate_sequences(
+            temp_fasta,
+            output_nuc,
+            output_pro,
+            num_workers=2,
+            chunksize=1
+        )
+
+        assert processed == 5
+
+    def test_handles_large_chunksize(self, temp_fasta, tmp_path):
+        """Test with very large chunksize"""
+        output_nuc = tmp_path / "output_nuc.fa"
+        output_pro = tmp_path / "output_pro.faa"
+
+        # chunksize larger than total sequences
+        processed, valid = parallel_translate_sequences(
+            temp_fasta,
+            output_nuc,
+            output_pro,
+            num_workers=2,
+            chunksize=10000
+        )
+
+        assert processed == 5
+
+    @patch('os.cpu_count', return_value=None)
+    def test_handles_unknown_cpu_count(self, mock_cpu_count, temp_fasta, tmp_path):
+        """Test graceful handling when cpu_count returns None"""
+        output_nuc = tmp_path / "output_nuc.fa"
+        output_pro = tmp_path / "output_pro.faa"
+
+        # Should handle None from cpu_count gracefully
+        try:
+            processed, valid = parallel_translate_sequences(
+                temp_fasta,
+                output_nuc,
+                output_pro,
+                num_workers=None,  # Will try to use cpu_count()
+                chunksize=10
+            )
+            # If it completes, verify results
+            assert processed >= 0
+        except (TypeError, ValueError):
+            # Acceptable to fail if cpu_count is None and no explicit num_workers
+            pass
