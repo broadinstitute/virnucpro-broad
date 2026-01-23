@@ -579,13 +579,15 @@ def run_prediction(
 
             if use_parallel:
                 logger.info(f"Using parallel merge with {num_merge_threads} workers")
-                merged_feature_files = parallel_merge_with_progress(
+                merged_feature_files, failed_pairs = parallel_merge_with_progress(
                     nucleotide_feature_files,
                     protein_feature_files,
                     merged_dir,
                     num_workers=num_merge_threads,
                     show_progress=show_progress
                 )
+                if failed_pairs:
+                    logger.warning(f"Failed to merge {len(failed_pairs)} file pairs")
             else:
                 # Fallback to sequential merge for single file or single core
                 logger.info("Using sequential merge (single file or single core)")
