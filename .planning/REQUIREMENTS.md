@@ -11,10 +11,10 @@ Requirements for GPU optimization release. Each maps to roadmap phases.
 
 - [x] **ESM-01**: ESM-2 parallelizes across multiple GPUs using PyTorch DDP
 - [x] **ESM-02**: ESM-2 automatically queues and processes multiple batches per GPU without manual intervention
-- [ ] **DNABERT-01**: DNABERT-S uses optimized batching (better than current one-file-per-GPU)
-- [ ] **DNABERT-02**: DNABERT-S automatically queues and processes multiple batches per GPU
+- [x] **DNABERT-01**: DNABERT-S uses optimized batching (better than current one-file-per-GPU)
+- [x] **DNABERT-02**: DNABERT-S automatically queues and processes multiple batches per GPU
 - [x] **GPU-01**: Mixed precision (BF16) enabled for both ESM-2 and DNABERT-S (2x speedup)
-- [ ] **GPU-02**: Batch sizes optimized via profiling for target GPUs (2-4x increase from current)
+- [x] **GPU-02**: Batch sizes optimized via profiling for target GPUs (2-4x increase from current)
 
 ### Attention & Memory Optimization
 
@@ -60,7 +60,7 @@ Requirements for GPU optimization release. Each maps to roadmap phases.
 
 - [x] **TEST-01**: ESM-2 worker unit tests verify model loading, batching, and output format
 - [x] **TEST-02**: ESM-2 multi-GPU integration test compares output against single-GPU baseline
-- [ ] **TEST-03**: DNABERT-S worker unit tests verify optimized batching matches vanilla output
+- [x] **TEST-03**: DNABERT-S worker unit tests verify optimized batching matches vanilla output
 - [ ] **TEST-04**: Checkpoint unit tests verify atomic writes, corruption handling, and resume capability
 - [ ] **TEST-05**: Memory/attention unit tests verify FlashAttention integration and fragmentation prevention
 - [ ] **TEST-06**: End-to-end integration test compares full pipeline output (optimized vs vanilla)
@@ -104,12 +104,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ESM-01 | Phase 1 | Pending |
-| ESM-02 | Phase 1 | Pending |
-| DNABERT-01 | Phase 2 | Pending |
-| DNABERT-02 | Phase 2 | Pending |
-| GPU-01 | Phase 1 | Pending |
-| GPU-02 | Phase 2 | Pending |
+| ESM-01 | Phase 1 | Complete |
+| ESM-02 | Phase 1 | Complete |
+| DNABERT-01 | Phase 2 | Complete |
+| DNABERT-02 | Phase 2 | Complete |
+| GPU-01 | Phase 1 | Complete |
+| GPU-02 | Phase 2 | Complete |
 | ATT-01 | Phase 4 | Pending |
 | ATT-02 | Phase 4 | Pending |
 | MEM-01 | Phase 4 | Pending |
@@ -117,8 +117,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MEM-03 | Phase 4 | Pending |
 | MEM-04 | Phase 4 | Pending |
 | MEM-05 | Phase 4 | Pending |
-| INFRA-01 | Phase 1 | Pending |
-| INFRA-02 | Phase 1 | Pending |
+| INFRA-01 | Phase 1 | Complete |
+| INFRA-02 | Phase 1 | Complete |
 | INFRA-03 | Phase 3 | Pending |
 | INFRA-04 | Phase 3 | Pending |
 | INFRA-05 | Phase 3 | Pending |
@@ -131,14 +131,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PERF-01 | Phase 6 | Pending |
 | PERF-02 | Phase 6 | Pending |
 | SCALE-01 | Phase 6 | Pending |
-| SCALE-02 | Phase 1 | Pending |
-| COMPAT-01 | Phase 1 | Pending |
+| SCALE-02 | Phase 1 | Complete |
+| COMPAT-01 | Phase 1 | Complete |
 | COMPAT-02 | Phase 3 | Pending |
-| COMPAT-03 | Phase 1 | Pending |
+| COMPAT-03 | Phase 1 | Complete |
 
-| TEST-01 | Phase 1 | Pending |
-| TEST-02 | Phase 1 | Pending |
-| TEST-03 | Phase 2 | Pending |
+| TEST-01 | Phase 1 | Complete |
+| TEST-02 | Phase 1 | Complete |
+| TEST-03 | Phase 2 | Complete |
 | TEST-04 | Phase 3 | Pending |
 | TEST-05 | Phase 4 | Pending |
 | TEST-06 | Phase 6 | Pending |

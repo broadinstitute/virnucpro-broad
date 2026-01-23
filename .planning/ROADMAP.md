@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: ESM-2 Multi-GPU Foundation** - Parallelize ESM-2 across GPUs with file-level distribution
 - [x] **Phase 1.1: Parallel Translation (INSERTED)** - Parallelize six-frame translation with CPU multiprocessing
-- [ ] **Phase 2: DNABERT-S Optimization** - Optimize DNABERT-S batching and queuing to match ESM-2
+- [x] **Phase 2: DNABERT-S Optimization** - Optimize DNABERT-S batching and queuing to match ESM-2
 - [ ] **Phase 3: Checkpoint Robustness** - Atomic writes, validation, backward compatibility
 - [ ] **Phase 4: Memory & Attention Optimization** - FlashAttention, prefetching, memory management
 - [ ] **Phase 5: Load Balancing & Monitoring** - Efficient work distribution and GPU utilization visibility
