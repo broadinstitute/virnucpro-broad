@@ -39,8 +39,14 @@ def merge_file_pair_worker(file_pair: Tuple[Path, Path, Path]) -> Optional[Path]
     try:
         merge_features(nuc_file, pro_file, output_file)
         return output_file
+    except FileNotFoundError as e:
+        logger.error(f"File not found during merge: {e}")
+        return None
+    except RuntimeError as e:
+        logger.error(f"Failed to load tensors for {nuc_file.name}: {e}")
+        return None
     except Exception as e:
-        logger.error(f"Merge failed for {nuc_file.name}: {e}")
+        logger.error(f"Unexpected error merging {nuc_file.name}: {e}")
         return None
 
 
@@ -67,8 +73,14 @@ def merge_batch_worker(file_pair_batch: List[Tuple[Path, Path, Path]]) -> List[O
         try:
             merge_features(nuc_file, pro_file, output_file)
             results.append(output_file)
+        except FileNotFoundError as e:
+            logger.error(f"File not found during merge: {e}")
+            results.append(None)
+        except RuntimeError as e:
+            logger.error(f"Failed to load tensors for {nuc_file.name}: {e}")
+            results.append(None)
         except Exception as e:
-            logger.error(f"Merge failed for {nuc_file.name}: {e}")
+            logger.error(f"Unexpected error merging {nuc_file.name}: {e}")
             results.append(None)
 
     return results
@@ -120,7 +132,7 @@ def parallel_merge_features(
     protein_files: List[Path],
     output_dir: Path,
     num_workers: Optional[int] = None
-) -> List[Path]:
+) -> Tuple[List[Path], List[Tuple[Path, Path, str]]]:
     """
     Parallelize feature merging across CPU cores.
 
@@ -134,10 +146,12 @@ def parallel_merge_features(
         num_workers: Number of worker processes (default: cpu_count())
 
     Returns:
-        List of successfully merged output files
+        Tuple of (merged_files, failed_pairs) where:
+        - merged_files: List of successfully merged output files
+        - failed_pairs: List of (nuc_file, pro_file, error_msg) tuples
 
     Example:
-        >>> merged = parallel_merge_features(
+        >>> merged, failed = parallel_merge_features(
         ...     nuc_files,
         ...     pro_files,
         ...     Path('output/merged'),
@@ -167,6 +181,8 @@ def parallel_merge_features(
     ctx = multiprocessing.get_context('spawn')
 
     merged_files = []
+    failed_pairs = []
+
     try:
         with ctx.Pool(num_workers) as pool:
             # Use imap() for lazy evaluation and streaming results
@@ -177,9 +193,14 @@ def parallel_merge_features(
             )
 
             # Collect results as they arrive
-            for result in results:
+            for result, (nuc_file, pro_file, output_file) in zip(results, file_pairs):
                 if result is not None:
                     merged_files.append(result)
+                else:
+                    failed_pairs.append((nuc_file, pro_file, f"Merge failed for {nuc_file.name}"))
+
+        if failed_pairs:
+            logger.warning(f"Failed to merge {len(failed_pairs)} file pairs")
 
         logger.info(f"Merge complete: {len(merged_files)}/{len(file_pairs)} files successful")
 
@@ -187,7 +208,7 @@ def parallel_merge_features(
         logger.exception("Error during parallel merge")
         raise
 
-    return merged_files
+    return merged_files, failed_pairs
 
 
 def parallel_merge_with_progress(
@@ -196,7 +217,7 @@ def parallel_merge_with_progress(
     output_dir: Path,
     num_workers: Optional[int] = None,
     show_progress: bool = True
-) -> List[Path]:
+) -> Tuple[List[Path], List[Tuple[Path, Path, str]]]:
     """
     Parallel merge with progress reporting.
 
@@ -211,7 +232,9 @@ def parallel_merge_with_progress(
         show_progress: Enable progress bar display (default: True)
 
     Returns:
-        List of successfully merged output files
+        Tuple of (merged_files, failed_pairs) where:
+        - merged_files: List of successfully merged output files
+        - failed_pairs: List of (nuc_file, pro_file, error_msg) tuples
     """
     if num_workers is None:
         num_workers = os.cpu_count()
@@ -233,6 +256,7 @@ def parallel_merge_with_progress(
 
     ctx = multiprocessing.get_context('spawn')
     merged_files = []
+    failed_pairs = []
 
     try:
         # Import progress reporting utilities
@@ -254,15 +278,22 @@ def parallel_merge_with_progress(
             # Create progress context if available
             if show_progress:
                 with progress.create_file_bar(len(file_pairs), desc="Merging features") as pbar:
-                    for result in results:
+                    for result, (nuc_file, pro_file, output_file) in zip(results, file_pairs):
                         if result is not None:
                             merged_files.append(result)
+                        else:
+                            failed_pairs.append((nuc_file, pro_file, f"Merge failed for {nuc_file.name}"))
                         pbar.update(1)
             else:
                 # No progress bar - just collect results
-                for result in results:
+                for result, (nuc_file, pro_file, output_file) in zip(results, file_pairs):
                     if result is not None:
                         merged_files.append(result)
+                    else:
+                        failed_pairs.append((nuc_file, pro_file, f"Merge failed for {nuc_file.name}"))
+
+        if failed_pairs:
+            logger.warning(f"Failed to merge {len(failed_pairs)} file pairs")
 
         logger.info(f"Merge complete: {len(merged_files)}/{len(file_pairs)} files successful")
 
@@ -270,4 +301,4 @@ def parallel_merge_with_progress(
         logger.exception("Error during parallel merge with progress")
         raise
 
-    return merged_files
+    return merged_files, failed_pairs
