@@ -111,11 +111,12 @@ Plans:
   4. Checkpoint files include .done markers to distinguish complete vs in-progress work
   5. Checkpoint version field supports migration functions for future format changes
   6. Unit tests verify atomic writes, corruption handling, and successful resume from pre-optimization checkpoints
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 03-01: TBD
-- [ ] 03-02: TBD
+- [ ] 03-01-PLAN.md — Create validation utilities and extend atomic writes
+- [ ] 03-02-PLAN.md — Add version management and backward compatibility
+- [ ] 03-03-PLAN.md — Integrate into pipeline with comprehensive tests
 
 ### Phase 4: Memory & Attention Optimization
 **Goal**: Memory-efficient processing with FlashAttention-2, DataLoader prefetching, CUDA streams, and fragmentation prevention delivers additional 1.5-2x speedup.
