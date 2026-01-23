@@ -8,6 +8,13 @@ from typing import Dict, List, Optional, Any
 from enum import Enum, IntEnum
 import logging
 
+import torch
+
+from virnucpro.core.checkpoint_validation import (
+    validate_checkpoint,
+    CheckpointError
+)
+
 logger = logging.getLogger('virnucpro.checkpoint')
 
 
@@ -30,6 +37,115 @@ class PipelineStage(IntEnum):
     FEATURE_MERGING = 7
     PREDICTION = 8
     CONSENSUS = 9
+
+
+def atomic_save(
+    checkpoint_dict: Dict[str, Any],
+    output_file: Path,
+    validate_after_save: bool = True,
+    skip_validation: bool = False
+) -> Path:
+    """Save PyTorch checkpoint with atomic write to prevent corruption.
+
+    Uses temp-then-rename pattern to ensure checkpoint is never partially written.
+    Optionally validates checkpoint after save to ensure integrity.
+
+    Args:
+        checkpoint_dict: Dictionary to save as checkpoint
+        output_file: Target path for checkpoint file
+        validate_after_save: Validate checkpoint integrity after write (default: True)
+        skip_validation: Skip validation (--skip-checkpoint-validation flag)
+
+    Returns:
+        Path to saved checkpoint file
+
+    Raises:
+        RuntimeError: If save or validation fails
+
+    Example:
+        >>> checkpoint = {'version': '1.0', 'status': 'complete', 'data': tensor}
+        >>> atomic_save(checkpoint, Path("model.pt"))
+        Path("model.pt")
+    """
+    temp_file = output_file.with_suffix('.tmp')
+
+    try:
+        # Save to temporary file
+        torch.save(checkpoint_dict, temp_file)
+
+        # Atomic rename (overwrites existing file)
+        temp_file.replace(output_file)
+
+        logger.debug(f"Checkpoint saved: {output_file}")
+
+        # Validate after save if requested
+        if validate_after_save and not skip_validation:
+            is_valid, error_msg = validate_checkpoint(
+                output_file,
+                skip_load=False,  # Full validation
+                logger_instance=logger
+            )
+
+            if not is_valid:
+                # Remove corrupted file
+                output_file.unlink()
+                raise RuntimeError(f"Checkpoint validation failed: {error_msg}")
+
+            logger.debug(f"Checkpoint validated successfully: {output_file}")
+
+    except Exception as e:
+        # Clean up temp file on any failure
+        if temp_file.exists():
+            temp_file.unlink()
+        raise RuntimeError(f"Failed to save checkpoint: {e}")
+
+    return output_file
+
+
+def load_checkpoint_safe(
+    checkpoint_path: Path,
+    skip_validation: bool = False,
+    required_keys: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """Load PyTorch checkpoint with validation.
+
+    Args:
+        checkpoint_path: Path to checkpoint file
+        skip_validation: Skip validation (--skip-checkpoint-validation flag)
+        required_keys: List of required keys in checkpoint dict
+
+    Returns:
+        Loaded checkpoint dict
+
+    Raises:
+        CheckpointError: If checkpoint is corrupted or incompatible
+
+    Example:
+        >>> checkpoint = load_checkpoint_safe(Path("model.pt"))
+        >>> data = checkpoint['data']
+    """
+    if not skip_validation:
+        # Validate before loading
+        is_valid, error_msg = validate_checkpoint(
+            checkpoint_path,
+            required_keys=required_keys,
+            skip_load=False,
+            logger_instance=logger
+        )
+
+        if not is_valid:
+            error_type = 'corrupted' if 'corrupted:' in error_msg else 'incompatible'
+            raise CheckpointError(checkpoint_path, error_type, error_msg)
+
+    # Load checkpoint
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+        logger.info(f"Checkpoint loaded: {checkpoint_path}")
+        return checkpoint
+    except Exception as e:
+        logger.error(f"Failed to load checkpoint: {checkpoint_path}")
+        logger.error(f"  Error: {str(e)}")
+        raise CheckpointError(checkpoint_path, 'corrupted', f"torch.load failed - {str(e)}")
 
 
 class CheckpointManager:
