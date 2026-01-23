@@ -15,6 +15,8 @@ from typing import List, Tuple
 from Bio import SeqIO
 import logging
 
+from virnucpro.core.checkpoint import atomic_save
+
 logger = logging.getLogger('virnucpro.parallel_dnabert')
 
 # Import base worker utilities
@@ -173,8 +175,13 @@ def process_dnabert_files_worker(
 
                             logger.debug(f"Worker {device_id}: Processed batch {batch_idx + 1}/{len(batches)}")
 
-                    # Save to file in original format
-                    torch.save({'nucleotide': nucleotide, 'data': data}, output_file)
+                    # Save to file in original format using atomic write
+                    # Feature extraction checkpoints skip validation for performance (large files)
+                    atomic_save(
+                        {'nucleotide': nucleotide, 'data': data},
+                        output_file,
+                        validate_after_save=False  # Skip validation for feature extraction (performance)
+                    )
 
                     processed_files.append(output_file)
                     logger.info(f"Worker {device_id}: Completed {file.name} -> {output_file.name} ({len(data)} sequences)")

@@ -7,7 +7,8 @@ import time
 import os
 import torch
 
-from virnucpro.core.checkpoint import CheckpointManager, PipelineStage
+from virnucpro.core.checkpoint import CheckpointManager, PipelineStage, atomic_save
+from virnucpro.core.checkpoint_validation import CheckpointError, CHECKPOINT_EXIT_CODE, load_failed_checkpoints
 from virnucpro.core.config import Config
 from virnucpro.pipeline.parallel import detect_cuda_devices
 from virnucpro.pipeline.parallel_esm import assign_files_round_robin, process_esm_files_worker
@@ -92,6 +93,25 @@ def run_prediction(
         if start_stage is None:
             logger.info("All stages already completed!")
             return
+
+        # Log resume summary with checkpoint status
+        completed_stages = sum(
+            1 for stage in PipelineStage
+            if state['stages'][stage.name]['status'] == 'completed'
+        )
+        total_stages = len(PipelineStage)
+        logger.info(f"=== Resuming Pipeline ===")
+        logger.info(f"Progress: {completed_stages}/{total_stages} stages complete")
+        logger.info(f"Resuming from stage: {start_stage.name}")
+
+        # Show any failed checkpoints from previous runs
+        failed_checkpoints = load_failed_checkpoints(checkpoint_dir)
+        if failed_checkpoints:
+            logger.warning(f"Found {len(failed_checkpoints)} failed checkpoints from previous runs:")
+            for path, reason, timestamp in failed_checkpoints[:5]:  # Show first 5
+                logger.warning(f"  {Path(path).name}: {reason}")
+            if len(failed_checkpoints) > 5:
+                logger.warning(f"  ... and {len(failed_checkpoints) - 5} more")
     else:
         state = checkpoint_manager._create_initial_state()
         start_stage = PipelineStage.CHUNKING
