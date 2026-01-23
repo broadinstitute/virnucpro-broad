@@ -2,6 +2,8 @@
 
 import sys
 import logging
+import threading
+import queue
 from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime
@@ -244,3 +246,52 @@ def create_progress_display(file_assignments: Dict[int, List[Path]]) -> MultiGPU
     }
 
     return MultiGPUDashboard(num_gpus, total_files_per_gpu)
+
+
+def monitor_progress(progress_queue, dashboard: MultiGPUDashboard, stop_event: threading.Event):
+    """
+    Monitor progress queue and update dashboard.
+
+    Runs in a background thread, consuming progress events from workers
+    and updating the dashboard accordingly. Supports both TTY and non-TTY modes.
+
+    Args:
+        progress_queue: Multiprocessing queue receiving progress events
+        dashboard: Dashboard instance to update
+        stop_event: Event to signal monitoring thread to stop
+
+    Progress event format:
+        {
+            'gpu_id': int,      # GPU device ID
+            'file': str,        # File path
+            'status': str       # 'complete' or 'failed'
+        }
+    """
+    logger.debug("Progress monitor thread started")
+
+    try:
+        while not stop_event.is_set():
+            try:
+                # Get progress event with timeout to allow checking stop_event
+                event = progress_queue.get(timeout=0.5)
+
+                gpu_id = event.get('gpu_id')
+                file_path = event.get('file')
+                status = event.get('status')
+
+                # Update dashboard based on event
+                if status == 'complete':
+                    dashboard.update(gpu_id, files_completed=1)
+                elif status == 'failed':
+                    # Still count as progress (attempted)
+                    dashboard.update(gpu_id, files_completed=1)
+                    logger.warning(f"GPU {gpu_id}: Failed to process {file_path}")
+
+            except queue.Empty:
+                # Timeout - continue loop to check stop_event
+                continue
+
+    except Exception as e:
+        logger.exception("Error in progress monitor thread")
+
+    logger.debug("Progress monitor thread stopped")

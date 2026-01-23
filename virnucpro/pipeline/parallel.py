@@ -2,7 +2,7 @@
 
 import torch
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 import logging
 
 logger = logging.getLogger('virnucpro.parallel')
@@ -67,7 +67,7 @@ def process_dnabert_files_worker(
     batch_size: int,
     output_dir: Path,
     **kwargs
-) -> List[Path]:
+) -> Tuple[List[Path], List[Tuple[Path, str]]]:
     """
     Worker function to process DNABERT-S features on a specific GPU.
 
@@ -83,15 +83,18 @@ def process_dnabert_files_worker(
         **kwargs: Additional arguments including progress_queue
 
     Returns:
-        List of output .pt file paths
+        Tuple of (processed_files, failed_files)
+        - processed_files: List of successfully processed output .pt file paths
+        - failed_files: List of (file_path, error_message) tuples for failures
 
     Raises:
-        Exception: Any error during processing (logged with device context)
+        Exception: Critical errors that prevent worker startup (logged with device context)
     """
     # Extract progress queue if provided
     progress_queue = kwargs.get('progress_queue', None)
 
-    output_files = []
+    processed_files = []
+    failed_files = []
 
     try:
         device = torch.device(f'cuda:{device_id}')
@@ -109,7 +112,7 @@ def process_dnabert_files_worker(
                     device,
                     batch_size=batch_size
                 )
-                output_files.append(output_file)
+                processed_files.append(output_file)
 
                 # Report progress if queue available
                 if progress_queue is not None:
@@ -119,7 +122,10 @@ def process_dnabert_files_worker(
                         'status': 'complete'
                     })
             except Exception as e:
-                logger.error(f"Worker {device_id}: Failed to process {nuc_file.name}: {e}")
+                error_msg = str(e)
+                logger.error(f"Worker {device_id}: Failed to process {nuc_file.name}: {error_msg}")
+
+                failed_files.append((nuc_file, error_msg))
 
                 # Report failure if queue available
                 if progress_queue is not None:
@@ -130,9 +136,10 @@ def process_dnabert_files_worker(
                     })
                 # Continue with next file instead of raising
 
-        logger.info(f"Worker {device_id}: Completed {len(output_files)} files")
-        return output_files
+        logger.info(f"Worker {device_id}: Completed {len(processed_files)}/{len(file_subset)} files "
+                   f"({len(failed_files)} failed)")
+        return (processed_files, failed_files)
 
     except Exception as e:
-        logger.exception(f"Worker {device_id}: Error processing files")
+        logger.exception(f"Worker {device_id}: Critical error during initialization")
         raise

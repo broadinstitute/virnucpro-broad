@@ -249,20 +249,46 @@ def run_prediction(
                 else:
                     worker_file_assignments = assign_files_round_robin(files_to_process, len(available_gpus))
 
-                    worker_args = [
-                        (file_subset, device_id, dnabert_batch_size, nucleotide_split_dir)
-                        for device_id, file_subset in zip(available_gpus, worker_file_assignments)
-                    ]
-
-                    # Use 'spawn' start method for CUDA compatibility
-                    # Fork method causes "Cannot re-initialize CUDA in forked subprocess" error
+                    # Create progress queue for live updates
+                    import threading
                     ctx = multiprocessing.get_context('spawn')
-                    with ctx.Pool(processes=len(available_gpus)) as pool:
-                        with progress.create_file_bar(len(files_to_process), desc="DNABERT-S extraction (parallel)") as pbar:
-                            results = pool.starmap(process_dnabert_files_worker, worker_args)
-                            for worker_output in results:
-                                nucleotide_feature_files.extend(worker_output)
-                            pbar.update(len(files_to_process))
+                    progress_queue = ctx.Queue()
+
+                    # Create and start dashboard
+                    from virnucpro.pipeline.dashboard import monitor_progress, MultiGPUDashboard
+                    total_files_per_gpu = {i: len(worker_file_assignments[i]) for i in range(len(available_gpus))}
+                    dashboard = MultiGPUDashboard(len(available_gpus), total_files_per_gpu)
+                    dashboard.start()
+
+                    # Start progress monitor thread
+                    stop_event = threading.Event()
+                    monitor_thread = threading.Thread(
+                        target=monitor_progress,
+                        args=(progress_queue, dashboard, stop_event),
+                        daemon=True
+                    )
+                    monitor_thread.start()
+
+                    try:
+                        # Process with queue manager
+                        queue_manager = BatchQueueManager(len(available_gpus), process_dnabert_files_worker, progress_queue=progress_queue)
+                        processed, failed = queue_manager.process_files(
+                            worker_file_assignments,
+                            batch_size=dnabert_batch_size,
+                            output_dir=nucleotide_split_dir
+                        )
+                        nucleotide_feature_files.extend(processed)
+
+                        # Log any failures
+                        if failed:
+                            logger.warning(f"Failed to process {len(failed)} DNABERT files")
+                            for file_path, error in failed:
+                                logger.error(f"  {file_path}: {error}")
+                    finally:
+                        # Stop monitor thread and complete dashboard
+                        stop_event.set()
+                        monitor_thread.join(timeout=1.0)
+                        dashboard.complete_all()
 
                     # Validate that we have feature files
                     if not nucleotide_feature_files:
@@ -354,16 +380,43 @@ def run_prediction(
                     # Assign files round-robin across GPUs
                     file_assignments = assign_files_round_robin(protein_files, num_gpus)
 
-                    # Process with queue manager
-                    queue_manager = BatchQueueManager(num_gpus, process_esm_files_worker)
-                    processed, failed = queue_manager.process_files(
-                        file_assignments,
-                        toks_per_batch=toks_per_batch,
-                        output_dir=protein_split_dir
-                    )
+                    # Create progress queue for live updates
+                    import multiprocessing
+                    import threading
+                    ctx = multiprocessing.get_context('spawn')
+                    progress_queue = ctx.Queue()
 
-                    protein_feature_files.extend(processed)
-                    failed_files.extend(failed)
+                    # Create and start dashboard
+                    from virnucpro.pipeline.dashboard import monitor_progress, MultiGPUDashboard
+                    total_files_per_gpu = {i: len(file_assignments[i]) for i in range(num_gpus)}
+                    dashboard = MultiGPUDashboard(num_gpus, total_files_per_gpu)
+                    dashboard.start()
+
+                    # Start progress monitor thread
+                    stop_event = threading.Event()
+                    monitor_thread = threading.Thread(
+                        target=monitor_progress,
+                        args=(progress_queue, dashboard, stop_event),
+                        daemon=True
+                    )
+                    monitor_thread.start()
+
+                    try:
+                        # Process with queue manager
+                        queue_manager = BatchQueueManager(num_gpus, process_esm_files_worker, progress_queue=progress_queue)
+                        processed, failed = queue_manager.process_files(
+                            file_assignments,
+                            toks_per_batch=toks_per_batch,
+                            output_dir=protein_split_dir
+                        )
+
+                        protein_feature_files.extend(processed)
+                        failed_files.extend(failed)
+                    finally:
+                        # Stop monitor thread and complete dashboard
+                        stop_event.set()
+                        monitor_thread.join(timeout=1.0)
+                        dashboard.complete_all()
 
                     # Log failures
                     if failed:
