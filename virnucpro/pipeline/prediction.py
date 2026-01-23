@@ -581,7 +581,7 @@ def run_prediction(
             use_parallel = num_merge_threads > 1 and len(nucleotide_feature_files) > 1
 
             if use_parallel:
-                logger.info(f"Using parallel merge with {num_merge_threads} workers")
+                logger.info(f"Using parallel merge with {num_merge_threads} workers ({len(nucleotide_feature_files)} files to merge)")
                 merged_feature_files, failed_pairs = parallel_merge_with_progress(
                     nucleotide_feature_files,
                     protein_feature_files,
@@ -593,7 +593,7 @@ def run_prediction(
                     logger.warning(f"Failed to merge {len(failed_pairs)} file pairs")
             else:
                 # Fallback to sequential merge for single file or single core
-                logger.info("Using sequential merge (single file or single core)")
+                logger.info(f"Using sequential merge (single file or single core system)")
                 merged_feature_files = []
                 with progress.create_file_bar(len(nucleotide_feature_files), desc="Merging features") as pbar:
                     for nuc_feat, pro_feat in zip(nucleotide_feature_files, protein_feature_files):
