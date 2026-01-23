@@ -33,13 +33,16 @@ Decimal phases appear between their surrounding integers in numeric order.
   5. Batch queue manager distributes files round-robin across GPU workers with spawn context
   6. Unit tests verify ESM-2 worker model loading, batching, and output format
   7. Integration test confirms multi-GPU output matches single-GPU baseline (vanilla comparison)
-**Plans**: 4 plans
+**Plans**: 7 plans
 
 Plans:
 - [ ] 01-01-PLAN.md — Create ESM-2 worker functions and batch queue manager
 - [ ] 01-02-PLAN.md — Add BF16 optimization and GPU monitoring dashboard
 - [ ] 01-03-PLAN.md — Integrate into pipeline with CLI support and tests
 - [ ] 01-04-PLAN.md — End-to-end integration test and documentation
+- [ ] 01-05-PLAN.md — Fix multi-GPU auto-detection (gap closure)
+- [ ] 01-06-PLAN.md — Fix BF16 logging visibility (gap closure)
+- [ ] 01-07-PLAN.md — Add progress dashboard for GPU workers (gap closure)
 
 ### Phase 2: DNABERT-S Optimization
 **Goal**: DNABERT-S feature extraction matches ESM-2's optimization level with improved batching, automatic queuing, and unified worker infrastructure.
@@ -131,7 +134,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. ESM-2 Multi-GPU Foundation | 0/4 | Planning complete | - |
+| 1. ESM-2 Multi-GPU Foundation | 4/7 | Gap closure in progress | - |
 | 2. DNABERT-S Optimization | 0/TBD | Not started | - |
 | 3. Checkpoint Robustness | 0/TBD | Not started | - |
 | 4. Memory & Attention Optimization | 0/TBD | Not started | - |
