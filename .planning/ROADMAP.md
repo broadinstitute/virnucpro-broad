@@ -12,7 +12,7 @@ This roadmap transforms VirNucPro from a 45-hour single-GPU bottleneck into a su
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: ESM-2 Multi-GPU Foundation** - Parallelize ESM-2 across GPUs with file-level distribution
+- [x] **Phase 1: ESM-2 Multi-GPU Foundation** - Parallelize ESM-2 across GPUs with file-level distribution
 - [ ] **Phase 2: DNABERT-S Optimization** - Optimize DNABERT-S batching and queuing to match ESM-2
 - [ ] **Phase 3: Checkpoint Robustness** - Atomic writes, validation, backward compatibility
 - [ ] **Phase 4: Memory & Attention Optimization** - FlashAttention, prefetching, memory management
@@ -36,13 +36,13 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 7 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Create ESM-2 worker functions and batch queue manager
-- [ ] 01-02-PLAN.md — Add BF16 optimization and GPU monitoring dashboard
-- [ ] 01-03-PLAN.md — Integrate into pipeline with CLI support and tests
-- [ ] 01-04-PLAN.md — End-to-end integration test and documentation
-- [ ] 01-05-PLAN.md — Fix multi-GPU auto-detection (gap closure)
-- [ ] 01-06-PLAN.md — Fix BF16 logging visibility (gap closure)
-- [ ] 01-07-PLAN.md — Add progress dashboard for GPU workers (gap closure)
+- [x] 01-01-PLAN.md — Create ESM-2 worker functions and batch queue manager
+- [x] 01-02-PLAN.md — Add BF16 optimization and GPU monitoring dashboard
+- [x] 01-03-PLAN.md — Integrate into pipeline with CLI support and tests
+- [x] 01-04-PLAN.md — End-to-end integration test and documentation
+- [x] 01-05-PLAN.md — Fix multi-GPU auto-detection (gap closure)
+- [x] 01-06-PLAN.md — Fix BF16 logging visibility (gap closure)
+- [x] 01-07-PLAN.md — Add progress dashboard for GPU workers (gap closure)
 
 ### Phase 2: DNABERT-S Optimization
 **Goal**: DNABERT-S feature extraction matches ESM-2's optimization level with improved batching, automatic queuing, and unified worker infrastructure.
@@ -134,7 +134,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. ESM-2 Multi-GPU Foundation | 4/7 | Gap closure in progress | - |
+| 1. ESM-2 Multi-GPU Foundation | 7/7 | Complete | 2026-01-23 |
 | 2. DNABERT-S Optimization | 0/TBD | Not started | - |
 | 3. Checkpoint Robustness | 0/TBD | Not started | - |
 | 4. Memory & Attention Optimization | 0/TBD | Not started | - |

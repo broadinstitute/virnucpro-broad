@@ -9,11 +9,11 @@ Requirements for GPU optimization release. Each maps to roadmap phases.
 
 ### GPU Parallelization
 
-- [ ] **ESM-01**: ESM-2 parallelizes across multiple GPUs using PyTorch DDP
-- [ ] **ESM-02**: ESM-2 automatically queues and processes multiple batches per GPU without manual intervention
+- [x] **ESM-01**: ESM-2 parallelizes across multiple GPUs using PyTorch DDP
+- [x] **ESM-02**: ESM-2 automatically queues and processes multiple batches per GPU without manual intervention
 - [ ] **DNABERT-01**: DNABERT-S uses optimized batching (better than current one-file-per-GPU)
 - [ ] **DNABERT-02**: DNABERT-S automatically queues and processes multiple batches per GPU
-- [ ] **GPU-01**: Mixed precision (BF16) enabled for both ESM-2 and DNABERT-S (2x speedup)
+- [x] **GPU-01**: Mixed precision (BF16) enabled for both ESM-2 and DNABERT-S (2x speedup)
 - [ ] **GPU-02**: Batch sizes optimized via profiling for target GPUs (2-4x increase from current)
 
 ### Attention & Memory Optimization
@@ -28,8 +28,8 @@ Requirements for GPU optimization release. Each maps to roadmap phases.
 
 ### Infrastructure & Checkpointing
 
-- [ ] **INFRA-01**: Batch queue manager coordinates work distribution across GPUs
-- [ ] **INFRA-02**: GPU worker pool with spawn context (CUDA-safe multiprocessing)
+- [x] **INFRA-01**: Batch queue manager coordinates work distribution across GPUs
+- [x] **INFRA-02**: GPU worker pool with spawn context (CUDA-safe multiprocessing)
 - [ ] **INFRA-03**: Checkpoint integration with .done markers (distinguish complete vs in-progress)
 - [ ] **INFRA-04**: Atomic file writes via temp-then-rename pattern (prevent corruption)
 - [ ] **INFRA-05**: Checkpoint validation checks file size >0 and optionally validates keys
@@ -39,7 +39,7 @@ Requirements for GPU optimization release. Each maps to roadmap phases.
 - [ ] **MON-01**: GPU utilization monitoring via nvitop logs compute % and memory usage
 - [ ] **MON-02**: Throughput logging tracks sequences/sec per GPU
 - [ ] **MON-03**: Monitoring detects stalled workers or imbalanced load
-- [ ] **LOAD-01**: Load-balanced file assignment using greedy bin packing by sequence count
+- [x] **LOAD-01**: Load-balanced file assignment using greedy bin packing by sequence count
 - [ ] **LOAD-02**: Checkpoint versioning with migration functions for backward compatibility
 - [ ] **LOAD-03**: Heterogeneous GPU support (handle mixed GPU types/memory sizes)
 
@@ -48,18 +48,18 @@ Requirements for GPU optimization release. Each maps to roadmap phases.
 - [ ] **PERF-01**: Pipeline completes one sample (thousands of sequences) in under 10 hours
 - [ ] **PERF-02**: GPU utilization metrics show >80% GPU usage during embedding steps
 - [ ] **SCALE-01**: Adding GPUs provides linear speedup (2x GPUs = ~2x faster, measured)
-- [ ] **SCALE-02**: Works with variable GPU counts (1, 4, 8, or any number of GPUs)
+- [x] **SCALE-02**: Works with variable GPU counts (1, 4, 8, or any number of GPUs)
 
 ### Compatibility
 
-- [ ] **COMPAT-01**: CLI interface unchanged (users run same `virnucpro predict` command)
+- [x] **COMPAT-01**: CLI interface unchanged (users run same `virnucpro predict` command)
 - [ ] **COMPAT-02**: Can resume checkpoints from pre-optimization runs (backward compatible)
-- [ ] **COMPAT-03**: Single-GPU fallback mode works when only one GPU available
+- [x] **COMPAT-03**: Single-GPU fallback mode works when only one GPU available
 
 ### Testing
 
-- [ ] **TEST-01**: ESM-2 worker unit tests verify model loading, batching, and output format
-- [ ] **TEST-02**: ESM-2 multi-GPU integration test compares output against single-GPU baseline
+- [x] **TEST-01**: ESM-2 worker unit tests verify model loading, batching, and output format
+- [x] **TEST-02**: ESM-2 multi-GPU integration test compares output against single-GPU baseline
 - [ ] **TEST-03**: DNABERT-S worker unit tests verify optimized batching matches vanilla output
 - [ ] **TEST-04**: Checkpoint unit tests verify atomic writes, corruption handling, and resume capability
 - [ ] **TEST-05**: Memory/attention unit tests verify FlashAttention integration and fragmentation prevention
