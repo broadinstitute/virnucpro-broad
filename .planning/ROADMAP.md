@@ -71,11 +71,13 @@ Plans:
   2. Batch sizes for both DNABERT-S and ESM-2 are optimized via profiling (2-4x increase from baseline)
   3. DNABERT-S and ESM-2 use the same worker pool pattern for consistency
   4. Unit tests verify DNABERT-S optimized batching produces identical output to vanilla implementation
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 02-01: TBD
-- [ ] 02-02: TBD
+- [ ] 02-01-PLAN.md — Create BaseEmbeddingWorker abstraction and DNABERT-S parallel worker
+- [ ] 02-02-PLAN.md — Refactor ESM-2 to use base class and test DNABERT-S worker
+- [ ] 02-03-PLAN.md — Integrate into pipeline with CLI support and profiling tools
+- [ ] 02-04-PLAN.md — Integration tests and optimization documentation
 
 ### Phase 3: Checkpoint Robustness
 **Goal**: Checkpoint system prevents corruption, validates integrity, supports resume from pre-optimization runs, and maintains backward compatibility.
