@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 2.1 of 6 (Parallel Embedding Merge)
-Plan: 3 of 3 (Integration Tests and Performance Validation)
-Status: Phase complete and verified
-Last activity: 2026-01-23 — Phase 2.1 verified (5/5 must-haves) after orchestrator tuple unpacking fix
+Plan: 5 of 5 (Gap Closure - UAT Issues Resolved)
+Status: Phase complete with all UAT gaps resolved
+Last activity: 2026-01-23 — Completed 02.1-05 gap closure (workload-aware merge documentation)
 
-Progress: [███████████] 100% (18/18 plans)
+Progress: [███████████] 100% (20/20 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 18
-- Average duration: 3.8 minutes
-- Total execution time: 1.20 hours
+- Total plans completed: 20
+- Average duration: 3.7 minutes
+- Total execution time: 1.24 hours
 
 **By Phase:**
 
@@ -30,11 +30,11 @@ Progress: [███████████] 100% (18/18 plans)
 | 1     | 7     | 33.6m | 4.8m     |
 | 1.1   | 3     | 10.3m | 3.4m     |
 | 2     | 5     | 19.5m | 3.9m     |
-| 2.1   | 3     | 10.4m | 3.5m     |
+| 2.1   | 5     | 14.5m | 2.9m     |
 
 **Recent Trend:**
-- Last 5 plans: 02-04 (2.6m), 02-05 (8.0m), 02.1-01 (3.7m), 02.1-02 (2.5m), 02.1-03 (4.2m)
-- Trend: Phase 2.1 complete; integration tests validate parallel merge correctness and performance
+- Last 5 plans: 02.1-01 (3.7m), 02.1-02 (2.5m), 02.1-03 (4.2m), 02.1-04 (2.0m), 02.1-05 (2.1m)
+- Trend: Phase 2.1 complete with UAT gap closure; all issues resolved through documentation and unification
 
 *Updated after each plan completion*
 
@@ -134,6 +134,14 @@ Recent decisions affecting current work:
 **Orchestrator correction (Phase 2.1):**
 - tuple-unpacking-integration: Fix prediction.py:582 to unpack tuple return from parallel_merge_with_progress (verifier gap closure)
 
+**From 02.1-04 execution:**
+- unified-threads-parameter: Consolidated --threads and --merge-threads into single --threads CLI parameter for simpler UX
+- backward-compatible-merge: Translation defaults to --threads value, allows --merge-threads override for backward compatibility
+
+**From 02.1-05 execution:**
+- workload-aware-merge-strategy: Merge strategy based on actual file count to merge (workload), not original input count
+- auto-split-enables-parallel: Auto-split files from Phase 2 benefit from parallel merge even from single input (optimal performance)
+
 ### Pending Todos
 
 None yet.
@@ -162,8 +170,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-23 17:55 UTC
-Stopped at: Completed 02.1-03-PLAN.md execution (Integration Tests and Error Handling)
+Last session: 2026-01-23 19:08 UTC
+Stopped at: Completed 02.1-05-PLAN.md execution (Workload-Aware Merge Documentation)
 Resume file: None
 
 ## Phase 2 Complete
@@ -190,24 +198,32 @@ All 5 plans executed successfully:
 
 ## Phase 2.1 Complete
 
-**Parallel Embedding Merge - Complete**
+**Parallel Embedding Merge - Complete with UAT Gap Closure**
 
-All 3 plans executed successfully:
+All 5 plans executed successfully:
 - 02.1-01: Parallel merge worker functions (3.7m)
 - 02.1-02: Pipeline integration and CLI control (2.5m)
 - 02.1-03: Integration tests and error handling (4.2m)
+- 02.1-04: CLI threads parameter unification (2.0m) [GAP CLOSURE]
+- 02.1-05: Workload-aware merge documentation (2.1m) [GAP CLOSURE]
 
 **Key achievements:**
 - CPU multiprocessing for embedding merge with 6-7x expected speedup
 - Auto-detection of CPU count for zero-config optimization
-- User control via --merge-threads CLI parameter
+- Unified --threads CLI parameter (translation and merge)
 - Sequential fallback for single file or single core
 - Checkpoint support for resume capability
 - Atomic writes for corruption prevention
 - Enhanced error handling with partial failure support
 - Comprehensive integration tests validating correctness and performance
+- Workload-aware merge strategy (auto-split files benefit from parallel merge)
+- Clear documentation and logging explaining merge decisions
 
-**Phase duration:** 10.4 minutes (3 plans)
-**Average per plan:** 3.5 minutes
+**UAT gaps resolved:**
+- CLI parameter unification (--threads replaces separate --merge-threads)
+- Workload-aware merge behavior documented and tested
+
+**Phase duration:** 14.5 minutes (5 plans)
+**Average per plan:** 2.9 minutes
 
 Ready to proceed to next phase when defined.
