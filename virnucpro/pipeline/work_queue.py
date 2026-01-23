@@ -102,6 +102,12 @@ class BatchQueueManager:
         for worker_id, files in enumerate(file_assignments):
             logger.info(f"  Worker {worker_id}: {len(files)} files assigned")
 
+        # Add logging configuration to kwargs
+        log_level = logging.getLogger().level
+        log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        worker_kwargs['log_level'] = log_level
+        worker_kwargs['log_format'] = log_format
+
         # Create worker arguments: (file_subset, device_id, **worker_kwargs)
         worker_args = []
         for worker_id, file_subset in enumerate(file_assignments):

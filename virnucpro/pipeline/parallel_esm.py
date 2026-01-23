@@ -11,6 +11,7 @@ logger = logging.getLogger('virnucpro.parallel_esm')
 
 # Import at module level for worker access
 from virnucpro.pipeline.features import extract_esm_features
+from virnucpro.core.logging_setup import setup_worker_logging
 
 
 def count_sequences(file_path: Path) -> int:
@@ -87,7 +88,7 @@ def process_esm_files_worker(
         device_id: CUDA device ID (e.g., 0 for cuda:0)
         toks_per_batch: Tokens per batch for ESM-2 processing (default: 2048)
         output_dir: Directory where output files should be saved
-        **kwargs: Additional arguments (for compatibility)
+        **kwargs: Additional arguments including log_level and log_format
 
     Returns:
         Tuple of (processed_files, failed_files)
@@ -97,6 +98,11 @@ def process_esm_files_worker(
     Raises:
         Exception: Critical errors that prevent worker startup (logged with device context)
     """
+    # Initialize logging in worker process
+    log_level = kwargs.get('log_level', logging.INFO)
+    log_format = kwargs.get('log_format', '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    setup_worker_logging(log_level, log_format)
+
     processed_files = []
     failed_files = []
 
