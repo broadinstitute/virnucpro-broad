@@ -10,28 +10,28 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 1 of 6 (ESM-2 Multi-GPU Foundation)
-Plan: 3 of 4 (ESM-2 Multi-GPU Foundation)
-Status: In progress
-Last activity: 2026-01-22 — Completed 01-03-PLAN.md (Pipeline Integration & CLI)
+Plan: 4 of 4 (ESM-2 Multi-GPU Foundation)
+Status: Phase complete
+Last activity: 2026-01-22 — Completed 01-04-PLAN.md (Testing & Validation)
 
-Progress: [██░░░░░░░░] 20.0% (3/15 plans)
+Progress: [███░░░░░░░] 26.7% (4/15 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 3
-- Average duration: 3.0 minutes
-- Total execution time: 0.15 hours
+- Total plans completed: 4
+- Average duration: 5.5 minutes
+- Total execution time: 0.37 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1     | 3     | 9.1m  | 3.0m     |
+| 1     | 4     | 21.5m | 5.4m     |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (2.9m), 01-02 (2.4m), 01-03 (4.0m)
-- Trend: Consistent velocity (~2.5-4.0 minutes per plan)
+- Last 5 plans: 01-01 (2.9m), 01-02 (2.4m), 01-03 (4.0m), 01-04 (12.4m)
+- Trend: Plan 01-04 longer due to human verification checkpoint and bug fixes
 
 *Updated after each plan completion*
 
@@ -62,6 +62,11 @@ Recent decisions affecting current work:
 - pipeline-exit-codes: Return exit codes from pipeline (0: success, 1: failure, 2: partial) to signal partial failures
 - failed-files-pipe-delimited: Log failed files to failed_files.txt with format {file_path}|ESM-2|{error_message}
 
+**From 01-04 execution:**
+- auto-enable-parallel-from-gpus: Auto-enable parallel processing when --gpus flag contains multiple GPU IDs (improves UX)
+- python39-type-compatibility: Use Optional[Tuple[...]] instead of | operator for Python 3.9 compatibility
+- integration-test-subprocess: Use subprocess calls in integration tests to test exact CLI interface users invoke
+
 ### Pending Todos
 
 None yet.
@@ -78,6 +83,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-22 23:07 UTC
-Stopped at: Completed 01-03-PLAN.md execution
+Last session: 2026-01-23 00:27 UTC
+Stopped at: Completed 01-04-PLAN.md execution (Phase 1 complete)
 Resume file: None
