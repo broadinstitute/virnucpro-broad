@@ -30,9 +30,9 @@ Requirements for GPU optimization release. Each maps to roadmap phases.
 
 - [x] **INFRA-01**: Batch queue manager coordinates work distribution across GPUs
 - [x] **INFRA-02**: GPU worker pool with spawn context (CUDA-safe multiprocessing)
-- [ ] **INFRA-03**: Checkpoint integration with .done markers (distinguish complete vs in-progress)
-- [ ] **INFRA-04**: Atomic file writes via temp-then-rename pattern (prevent corruption)
-- [ ] **INFRA-05**: Checkpoint validation checks file size >0 and optionally validates keys
+- [x] **INFRA-03**: Checkpoint integration with .done markers (distinguish complete vs in-progress)
+- [x] **INFRA-04**: Atomic file writes via temp-then-rename pattern (prevent corruption)
+- [x] **INFRA-05**: Checkpoint validation checks file size >0 and optionally validates keys
 
 ### Monitoring & Load Balancing
 
@@ -40,7 +40,7 @@ Requirements for GPU optimization release. Each maps to roadmap phases.
 - [ ] **MON-02**: Throughput logging tracks sequences/sec per GPU
 - [ ] **MON-03**: Monitoring detects stalled workers or imbalanced load
 - [x] **LOAD-01**: Load-balanced file assignment using greedy bin packing by sequence count
-- [ ] **LOAD-02**: Checkpoint versioning with migration functions for backward compatibility
+- [x] **LOAD-02**: Checkpoint versioning with migration functions for backward compatibility
 - [ ] **LOAD-03**: Heterogeneous GPU support (handle mixed GPU types/memory sizes)
 
 ### Performance & Scalability
@@ -53,7 +53,7 @@ Requirements for GPU optimization release. Each maps to roadmap phases.
 ### Compatibility
 
 - [x] **COMPAT-01**: CLI interface unchanged (users run same `virnucpro predict` command)
-- [ ] **COMPAT-02**: Can resume checkpoints from pre-optimization runs (backward compatible)
+- [x] **COMPAT-02**: Can resume checkpoints from pre-optimization runs (backward compatible)
 - [x] **COMPAT-03**: Single-GPU fallback mode works when only one GPU available
 
 ### Testing
@@ -61,7 +61,7 @@ Requirements for GPU optimization release. Each maps to roadmap phases.
 - [x] **TEST-01**: ESM-2 worker unit tests verify model loading, batching, and output format
 - [x] **TEST-02**: ESM-2 multi-GPU integration test compares output against single-GPU baseline
 - [x] **TEST-03**: DNABERT-S worker unit tests verify optimized batching matches vanilla output
-- [ ] **TEST-04**: Checkpoint unit tests verify atomic writes, corruption handling, and resume capability
+- [x] **TEST-04**: Checkpoint unit tests verify atomic writes, corruption handling, and resume capability
 - [ ] **TEST-05**: Memory/attention unit tests verify FlashAttention integration and fragmentation prevention
 - [ ] **TEST-06**: End-to-end integration test compares full pipeline output (optimized vs vanilla)
 
@@ -119,27 +119,27 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MEM-05 | Phase 4 | Pending |
 | INFRA-01 | Phase 1 | Complete |
 | INFRA-02 | Phase 1 | Complete |
-| INFRA-03 | Phase 3 | Pending |
-| INFRA-04 | Phase 3 | Pending |
-| INFRA-05 | Phase 3 | Pending |
+| INFRA-03 | Phase 3 | Complete |
+| INFRA-04 | Phase 3 | Complete |
+| INFRA-05 | Phase 3 | Complete |
 | MON-01 | Phase 5 | Pending |
 | MON-02 | Phase 5 | Pending |
 | MON-03 | Phase 5 | Pending |
 | LOAD-01 | Phase 5 | Pending |
-| LOAD-02 | Phase 3 | Pending |
+| LOAD-02 | Phase 3 | Complete |
 | LOAD-03 | Phase 5 | Pending |
 | PERF-01 | Phase 6 | Pending |
 | PERF-02 | Phase 6 | Pending |
 | SCALE-01 | Phase 6 | Pending |
 | SCALE-02 | Phase 1 | Complete |
 | COMPAT-01 | Phase 1 | Complete |
-| COMPAT-02 | Phase 3 | Pending |
+| COMPAT-02 | Phase 3 | Complete |
 | COMPAT-03 | Phase 1 | Complete |
 
 | TEST-01 | Phase 1 | Complete |
 | TEST-02 | Phase 1 | Complete |
 | TEST-03 | Phase 2 | Complete |
-| TEST-04 | Phase 3 | Pending |
+| TEST-04 | Phase 3 | Complete |
 | TEST-05 | Phase 4 | Pending |
 | TEST-06 | Phase 6 | Pending |
 

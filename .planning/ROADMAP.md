@@ -16,7 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1.1: Parallel Translation (INSERTED)** - Parallelize six-frame translation with CPU multiprocessing
 - [x] **Phase 2: DNABERT-S Optimization** - Optimize DNABERT-S batching and queuing to match ESM-2
 - [x] **Phase 2.1: Parallel Embedding Merge (INSERTED)** - Parallelize embedding merge with multi-processing/multi-threading
-- [ ] **Phase 3: Checkpoint Robustness** - Atomic writes, validation, backward compatibility
+- [x] **Phase 3: Checkpoint Robustness** - Atomic writes, validation, backward compatibility
 - [ ] **Phase 4: Memory & Attention Optimization** - FlashAttention, prefetching, memory management
 - [ ] **Phase 5: Load Balancing & Monitoring** - Efficient work distribution and GPU utilization visibility
 - [ ] **Phase 6: Performance Validation** - Verify <10 hour target and linear scaling
@@ -117,7 +117,7 @@ Plans:
 - [x] 03-01-PLAN.md — Create validation utilities and extend atomic writes
 - [x] 03-02-PLAN.md — Add version management and backward compatibility
 - [x] 03-03-PLAN.md — Integrate into pipeline with comprehensive tests
-- [ ] 03-04-PLAN.md — Add .done marker files for quick resume checks (gap closure)
+- [x] 03-04-PLAN.md — Add .done marker files for quick resume checks (gap closure)
 
 ### Phase 4: Memory & Attention Optimization
 **Goal**: Memory-efficient processing with FlashAttention-2, DataLoader prefetching, CUDA streams, and fragmentation prevention delivers additional 1.5-2x speedup.
