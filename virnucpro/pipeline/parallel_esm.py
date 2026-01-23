@@ -9,7 +9,12 @@ import logging
 
 logger = logging.getLogger('virnucpro.parallel_esm')
 
-# Import at module level for worker access
+# Import base worker utilities for shared functionality
+from virnucpro.pipeline.base_worker import (
+    BaseEmbeddingWorker,
+    count_sequences as base_count_sequences,
+    assign_files_by_sequences
+)
 from virnucpro.pipeline.features import extract_esm_features
 from virnucpro.core.logging_setup import setup_worker_logging
 
@@ -31,26 +36,23 @@ def count_sequences(file_path: Path) -> int:
     """
     Count number of sequences in a FASTA file.
 
+    This is a wrapper around the base_worker implementation for backward compatibility.
+
     Args:
         file_path: Path to FASTA file
 
     Returns:
         Number of sequences in file
     """
-    count = 0
-    with open(file_path, 'r') as f:
-        for line in f:
-            if line.startswith('>'):
-                count += 1
-    return count
+    return base_count_sequences(file_path)
 
 
 def assign_files_round_robin(files: List[Path], num_workers: int) -> List[List[Path]]:
     """
     Distribute files across workers using balanced bin-packing by sequence count.
 
-    Uses greedy bin-packing algorithm to balance work by sequence count,
-    not just file count, ensuring even GPU utilization.
+    This is a wrapper around assign_files_by_sequences from base_worker for backward compatibility.
+    The name "round_robin" is a misnomer - this actually uses greedy bin-packing.
 
     Args:
         files: List of file paths to process
@@ -64,40 +66,7 @@ def assign_files_round_robin(files: List[Path], num_workers: int) -> List[List[P
         >>> assign_files_round_robin(files, 2)
         [[Path('a.fa'), Path('c.fa')], [Path('b.fa'), Path('d.fa'), Path('e.fa')]]
     """
-    if num_workers <= 0:
-        raise ValueError(f"num_workers must be positive, got {num_workers}")
-
-    if not files:
-        return [[] for _ in range(num_workers)]
-
-    # Count sequences in each file
-    file_sizes = []
-    for file_path in files:
-        seq_count = count_sequences(file_path)
-        file_sizes.append((file_path, seq_count))
-
-    # Sort by sequence count (descending) for better bin-packing
-    file_sizes.sort(key=lambda x: x[1], reverse=True)
-
-    # Initialize bins (workers) with running totals
-    worker_files = [[] for _ in range(num_workers)]
-    worker_totals = [0] * num_workers
-
-    # Greedy bin-packing: assign each file to worker with lowest current total
-    for file_path, seq_count in file_sizes:
-        # Find worker with minimum load
-        min_worker_idx = min(range(num_workers), key=lambda i: worker_totals[i])
-
-        # Assign file to that worker
-        worker_files[min_worker_idx].append(file_path)
-        worker_totals[min_worker_idx] += seq_count
-
-    logger.info(f"Assigned {len(files)} files to {num_workers} workers (bin-packing)")
-    for worker_idx, file_list in enumerate(worker_files):
-        total_seqs = worker_totals[worker_idx]
-        logger.info(f"  Worker {worker_idx}: {len(file_list)} files, {total_seqs} sequences")
-
-    return worker_files
+    return assign_files_by_sequences(files, num_workers)
 
 
 def process_esm_files_worker(
