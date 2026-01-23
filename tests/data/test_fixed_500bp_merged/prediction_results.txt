@@ -1,0 +1,5 @@
+Sequence_ID	Prediction	score1	score2
+fixed_500bp_seq1_chunk_1R1	virus	0.002076708	0.9979233
+fixed_500bp_seq1_chunk_1R3	virus	0.21817714	0.7818229
+fixed_500bp_seq2_chunk_1R1	virus	0.08007622	0.9199237
+fixed_500bp_seq2_chunk_1R3	virus	0.22702886	0.7729711

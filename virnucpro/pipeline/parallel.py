@@ -8,6 +8,19 @@ import logging
 logger = logging.getLogger('virnucpro.parallel')
 
 
+def _get_progress_queue():
+    """
+    Get the progress queue from work_queue module.
+
+    Returns None if queue not initialized (when running without progress reporting).
+    """
+    try:
+        from virnucpro.pipeline.work_queue import _worker_progress_queue
+        return _worker_progress_queue
+    except ImportError:
+        return None
+
+
 def detect_cuda_devices() -> List[int]:
     """
     Detect available CUDA devices.
@@ -80,7 +93,7 @@ def process_dnabert_files_worker(
         device_id: CUDA device ID (e.g., 0 for cuda:0)
         batch_size: Batch size for DNABERT-S processing
         output_dir: Directory where output files should be saved
-        **kwargs: Additional arguments including progress_queue
+        **kwargs: Additional arguments (log_level, log_format)
 
     Returns:
         Tuple of (processed_files, failed_files)
@@ -90,8 +103,8 @@ def process_dnabert_files_worker(
     Raises:
         Exception: Critical errors that prevent worker startup (logged with device context)
     """
-    # Extract progress queue if provided
-    progress_queue = kwargs.get('progress_queue', None)
+    # Get progress queue from module global (set by Pool initializer)
+    progress_queue = _get_progress_queue()
 
     processed_files = []
     failed_files = []

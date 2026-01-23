@@ -14,6 +14,19 @@ from virnucpro.pipeline.features import extract_esm_features
 from virnucpro.core.logging_setup import setup_worker_logging
 
 
+def _get_progress_queue():
+    """
+    Get the progress queue from work_queue module.
+
+    Returns None if queue not initialized (when running without progress reporting).
+    """
+    try:
+        from virnucpro.pipeline.work_queue import _worker_progress_queue
+        return _worker_progress_queue
+    except ImportError:
+        return None
+
+
 def count_sequences(file_path: Path) -> int:
     """
     Count number of sequences in a FASTA file.
@@ -107,7 +120,7 @@ def process_esm_files_worker(
         device_id: CUDA device ID (e.g., 0 for cuda:0)
         toks_per_batch: Tokens per batch for ESM-2 processing (default: 2048)
         output_dir: Directory where output files should be saved
-        **kwargs: Additional arguments including log_level and log_format
+        **kwargs: Additional arguments (log_level, log_format)
 
     Returns:
         Tuple of (processed_files, failed_files)
@@ -122,8 +135,8 @@ def process_esm_files_worker(
     log_format = kwargs.get('log_format', '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     setup_worker_logging(log_level, log_format)
 
-    # Extract progress queue if provided
-    progress_queue = kwargs.get('progress_queue', None)
+    # Get progress queue from module global (set by Pool initializer)
+    progress_queue = _get_progress_queue()
 
     processed_files = []
     failed_files = []

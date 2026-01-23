@@ -10,6 +10,52 @@ import time
 
 logger = logging.getLogger('virnucpro.work_queue')
 
+# Module-level globals for worker processes (set by Pool initializer)
+_worker_progress_queue = None
+_worker_function = None
+
+
+def _init_worker(progress_queue, worker_function):
+    """
+    Pool initializer function to set module-level worker globals.
+
+    This allows Queue to be inherited by child processes through multiprocessing
+    context instead of being pickled as a function argument.
+
+    Args:
+        progress_queue: Multiprocessing Queue for progress reporting (can be None)
+        worker_function: Function to execute in workers
+    """
+    global _worker_progress_queue, _worker_function
+    _worker_progress_queue = progress_queue
+    _worker_function = worker_function
+
+
+def _worker_wrapper(
+    file_subset: List[Path],
+    device_id: int,
+    kwargs: Dict[str, Any]
+) -> Optional[Tuple[List[Path], List[Tuple[Path, str]]]]:
+    """
+    Wrapper around worker function to handle exceptions.
+
+    This is a module-level function (not a method) so it can be pickled
+    for multiprocessing.
+
+    Args:
+        file_subset: Files to process
+        device_id: CUDA device ID
+        kwargs: Additional keyword arguments
+
+    Returns:
+        Worker function result or None if critical failure
+    """
+    try:
+        return _worker_function(file_subset, device_id, **kwargs)
+    except Exception as e:
+        logger.exception(f"Worker {device_id} critical failure")
+        return None
+
 
 class WorkerStatus(Enum):
     """Status states for worker processes"""
@@ -111,9 +157,8 @@ class BatchQueueManager:
         worker_kwargs['log_level'] = log_level
         worker_kwargs['log_format'] = log_format
 
-        # Add progress queue to kwargs if provided
-        if self.progress_queue is not None:
-            worker_kwargs['progress_queue'] = self.progress_queue
+        # NOTE: progress_queue is NOT added to kwargs - it's passed via Pool initializer
+        # to avoid pickling Queue objects (which triggers RuntimeError)
 
         # Create worker arguments: (file_subset, device_id, **worker_kwargs)
         worker_args = []
@@ -125,10 +170,16 @@ class BatchQueueManager:
 
         try:
             # Use spawn context pool for CUDA safety
-            with self.ctx.Pool(self.num_workers) as pool:
-                # Launch workers with starmap
+            # Pass progress_queue and worker_function via initializer so they're inherited, not pickled
+            # This avoids "Queue objects should only be shared between processes through inheritance" error
+            with self.ctx.Pool(
+                self.num_workers,
+                initializer=_init_worker,
+                initargs=(self.progress_queue, self.worker_function)
+            ) as pool:
+                # Launch workers with starmap using module-level wrapper function
                 results = pool.starmap(
-                    self._worker_wrapper,
+                    _worker_wrapper,
                     [(args[0], args[1], worker_kwargs) for args in worker_args]
                 )
 
@@ -164,29 +215,6 @@ class BatchQueueManager:
                    f"{len(all_processed)} processed, {len(all_failed)} failed")
 
         return (all_processed, all_failed)
-
-    def _worker_wrapper(
-        self,
-        file_subset: List[Path],
-        device_id: int,
-        kwargs: Dict[str, Any]
-    ) -> Optional[Tuple[List[Path], List[Tuple[Path, str]]]]:
-        """
-        Wrapper around worker function to handle exceptions.
-
-        Args:
-            file_subset: Files to process
-            device_id: CUDA device ID
-            kwargs: Additional keyword arguments
-
-        Returns:
-            Worker function result or None if critical failure
-        """
-        try:
-            return self.worker_function(file_subset, device_id, **kwargs)
-        except Exception as e:
-            logger.exception(f"Worker {device_id} critical failure")
-            return None
 
     def get_worker_status(self) -> Dict[int, WorkerStatus]:
         """

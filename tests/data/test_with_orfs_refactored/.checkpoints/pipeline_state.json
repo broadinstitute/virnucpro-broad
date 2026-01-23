@@ -1,0 +1,123 @@
+{
+  "created_at": "2026-01-22T17:32:57.741463",
+  "pipeline_config": {
+    "config_hash": "9ef5f4afba5b7382465e7f0cbd603da777b15581827556a2c99215383e7fee61",
+    "expected_length": 500,
+    "model_path": "500_model.pth"
+  },
+  "stages": {
+    "CHUNKING": {
+      "status": "completed",
+      "started_at": "2026-01-22T17:32:57.741521",
+      "completed_at": "2026-01-22T17:32:57.746605",
+      "duration_seconds": 0.005088,
+      "inputs": {},
+      "outputs": {
+        "files": [
+          "tests/data/test_with_orfs_refactored/test_with_orfs_chunked500.fa"
+        ]
+      },
+      "error": null
+    },
+    "TRANSLATION": {
+      "status": "completed",
+      "started_at": "2026-01-22T17:32:57.746886",
+      "completed_at": "2026-01-22T17:32:57.750130",
+      "duration_seconds": 0.003251,
+      "inputs": {},
+      "outputs": {
+        "nucleotide_file": "tests/data/test_with_orfs_refactored/test_with_orfs_nucleotide.fa",
+        "protein_file": "tests/data/test_with_orfs_refactored/test_with_orfs_protein.faa"
+      },
+      "error": null
+    },
+    "NUCLEOTIDE_SPLITTING": {
+      "status": "completed",
+      "started_at": "2026-01-22T17:32:57.750537",
+      "completed_at": "2026-01-22T17:32:57.751089",
+      "duration_seconds": 0.000555,
+      "inputs": {},
+      "outputs": {
+        "nucleotide_files": [
+          "tests/data/test_with_orfs_refactored/test_with_orfs_nucleotide/output_1.fa"
+        ]
+      },
+      "error": null
+    },
+    "PROTEIN_SPLITTING": {
+      "status": "completed",
+      "started_at": "2026-01-22T17:32:57.751341",
+      "completed_at": "2026-01-22T17:32:57.751783",
+      "duration_seconds": 0.000445,
+      "inputs": {},
+      "outputs": {
+        "protein_files": [
+          "tests/data/test_with_orfs_refactored/test_with_orfs_protein/output_1.fa"
+        ]
+      },
+      "error": null
+    },
+    "NUCLEOTIDE_FEATURES": {
+      "status": "completed",
+      "started_at": "2026-01-22T17:32:57.752025",
+      "completed_at": "2026-01-22T17:32:59.400293",
+      "duration_seconds": 1.648274,
+      "inputs": {},
+      "outputs": {
+        "nucleotide_features": [
+          "tests/data/test_with_orfs_refactored/test_with_orfs_nucleotide/output_1_DNABERT_S.pt"
+        ]
+      },
+      "error": null
+    },
+    "PROTEIN_FEATURES": {
+      "status": "completed",
+      "started_at": "2026-01-22T17:32:59.400716",
+      "completed_at": "2026-01-22T17:33:14.337402",
+      "duration_seconds": 14.936694,
+      "inputs": {},
+      "outputs": {
+        "protein_features": [
+          "tests/data/test_with_orfs_refactored/test_with_orfs_protein/output_1_ESM.pt"
+        ]
+      },
+      "error": null
+    },
+    "FEATURE_MERGING": {
+      "status": "completed",
+      "started_at": "2026-01-22T17:33:14.337955",
+      "completed_at": "2026-01-22T17:33:14.365163",
+      "duration_seconds": 0.027215,
+      "inputs": {},
+      "outputs": {
+        "merged_files": [
+          "tests/data/test_with_orfs_refactored/test_with_orfs_merged/output_1_merged.pt"
+        ]
+      },
+      "error": null
+    },
+    "PREDICTION": {
+      "status": "completed",
+      "started_at": "2026-01-22T17:33:14.365515",
+      "completed_at": "2026-01-22T17:33:14.505290",
+      "duration_seconds": 0.139784,
+      "inputs": {},
+      "outputs": {
+        "prediction_file": "tests/data/test_with_orfs_refactored/test_with_orfs_merged/prediction_results.txt"
+      },
+      "error": null
+    },
+    "CONSENSUS": {
+      "status": "completed",
+      "started_at": "2026-01-22T17:33:14.505752",
+      "completed_at": "2026-01-22T17:33:14.637072",
+      "duration_seconds": 0.131325,
+      "inputs": {},
+      "outputs": {
+        "consensus_file": "tests/data/test_with_orfs_refactored/test_with_orfs_merged/prediction_results_highestscore.csv"
+      },
+      "error": null
+    }
+  },
+  "updated_at": "2026-01-22T17:33:14.637080"
+}
