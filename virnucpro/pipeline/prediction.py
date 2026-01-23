@@ -328,6 +328,22 @@ def run_prediction(
             num_gpus = len(cuda_devices) if cuda_devices else 1
             use_parallel = num_gpus > 1 and len(protein_files) > 1 and parallel
 
+            # Log GPU capabilities and BF16 status
+            if torch.cuda.is_available() and cuda_devices:
+                for gpu_id in cuda_devices:
+                    device_name = torch.cuda.get_device_name(gpu_id)
+                    capability = torch.cuda.get_device_capability(gpu_id)
+                    compute_version = f"{capability[0]}.{capability[1]}"
+                    bf16_enabled = capability[0] >= 8
+                    logger.info(f"GPU {gpu_id} ({device_name}): Compute {compute_version}, BF16 {'enabled' if bf16_enabled else 'disabled'}")
+
+                # Log batch size based on BF16 status
+                if cuda_devices and torch.cuda.get_device_capability(cuda_devices[0])[0] >= 8:
+                    effective_batch = 3072 if toks_per_batch == 2048 else toks_per_batch
+                    logger.info(f"BF16 mixed precision available, using batch size {effective_batch}")
+                else:
+                    logger.info(f"Using FP32 precision, batch size {toks_per_batch}")
+
             if use_parallel:
                 logger.info(f"Using {num_gpus} GPUs for ESM-2 extraction")
 
