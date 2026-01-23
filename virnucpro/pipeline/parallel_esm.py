@@ -103,6 +103,9 @@ def process_esm_files_worker(
     log_format = kwargs.get('log_format', '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     setup_worker_logging(log_level, log_format)
 
+    # Extract progress queue if provided
+    progress_queue = kwargs.get('progress_queue', None)
+
     processed_files = []
     failed_files = []
 
@@ -128,6 +131,14 @@ def process_esm_files_worker(
                     processed_files.append(output_file)
                     logger.info(f"Worker {device_id}: Completed {file.name} -> {output_file.name}")
 
+                    # Report progress if queue available
+                    if progress_queue is not None:
+                        progress_queue.put({
+                            'gpu_id': device_id,
+                            'file': str(file),
+                            'status': 'complete'
+                        })
+
                 except RuntimeError as e:
                     # Handle OOM and other CUDA errors
                     error_msg = str(e)
@@ -139,11 +150,27 @@ def process_esm_files_worker(
 
                     failed_files.append((file, error_msg))
 
+                    # Report failure if queue available
+                    if progress_queue is not None:
+                        progress_queue.put({
+                            'gpu_id': device_id,
+                            'file': str(file),
+                            'status': 'failed'
+                        })
+
                 except Exception as e:
                     # Handle other errors
                     error_msg = str(e)
                     logger.exception(f"Worker {device_id}: Error processing {file.name}")
                     failed_files.append((file, error_msg))
+
+                    # Report failure if queue available
+                    if progress_queue is not None:
+                        progress_queue.put({
+                            'gpu_id': device_id,
+                            'file': str(file),
+                            'status': 'failed'
+                        })
 
         logger.info(f"Worker {device_id}: Completed {len(processed_files)}/{len(file_subset)} files "
                    f"({len(failed_files)} failed)")

@@ -65,7 +65,8 @@ def process_dnabert_files_worker(
     file_subset: List[Path],
     device_id: int,
     batch_size: int,
-    output_dir: Path
+    output_dir: Path,
+    **kwargs
 ) -> List[Path]:
     """
     Worker function to process DNABERT-S features on a specific GPU.
@@ -79,6 +80,7 @@ def process_dnabert_files_worker(
         device_id: CUDA device ID (e.g., 0 for cuda:0)
         batch_size: Batch size for DNABERT-S processing
         output_dir: Directory where output files should be saved
+        **kwargs: Additional arguments including progress_queue
 
     Returns:
         List of output .pt file paths
@@ -86,6 +88,9 @@ def process_dnabert_files_worker(
     Raises:
         Exception: Any error during processing (logged with device context)
     """
+    # Extract progress queue if provided
+    progress_queue = kwargs.get('progress_queue', None)
+
     output_files = []
 
     try:
@@ -97,13 +102,33 @@ def process_dnabert_files_worker(
         for nuc_file in file_subset:
             output_file = output_dir / f"{nuc_file.stem}_DNABERT_S.pt"
 
-            extract_dnabert_features(
-                nuc_file,
-                output_file,
-                device,
-                batch_size=batch_size
-            )
-            output_files.append(output_file)
+            try:
+                extract_dnabert_features(
+                    nuc_file,
+                    output_file,
+                    device,
+                    batch_size=batch_size
+                )
+                output_files.append(output_file)
+
+                # Report progress if queue available
+                if progress_queue is not None:
+                    progress_queue.put({
+                        'gpu_id': device_id,
+                        'file': str(nuc_file),
+                        'status': 'complete'
+                    })
+            except Exception as e:
+                logger.error(f"Worker {device_id}: Failed to process {nuc_file.name}: {e}")
+
+                # Report failure if queue available
+                if progress_queue is not None:
+                    progress_queue.put({
+                        'gpu_id': device_id,
+                        'file': str(nuc_file),
+                        'status': 'failed'
+                    })
+                # Continue with next file instead of raising
 
         logger.info(f"Worker {device_id}: Completed {len(output_files)} files")
         return output_files
