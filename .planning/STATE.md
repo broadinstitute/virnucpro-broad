@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 2.1 of 6 (Parallel Embedding Merge)
-Plan: 2 of 2 (Pipeline Integration)
+Plan: 3 of 3 (Integration Tests and Error Handling)
 Status: Phase complete
-Last activity: 2026-01-23 — Completed 02.1-02-PLAN.md
+Last activity: 2026-01-23 — Completed 02.1-03-PLAN.md
 
-Progress: [███████████] 100% (17/17 plans)
+Progress: [███████████] 100% (18/18 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 17
+- Total plans completed: 18
 - Average duration: 3.8 minutes
-- Total execution time: 1.13 hours
+- Total execution time: 1.20 hours
 
 **By Phase:**
 
@@ -30,11 +30,11 @@ Progress: [███████████] 100% (17/17 plans)
 | 1     | 7     | 33.6m | 4.8m     |
 | 1.1   | 3     | 10.3m | 3.4m     |
 | 2     | 5     | 19.5m | 3.9m     |
-| 2.1   | 2     | 6.2m  | 3.1m     |
+| 2.1   | 3     | 10.4m | 3.5m     |
 
 **Recent Trend:**
-- Last 5 plans: 02-03 (2.7m), 02-04 (2.6m), 02-05 (8.0m), 02.1-01 (3.7m), 02.1-02 (2.5m)
-- Trend: Phase 2.1 complete; CPU parallelization for merge operations integrated
+- Last 5 plans: 02-04 (2.6m), 02-05 (8.0m), 02.1-01 (3.7m), 02.1-02 (2.5m), 02.1-03 (4.2m)
+- Trend: Phase 2.1 complete; integration tests validate parallel merge correctness and performance
 
 *Updated after each plan completion*
 
@@ -126,6 +126,11 @@ Recent decisions affecting current work:
 - sequential-fallback-merge: Maintain sequential merge path for single file or single core to avoid overhead when not beneficial
 - merge-threads-cli: Add --merge-threads CLI parameter for user control of merge parallelism (default: auto-detect)
 
+**From 02.1-03 execution:**
+- tuple-return-partial-success: Return (merged_files, failed_pairs) tuple from parallel merge for partial completion tracking
+- specific-exception-handling: Catch FileNotFoundError, RuntimeError, Exception separately for better error diagnostics
+- performance-threshold-2x: Assert >= 2x speedup with 4 workers in tests (conservative threshold accounting for overhead)
+
 ### Pending Todos
 
 None yet.
@@ -154,8 +159,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-23 17:48 UTC
-Stopped at: Completed 02.1-02-PLAN.md execution (Pipeline Integration)
+Last session: 2026-01-23 17:55 UTC
+Stopped at: Completed 02.1-03-PLAN.md execution (Integration Tests and Error Handling)
 Resume file: None
 
 ## Phase 2 Complete
@@ -184,9 +189,10 @@ All 5 plans executed successfully:
 
 **Parallel Embedding Merge - Complete**
 
-All 2 plans executed successfully:
-- 02.1-01: Parallel merge worker functions
-- 02.1-02: Pipeline integration and CLI control
+All 3 plans executed successfully:
+- 02.1-01: Parallel merge worker functions (3.7m)
+- 02.1-02: Pipeline integration and CLI control (2.5m)
+- 02.1-03: Integration tests and error handling (4.2m)
 
 **Key achievements:**
 - CPU multiprocessing for embedding merge with 6-7x expected speedup
@@ -195,8 +201,10 @@ All 2 plans executed successfully:
 - Sequential fallback for single file or single core
 - Checkpoint support for resume capability
 - Atomic writes for corruption prevention
+- Enhanced error handling with partial failure support
+- Comprehensive integration tests validating correctness and performance
 
-**Phase duration:** 6.2 minutes (2 plans)
-**Average per plan:** 3.1 minutes
+**Phase duration:** 10.4 minutes (3 plans)
+**Average per plan:** 3.5 minutes
 
 Ready to proceed to next phase when defined.
