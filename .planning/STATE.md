@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 3 of 6 (Checkpoint Robustness)
-Plan: 3 of 3
-Status: Phase complete
-Last activity: 2026-01-23 — Completed 03-03-PLAN.md (Pipeline Integration & Testing)
+Plan: 4 of 4
+Status: Phase complete with gap closure
+Last activity: 2026-01-23 — Completed 03-04-PLAN.md (.Done Marker Files)
 
-Progress: [███████████] 100% (23/23 plans)
+Progress: [███████████] 100% (24/24 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 23
-- Average duration: 3.6 minutes
-- Total execution time: 1.41 hours
+- Total plans completed: 24
+- Average duration: 3.5 minutes
+- Total execution time: 1.43 hours
 
 **By Phase:**
 
@@ -31,11 +31,11 @@ Progress: [███████████] 100% (23/23 plans)
 | 1.1   | 3     | 10.3m | 3.4m     |
 | 2     | 5     | 19.5m | 3.9m     |
 | 2.1   | 5     | 15.6m | 3.1m     |
-| 3     | 3     | 10.2m | 3.4m     |
+| 3     | 4     | 15.2m | 3.8m     |
 
 **Recent Trend:**
-- Last 5 plans: 02.1-04 (3.1m), 02.1-05 (2.1m), 03-01 (3.5m), 03-02 (3.7m), 03-03 (3.0m)
-- Trend: Phase 3 complete with comprehensive testing; checkpoint robustness fully integrated with 35 test cases
+- Last 5 plans: 02.1-05 (2.1m), 03-01 (3.5m), 03-02 (3.7m), 03-03 (3.0m), 03-04 (5.0m)
+- Trend: Phase 3 complete with gap closure; checkpoint robustness fully integrated with 56 test cases total
 
 *Updated after each plan completion*
 
@@ -156,6 +156,12 @@ Recent decisions affecting current work:
 - failed-checkpoint-logging: Log validation failures to failed_checkpoints.txt with pipe-delimited format {path}|{reason}|{timestamp}
 - checkpoint-exit-code-3: Exit code 3 for checkpoint-specific issues (0=success, 1=generic, 2=partial pipeline, 3=checkpoint)
 
+**From 03-04 execution:**
+- done-marker-location: Use {checkpoint}.done suffix for marker files (simple, atomic, co-located)
+- dual-mechanism-redundancy: Maintain both .done markers and embedded status field for backward compatibility
+- defensive-cleanup: Re-process files missing .done markers instead of trusting checkpoint existence
+- marker-check-order: Check .done marker before any checkpoint loading for performance (>1000x speedup)
+
 ### Pending Todos
 
 None yet.
@@ -184,8 +190,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-23 22:34 UTC
-Stopped at: Completed 03-03-PLAN.md execution (Pipeline Integration & Testing)
+Last session: 2026-01-23 23:17 UTC
+Stopped at: Completed 03-04-PLAN.md execution (.Done Marker Files - Gap Closure)
 Resume file: None
 
 ## Phase 2 Complete
@@ -243,12 +249,13 @@ All 5 plans executed successfully:
 
 ## Phase 3 Complete
 
-**Checkpoint Robustness - Complete**
+**Checkpoint Robustness - Complete with Gap Closure**
 
-All 3 plans executed successfully:
+All 4 plans executed successfully:
 - 03-01: Checkpoint validation utilities and atomic write pattern (3.5m)
 - 03-02: Checkpoint version management and backward compatibility (3.7m)
 - 03-03: Pipeline integration and comprehensive testing (3.0m)
+- 03-04: .Done marker files for quick resume checks (5.0m) [GAP CLOSURE]
 
 **Key achievements:**
 - Multi-level checkpoint validation (file size → ZIP → load → keys)
@@ -261,15 +268,20 @@ All 3 plans executed successfully:
 - CLI control flags (--skip-checkpoint-validation, --force-resume)
 - validate-checkpoints subcommand for standalone integrity checks
 - Pipeline integration with resume summary logging
-- Comprehensive test suite: 35 test cases (683 lines) covering all scenarios
+- **Gap closure:** .done marker files enable instant completion checks without loading multi-GB embeddings (>1000x speedup)
+- Resume logic optimized for DNABERT-S and ESM-2 (4 checkpoint sites)
+- Comprehensive test suite: 56 test cases (1072 lines) covering all scenarios
 
-**Phase duration:** 10.2 minutes (3 plans)
-**Average per plan:** 3.4 minutes
+**Phase duration:** 15.2 minutes (4 plans)
+**Average per plan:** 3.8 minutes
 
 **Checkpoint corruption prevention:**
 Atomic write pattern prevents "8+ hours into resume attempt, discovers corrupted checkpoint" failure mode that research identified as critical for long-running jobs.
 
 **Version evolution:**
 Version management enables safe checkpoint format changes while maintaining backward compatibility with pre-optimization runs.
+
+**Performance optimization:**
+.done markers enable O(1) completion checks for directories with hundreds of multi-GB checkpoint files, eliminating resume bottleneck.
 
 Ready to proceed to Phase 4 (FlashAttention-2 Integration).
