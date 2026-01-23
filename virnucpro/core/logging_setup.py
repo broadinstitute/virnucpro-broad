@@ -63,6 +63,42 @@ def setup_logging(
     return logger
 
 
+def setup_worker_logging(log_level: int, log_format: str) -> None:
+    """
+    Configure logging for multiprocessing worker processes.
+
+    This function is designed to be called at the start of each worker process
+    to ensure logging is properly configured in spawn context. It configures
+    both the root logger and module-specific loggers.
+
+    Args:
+        log_level: Logging level (e.g., logging.INFO, logging.DEBUG)
+        log_format: Format string for log messages
+
+    Example:
+        >>> import logging
+        >>> setup_worker_logging(logging.INFO, '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    """
+    # Create formatter
+    formatter = logging.Formatter(log_format, datefmt='%Y-%m-%d %H:%M:%S')
+
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
+    root_logger.handlers = []  # Clear any existing handlers
+
+    # Add console handler to root logger
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+    # Configure virnucpro module loggers
+    virnuc_logger = logging.getLogger('virnucpro')
+    virnuc_logger.setLevel(log_level)
+    virnuc_logger.propagate = True  # Let root logger handle the output
+
+
 def get_logger(name: str) -> logging.Logger:
     """
     Get a logger instance for a specific module.
