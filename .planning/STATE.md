@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 2.1 of 6 (Parallel Embedding Merge)
-Plan: 1 of 2 (Parallel Merge Worker Functions)
-Status: In progress
-Last activity: 2026-01-23 — Completed 02.1-01-PLAN.md
+Plan: 2 of 2 (Pipeline Integration)
+Status: Phase complete
+Last activity: 2026-01-23 — Completed 02.1-02-PLAN.md
 
-Progress: [██████████░] 94% (16/17 plans)
+Progress: [███████████] 100% (17/17 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 16
-- Average duration: 4.0 minutes
-- Total execution time: 1.08 hours
+- Total plans completed: 17
+- Average duration: 3.8 minutes
+- Total execution time: 1.13 hours
 
 **By Phase:**
 
@@ -30,11 +30,11 @@ Progress: [██████████░] 94% (16/17 plans)
 | 1     | 7     | 33.6m | 4.8m     |
 | 1.1   | 3     | 10.3m | 3.4m     |
 | 2     | 5     | 19.5m | 3.9m     |
-| 2.1   | 1     | 3.7m  | 3.7m     |
+| 2.1   | 2     | 6.2m  | 3.1m     |
 
 **Recent Trend:**
-- Last 5 plans: 02-02 (3.3m), 02-03 (2.7m), 02-04 (2.6m), 02-05 (8.0m), 02.1-01 (3.7m)
-- Trend: Phase 2.1 started; CPU parallelization for merge operations
+- Last 5 plans: 02-03 (2.7m), 02-04 (2.6m), 02-05 (8.0m), 02.1-01 (3.7m), 02.1-02 (2.5m)
+- Trend: Phase 2.1 complete; CPU parallelization for merge operations integrated
 
 *Updated after each plan completion*
 
@@ -121,6 +121,11 @@ Recent decisions affecting current work:
 - checkpoint-and-atomic: Add checkpoint skip and atomic write to merge_features() for resume capability and corruption prevention
 - batch-size-one: Default batch_size=1 for merge (each file pair is substantial work, batching available for 100+ files)
 
+**From 02.1-02 execution:**
+- auto-parallel-merge: Auto-detect CPU count and use parallel merge when >1 core and >1 file for zero-config optimization
+- sequential-fallback-merge: Maintain sequential merge path for single file or single core to avoid overhead when not beneficial
+- merge-threads-cli: Add --merge-threads CLI parameter for user control of merge parallelism (default: auto-detect)
+
 ### Pending Todos
 
 None yet.
@@ -149,8 +154,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-23 17:42 UTC
-Stopped at: Completed 02.1-01-PLAN.md execution (Parallel Merge Worker Functions)
+Last session: 2026-01-23 17:48 UTC
+Stopped at: Completed 02.1-02-PLAN.md execution (Pipeline Integration)
 Resume file: None
 
 ## Phase 2 Complete
@@ -174,5 +179,24 @@ All 5 plans executed successfully:
 
 **Phase duration:** 19.5 minutes (5 plans)
 **Average per plan:** 3.9 minutes
+
+## Phase 2.1 Complete
+
+**Parallel Embedding Merge - Complete**
+
+All 2 plans executed successfully:
+- 02.1-01: Parallel merge worker functions
+- 02.1-02: Pipeline integration and CLI control
+
+**Key achievements:**
+- CPU multiprocessing for embedding merge with 6-7x expected speedup
+- Auto-detection of CPU count for zero-config optimization
+- User control via --merge-threads CLI parameter
+- Sequential fallback for single file or single core
+- Checkpoint support for resume capability
+- Atomic writes for corruption prevention
+
+**Phase duration:** 6.2 minutes (2 plans)
+**Average per plan:** 3.1 minutes
 
 Ready to proceed to next phase when defined.
