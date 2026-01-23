@@ -5,7 +5,7 @@ import inspect
 import logging
 from enum import Enum
 from pathlib import Path
-from typing import List, Callable, Tuple, Dict, Any
+from typing import List, Callable, Tuple, Dict, Any, Optional
 import time
 
 logger = logging.getLogger('virnucpro.work_queue')
@@ -157,7 +157,7 @@ class BatchQueueManager:
         file_subset: List[Path],
         device_id: int,
         kwargs: Dict[str, Any]
-    ) -> Tuple[List[Path], List[Tuple[Path, str]]] | None:
+    ) -> Optional[Tuple[List[Path], List[Tuple[Path, str]]]]:
         """
         Wrapper around worker function to handle exceptions.
 

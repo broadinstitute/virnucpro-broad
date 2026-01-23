@@ -106,6 +106,11 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
         os.environ['CUDA_VISIBLE_DEVICES'] = gpus
         logger.info(f"Using GPUs: {gpus}")
 
+        # Auto-enable parallel if multiple GPUs specified
+        if ',' in gpus and not parallel:
+            parallel = True
+            logger.info("  Parallel processing: auto-enabled for multiple GPUs")
+
     # Validate and prepare parameters
     try:
         # Validate model parameters
