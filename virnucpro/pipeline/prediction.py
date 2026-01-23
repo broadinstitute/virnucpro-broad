@@ -272,9 +272,12 @@ def run_prediction(
             # Detect available GPUs for parallel processing
             available_gpus = detect_cuda_devices()
             num_gpus = len(available_gpus) if available_gpus else 1
-            use_parallel = num_gpus > 1 and len(nucleotide_files) > 1 and parallel
+            # Use parallel processing if multiple GPUs available and parallel mode enabled
+            # Note: Works with single files - sequences are distributed across GPUs
+            use_parallel = num_gpus > 1 and parallel
 
-            # Log GPU capabilities
+            # Log GPU capabilities and adjust batch size for BF16
+            effective_dnabert_batch = dnabert_batch_size
             if torch.cuda.is_available() and available_gpus:
                 for gpu_id in available_gpus:
                     device_name = torch.cuda.get_device_name(gpu_id)
@@ -283,12 +286,14 @@ def run_prediction(
                     bf16_enabled = capability[0] >= 8
                     logger.info(f"GPU {gpu_id} ({device_name}): Compute {compute_version}, BF16 {'enabled' if bf16_enabled else 'disabled'}")
 
-                # Log batch size based on BF16 status
+                # Adjust batch size for BF16 (Ampere+ GPUs)
                 if available_gpus and torch.cuda.get_device_capability(available_gpus[0])[0] >= 8:
-                    effective_batch = 3072 if dnabert_batch_size == 2048 else dnabert_batch_size
-                    logger.info(f"BF16 mixed precision available, using batch size {effective_batch}")
+                    # Auto-increase batch size for BF16 if using default
+                    if dnabert_batch_size == 2048:
+                        effective_dnabert_batch = 3072
+                    logger.info(f"BF16 mixed precision enabled, using batch size {effective_dnabert_batch}")
                 else:
-                    logger.info(f"Using FP32 precision, batch size {dnabert_batch_size}")
+                    logger.info(f"Using FP32 precision, batch size {effective_dnabert_batch}")
 
             if use_parallel:
                 logger.info(f"Using {num_gpus} GPUs for DNABERT-S extraction")
@@ -336,7 +341,7 @@ def run_prediction(
                         queue_manager = BatchQueueManager(num_gpus, process_dnabert_files_worker, progress_queue=progress_queue)
                         processed, failed = queue_manager.process_files(
                             file_assignments,
-                            toks_per_batch=dnabert_batch_size,
+                            toks_per_batch=effective_dnabert_batch,
                             output_dir=nucleotide_split_dir
                         )
                         nucleotide_feature_files.extend(processed)
@@ -380,7 +385,7 @@ def run_prediction(
                             nuc_file,
                             output_file,
                             device,
-                            batch_size=dnabert_batch_size
+                            batch_size=effective_dnabert_batch
                         )
                         nucleotide_feature_files.append(output_file)
                         pbar.update(1)
@@ -414,7 +419,9 @@ def run_prediction(
             # Detect available GPUs
             cuda_devices = detect_cuda_devices()
             num_gpus = len(cuda_devices) if cuda_devices else 1
-            use_parallel = num_gpus > 1 and len(protein_files) > 1 and parallel
+            # Use parallel processing if multiple GPUs available and parallel mode enabled
+            # Note: Works with single files - sequences are distributed across GPUs
+            use_parallel = num_gpus > 1 and parallel
 
             # Log GPU capabilities and BF16 status
             if torch.cuda.is_available() and cuda_devices:

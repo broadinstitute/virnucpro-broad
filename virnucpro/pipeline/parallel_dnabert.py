@@ -100,11 +100,9 @@ def process_dnabert_files_worker(
         model = AutoModel.from_pretrained(model_name, trust_remote_code=True).to(device)
         model.eval()
 
-        # Check for BF16 support and adjust batch size
+        # Check for BF16 support (batch size adjustment handled by pipeline)
         use_bf16 = detect_bf16_support(device)
-        if use_bf16 and toks_per_batch == 2048:
-            toks_per_batch = 3072  # Increase batch size with BF16
-            logger.info(f"Worker {device_id}: Increased toks_per_batch to {toks_per_batch} with BF16")
+        logger.info(f"Worker {device_id}: Using batch size {toks_per_batch}, BF16: {use_bf16}")
 
         # Wrap all inference in torch.no_grad() context
         with torch.no_grad():
