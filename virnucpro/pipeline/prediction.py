@@ -7,7 +7,7 @@ import time
 import os
 import torch
 
-from virnucpro.core.checkpoint import CheckpointManager, PipelineStage, atomic_save
+from virnucpro.core.checkpoint import CheckpointManager, PipelineStage, atomic_save, has_done_marker, remove_done_marker
 from virnucpro.core.checkpoint_validation import CheckpointError, CHECKPOINT_EXIT_CODE, load_failed_checkpoints
 from virnucpro.core.config import Config
 from virnucpro.pipeline.parallel import detect_cuda_devices
@@ -354,14 +354,27 @@ def run_prediction(
                 logger.info(f"Using {num_gpus} GPUs for DNABERT-S extraction")
 
                 # Filter out files with existing outputs for checkpoint resume
+                # Use .done markers for quick completion check without loading multi-GB checkpoints
                 files_to_process = []
+                complete_count = 0
                 for nuc_file in nucleotide_files:
                     output_file = nuc_file.parent / f"{nuc_file.stem}_DNABERT_S.pt"
-                    if not output_file.exists():
+
+                    # Quick check: .done marker indicates completed checkpoint
+                    if output_file.exists() and has_done_marker(output_file):
+                        nucleotide_feature_files.append(output_file)
+                        complete_count += 1
+                        logger.debug(f"Skipping {nuc_file.name} (checkpoint complete with .done marker)")
+                    elif output_file.exists() and not has_done_marker(output_file):
+                        # Checkpoint exists but no .done marker - may be incomplete
+                        logger.warning(f"Re-processing {nuc_file.name} (checkpoint missing .done marker)")
+                        remove_done_marker(output_file)  # Defensive cleanup
                         files_to_process.append(nuc_file)
                     else:
-                        nucleotide_feature_files.append(output_file)
-                        logger.info(f"Skipping {nuc_file.name} (output already exists)")
+                        files_to_process.append(nuc_file)
+
+                if complete_count > 0:
+                    logger.info(f"Resuming: {complete_count} DNABERT-S checkpoints complete, {len(files_to_process)} to process")
 
                 # Skip parallel processing if no files to process
                 if not files_to_process:
@@ -424,14 +437,27 @@ def run_prediction(
                 logger.info("Using single GPU for DNABERT-S extraction")
 
                 # Filter out files with existing outputs for checkpoint resume
+                # Use .done markers for quick completion check without loading multi-GB checkpoints
                 files_to_process = []
+                complete_count = 0
                 for nuc_file in nucleotide_files:
                     output_file = nuc_file.parent / f"{nuc_file.stem}_DNABERT_S.pt"
-                    if not output_file.exists() or output_file.stat().st_size == 0:
+
+                    # Quick check: .done marker indicates completed checkpoint
+                    if output_file.exists() and has_done_marker(output_file):
+                        nucleotide_feature_files.append(output_file)
+                        complete_count += 1
+                        logger.debug(f"Skipping {nuc_file.name} (checkpoint complete with .done marker)")
+                    elif output_file.exists() and not has_done_marker(output_file):
+                        # Checkpoint exists but no .done marker - may be incomplete or 0 bytes
+                        logger.warning(f"Re-processing {nuc_file.name} (checkpoint missing .done marker or invalid)")
+                        remove_done_marker(output_file)  # Defensive cleanup
                         files_to_process.append(nuc_file)
                     else:
-                        nucleotide_feature_files.append(output_file)
-                        logger.info(f"Skipping {nuc_file.name} (output already exists)")
+                        files_to_process.append(nuc_file)
+
+                if complete_count > 0:
+                    logger.info(f"Resuming: {complete_count} DNABERT-S checkpoints complete, {len(files_to_process)} to process")
 
                 with progress.create_file_bar(len(files_to_process), desc="DNABERT-S extraction") as pbar:
                     for nuc_file in files_to_process:
@@ -497,12 +523,35 @@ def run_prediction(
             if use_parallel:
                 logger.info(f"Using {num_gpus} GPUs for ESM-2 extraction")
 
+                # Filter out files with existing outputs for checkpoint resume
+                # Use .done markers for quick completion check without loading multi-GB checkpoints
+                files_to_process = []
+                complete_count = 0
+                for pro_file in protein_files:
+                    output_file = pro_file.parent / f"{pro_file.stem}_ESM.pt"
+
+                    # Quick check: .done marker indicates completed checkpoint
+                    if output_file.exists() and has_done_marker(output_file):
+                        protein_feature_files.append(output_file)
+                        complete_count += 1
+                        logger.debug(f"Skipping {pro_file.name} (checkpoint complete with .done marker)")
+                    elif output_file.exists() and not has_done_marker(output_file):
+                        # Checkpoint exists but no .done marker - may be incomplete
+                        logger.warning(f"Re-processing {pro_file.name} (checkpoint missing .done marker)")
+                        remove_done_marker(output_file)  # Defensive cleanup
+                        files_to_process.append(pro_file)
+                    else:
+                        files_to_process.append(pro_file)
+
+                if complete_count > 0:
+                    logger.info(f"Resuming: {complete_count} ESM-2 checkpoints complete, {len(files_to_process)} to process")
+
                 # Skip parallel processing if no files to process
-                if not protein_files:
-                    logger.info("No protein files to process, skipping ESM-2 extraction")
+                if not files_to_process:
+                    logger.info("All ESM-2 feature files already exist, skipping extraction")
                 else:
                     # Assign files round-robin across GPUs
-                    file_assignments = assign_files_round_robin(protein_files, num_gpus)
+                    file_assignments = assign_files_round_robin(files_to_process, num_gpus)
 
                     # Create progress queue for live updates
                     import multiprocessing
@@ -553,8 +602,31 @@ def run_prediction(
                 logger.info("Using single GPU for ESM-2 extraction")
                 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-                with progress.create_file_bar(len(protein_files), desc="ESM-2 extraction") as pbar:
-                    for pro_file in protein_files:
+                # Filter out files with existing outputs for checkpoint resume
+                # Use .done markers for quick completion check without loading multi-GB checkpoints
+                files_to_process = []
+                complete_count = 0
+                for pro_file in protein_files:
+                    output_file = pro_file.parent / f"{pro_file.stem}_ESM.pt"
+
+                    # Quick check: .done marker indicates completed checkpoint
+                    if output_file.exists() and has_done_marker(output_file):
+                        protein_feature_files.append(output_file)
+                        complete_count += 1
+                        logger.debug(f"Skipping {pro_file.name} (checkpoint complete with .done marker)")
+                    elif output_file.exists() and not has_done_marker(output_file):
+                        # Checkpoint exists but no .done marker - may be incomplete
+                        logger.warning(f"Re-processing {pro_file.name} (checkpoint missing .done marker)")
+                        remove_done_marker(output_file)  # Defensive cleanup
+                        files_to_process.append(pro_file)
+                    else:
+                        files_to_process.append(pro_file)
+
+                if complete_count > 0:
+                    logger.info(f"Resuming: {complete_count} ESM-2 checkpoints complete, {len(files_to_process)} to process")
+
+                with progress.create_file_bar(len(files_to_process), desc="ESM-2 extraction") as pbar:
+                    for pro_file in files_to_process:
                         # Construct output filename: output_0.fa -> output_0_ESM.pt
                         output_file = pro_file.parent / f"{pro_file.stem}_ESM.pt"
                         try:
