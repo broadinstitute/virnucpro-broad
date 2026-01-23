@@ -9,29 +9,30 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 
 ## Current Position
 
-Phase: 1 of 6 (ESM-2 Multi-GPU Foundation)
-Plan: 7 of 7 (Gap Closure - Progress Reporting & Balanced Distribution)
-Status: Phase complete and verified
-Last activity: 2026-01-23 — Completed gap closure and phase verification (7/7 success criteria met)
+Phase: 1.1 of 6 (Parallel Translation)
+Plan: 1 of 3 (Parallel Translation Worker)
+Status: In progress
+Last activity: 2026-01-23 — Completed 01.1-01-PLAN.md (Parallel Translation Worker)
 
-Progress: [████░░░░░░] 46.7% (7/15 plans)
+Progress: [████░░░░░░] 53.3% (8/15 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7
-- Average duration: 4.8 minutes
-- Total execution time: 0.56 hours
+- Total plans completed: 8
+- Average duration: 4.4 minutes
+- Total execution time: 0.62 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1     | 7     | 33.6m | 4.8m     |
+| 1.1   | 1     | 2.1m  | 2.1m     |
 
 **Recent Trend:**
-- Last 5 plans: 01-02 (2.4m), 01-03 (4.0m), 01-04 (12.4m), 01-05 (4.5m), 01-07 (3.6m)
-- Trend: Gap closure plans are efficient; 01-04 was longer due to human verification
+- Last 5 plans: 01-03 (4.0m), 01-04 (12.4m), 01-05 (4.5m), 01-07 (3.6m), 01.1-01 (2.1m)
+- Trend: Phase 1.1 efficient; CPU-only work is faster than GPU orchestration
 
 *Updated after each plan completion*
 
@@ -79,9 +80,22 @@ Recent decisions affecting current work:
 - unified-worker-interface: Both DNABERT and ESM workers return (processed, failed) tuple for consistency
 - dashboard-auto-tty-detect: Dashboard automatically uses Rich Live in TTY, logging fallback in non-TTY
 
+**From 01.1-01 execution:**
+- batch-processing-100x-reduction: Use batch worker to reduce serialization from 22M to 220K operations (100x improvement)
+- spawn-context-consistency: Use spawn context matching GPU worker pattern for consistency and safety
+- imap-for-memory: Use Pool.imap() instead of Pool.map() for lazy evaluation with 22M sequences
+- optimal-settings-helper: Provide get_optimal_settings() to calculate num_workers, batch_size, chunksize based on data characteristics
+
 ### Pending Todos
 
 None yet.
+
+### Roadmap Evolution
+
+- **Phase 1.1 inserted after Phase 1** (2026-01-23): Parallel Translation (URGENT)
+  - Reason: Six-frame translation taking >10 minutes on 22M sequences is a bottleneck
+  - Scope: Add CPU multiprocessing to translation step, add --threads CLI parameter
+  - Impact: Reduces non-GPU bottleneck before proceeding to Phase 2 DNABERT optimization
 
 ### Blockers/Concerns
 
@@ -95,6 +109,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-23 12:18 UTC
-Stopped at: Completed 01-07-PLAN.md execution (Progress Reporting & Balanced Distribution gap closure)
+Last session: 2026-01-23 13:02 UTC
+Stopped at: Completed 01.1-01-PLAN.md execution (Parallel Translation Worker)
 Resume file: None
