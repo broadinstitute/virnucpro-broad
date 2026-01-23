@@ -10,28 +10,28 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 1 of 6 (ESM-2 Multi-GPU Foundation)
-Plan: 5 of 6 (Gap Closure - Multi-GPU Auto-Detection)
+Plan: 7 of 7 (Gap Closure - Progress Reporting & Balanced Distribution)
 Status: In progress
-Last activity: 2026-01-23 — Completed 01-05-PLAN.md (Multi-GPU Auto-Detection)
+Last activity: 2026-01-23 — Completed 01-07-PLAN.md (Progress Reporting & Balanced Distribution)
 
-Progress: [███░░░░░░░] 33.3% (5/15 plans)
+Progress: [████░░░░░░] 46.7% (7/15 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5
-- Average duration: 5.2 minutes
-- Total execution time: 0.43 hours
+- Total plans completed: 7
+- Average duration: 4.8 minutes
+- Total execution time: 0.56 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1     | 5     | 26.2m | 5.2m     |
+| 1     | 7     | 33.6m | 4.8m     |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (2.9m), 01-02 (2.4m), 01-03 (4.0m), 01-04 (12.4m), 01-05 (4.5m)
-- Trend: Plan 01-04 was longer due to human verification; gap closure plans are efficient
+- Last 5 plans: 01-02 (2.4m), 01-03 (4.0m), 01-04 (12.4m), 01-05 (4.5m), 01-07 (3.6m)
+- Trend: Gap closure plans are efficient; 01-04 was longer due to human verification
 
 *Updated after each plan completion*
 
@@ -73,6 +73,12 @@ Recent decisions affecting current work:
 - zero-config-multi-gpu: Multi-GPU systems work without --gpus or --parallel flags (zero configuration)
 - preserve-user-control: Explicit --gpus flag overrides auto-detection (user control preserved)
 
+**From 01-07 execution:**
+- progress-queue-pattern: Workers report progress via multiprocessing Queue, monitor thread updates dashboard
+- bin-packing-by-sequences: Distribute files by sequence count (not file count) for balanced GPU utilization
+- unified-worker-interface: Both DNABERT and ESM workers return (processed, failed) tuple for consistency
+- dashboard-auto-tty-detect: Dashboard automatically uses Rich Live in TTY, logging fallback in non-TTY
+
 ### Pending Todos
 
 None yet.
@@ -89,6 +95,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-23 12:11 UTC
-Stopped at: Completed 01-05-PLAN.md execution (Multi-GPU Auto-Detection gap closure)
+Last session: 2026-01-23 12:18 UTC
+Stopped at: Completed 01-07-PLAN.md execution (Progress Reporting & Balanced Distribution gap closure)
 Resume file: None
