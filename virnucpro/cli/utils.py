@@ -120,3 +120,82 @@ def generate_config_cmd(output):
     except Exception as e:
         logger.error(f"Failed to generate config: {e}")
         sys.exit(1)
+
+
+@utils.command(name='validate-checkpoints')
+@click.argument('checkpoint_dir', type=click.Path(exists=True))
+@click.option('--skip-load', is_flag=True,
+              help='Skip torch.load validation (faster, less thorough)')
+def validate_checkpoints_cmd(checkpoint_dir, skip_load):
+    """
+    Validate all checkpoints in a directory.
+
+    Checks checkpoint integrity without running the pipeline.
+    Reports status and returns appropriate exit code.
+
+    Exit codes:
+      0: All checkpoints valid
+      1: Some checkpoints failed validation
+      3: Checkpoint directory issue
+
+    Example:
+      python -m virnucpro utils validate-checkpoints output_dir/checkpoints
+    """
+    from virnucpro.core.checkpoint_validation import (
+        validate_checkpoint_batch,
+        load_failed_checkpoints,
+        CHECKPOINT_EXIT_CODE
+    )
+
+    logger.info(f"Validating checkpoints in: {checkpoint_dir}")
+
+    try:
+        checkpoint_path = Path(checkpoint_dir)
+
+        # Find all .pt files
+        checkpoint_files = list(checkpoint_path.glob('*.pt'))
+
+        if not checkpoint_files:
+            print(f"\nNo checkpoint files (*.pt) found in {checkpoint_dir}")
+            sys.exit(CHECKPOINT_EXIT_CODE)
+
+        print(f"\nFound {len(checkpoint_files)} checkpoint file(s)")
+
+        # Validate all checkpoints
+        valid_paths, failed_items = validate_checkpoint_batch(
+            checkpoint_files,
+            skip_load=skip_load,
+            logger_instance=logger
+        )
+
+        # Report results
+        print(f"\nValidation Results:")
+        print(f"  Valid:  {len(valid_paths)}")
+        print(f"  Failed: {len(failed_items)}")
+
+        if failed_items:
+            print(f"\nFailed Checkpoints:")
+            for checkpoint_path, error_msg in failed_items:
+                error_type = 'CORRUPTED' if 'corrupted:' in error_msg else 'INCOMPATIBLE'
+                print(f"  [{error_type}] {checkpoint_path.name}")
+                print(f"    Reason: {error_msg}")
+
+        # Check for historical failures
+        failed_history = load_failed_checkpoints(checkpoint_path)
+        if failed_history:
+            print(f"\nHistorical Failures (from failed_checkpoints.txt):")
+            print(f"  Total: {len(failed_history)}")
+            for path, reason, timestamp in failed_history[-5:]:  # Show last 5
+                print(f"  {Path(path).name}: {reason}")
+                print(f"    Time: {timestamp}")
+
+        if failed_items:
+            print(f"\n✗ Validation failed: {len(failed_items)} checkpoint(s) have issues")
+            sys.exit(1)
+        else:
+            print(f"\n✓ All checkpoints valid")
+            sys.exit(0)
+
+    except Exception as e:
+        logger.error(f"Checkpoint validation failed: {e}")
+        sys.exit(CHECKPOINT_EXIT_CODE)

@@ -71,11 +71,18 @@ logger = logging.getLogger('virnucpro.cli.predict')
 @click.option('--verbose/--quiet',
               default=True,
               help='Show/hide progress dashboard and detailed logs.')
+@click.option('--skip-checkpoint-validation',
+              is_flag=True,
+              help='Skip checkpoint validation for trusted scenarios (faster but risky)')
+@click.option('--force-resume',
+              is_flag=True,
+              help='Force resume even if some checkpoints are corrupted')
 @click.pass_context
 def predict(ctx, input_file, model_type, model_path, expected_length,
             output_dir, device, batch_size, num_workers,
             keep_intermediate, resume, force, no_progress,
-            dnabert_batch_size, parallel, gpus, esm_batch_size, threads, verbose):
+            dnabert_batch_size, parallel, gpus, esm_batch_size, threads, verbose,
+            skip_checkpoint_validation, force_resume):
     """
     Predict viral sequences from FASTA input.
 
@@ -192,6 +199,10 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
         logger.info(f"  Cleanup intermediate files: {cleanup}")
         logger.info(f"  Progress bars: {'disabled' if no_progress else 'enabled'}")
         logger.info(f"  Verbose mode: {'enabled' if verbose else 'disabled'}")
+        if skip_checkpoint_validation:
+            logger.warning(f"  Checkpoint validation: DISABLED (trusted mode)")
+        if force_resume:
+            logger.warning(f"  Force resume: enabled (will ignore corrupted checkpoints)")
 
         # Import and run prediction pipeline
         from virnucpro.pipeline.prediction import run_prediction
@@ -216,7 +227,9 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
             translation_threads=threads,
             merge_threads=threads,
             quiet=not verbose,
-            gpus=gpus
+            gpus=gpus,
+            skip_checkpoint_validation=skip_checkpoint_validation,
+            force_resume=force_resume
         )
 
         if exit_code == 0:
