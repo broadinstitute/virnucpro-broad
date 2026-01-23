@@ -38,7 +38,8 @@ class BatchQueueManager:
         self,
         num_workers: int,
         worker_function: Callable,
-        spawn_context: bool = True
+        spawn_context: bool = True,
+        progress_queue: Optional[multiprocessing.Queue] = None
     ):
         """
         Initialize batch queue manager.
@@ -47,6 +48,7 @@ class BatchQueueManager:
             num_workers: Number of worker processes (typically number of GPUs)
             worker_function: Function to execute in workers
             spawn_context: Use spawn context for CUDA safety (default: True)
+            progress_queue: Optional queue for workers to report progress events
 
         Raises:
             ValueError: If worker_function signature is invalid
@@ -64,6 +66,7 @@ class BatchQueueManager:
         self.worker_function = worker_function
         self.ctx = multiprocessing.get_context('spawn') if spawn_context else multiprocessing
         self.worker_status = {i: WorkerStatus.IDLE for i in range(num_workers)}
+        self.progress_queue = progress_queue
 
         logger.info(f"Initialized BatchQueueManager with {num_workers} workers "
                    f"({'spawn' if spawn_context else 'default'} context)")
@@ -107,6 +110,10 @@ class BatchQueueManager:
         log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         worker_kwargs['log_level'] = log_level
         worker_kwargs['log_format'] = log_format
+
+        # Add progress queue to kwargs if provided
+        if self.progress_queue is not None:
+            worker_kwargs['progress_queue'] = self.progress_queue
 
         # Create worker arguments: (file_subset, device_id, **worker_kwargs)
         worker_args = []
