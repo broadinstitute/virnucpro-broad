@@ -64,14 +64,10 @@ logger = logging.getLogger('virnucpro.cli.predict')
               type=int,
               default=None,
               help='Token batch size for ESM-2 processing (default: 2048, with BF16: 3072). Reduce if encountering OOM errors.')
-@click.option('--threads', '-t',
+@click.option('--threads', '-t', '--merge-threads',
               type=int,
               default=None,
-              help='Number of CPU threads for six-frame translation (default: all cores)')
-@click.option('--merge-threads',
-              type=click.IntRange(min=1),
-              default=None,
-              help='Number of CPU threads for parallel embedding merge (default: auto-detect)')
+              help='Number of CPU threads for translation and merge (default: auto-detect)')
 @click.option('--verbose/--quiet',
               default=True,
               help='Show/hide progress dashboard and detailed logs.')
@@ -79,7 +75,7 @@ logger = logging.getLogger('virnucpro.cli.predict')
 def predict(ctx, input_file, model_type, model_path, expected_length,
             output_dir, device, batch_size, num_workers,
             keep_intermediate, resume, force, no_progress,
-            dnabert_batch_size, parallel, gpus, esm_batch_size, threads, merge_threads, verbose):
+            dnabert_batch_size, parallel, gpus, esm_batch_size, threads, verbose):
     """
     Predict viral sequences from FASTA input.
 
@@ -218,7 +214,7 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
             config=config,
             toks_per_batch=esm_batch_size,
             translation_threads=threads,
-            merge_threads=merge_threads,
+            merge_threads=threads,
             quiet=not verbose,
             gpus=gpus
         )
