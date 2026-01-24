@@ -162,8 +162,14 @@ class BatchQueueManager:
 
         # Check if using persistent pool
         if self.use_persistent_pool and self.persistent_pool is not None:
-            logger.info("Using persistent worker pool (models already loaded)")
+            logger.info("Using persistent worker pool for processing")
             return self.persistent_pool.process_job(file_assignments, **worker_kwargs)
+
+        # Check for fallback condition
+        if self.use_persistent_pool:
+            logger.warning("Persistent pool requested but not created, falling back to standard pool")
+        else:
+            logger.info("Using standard worker pool for processing")
 
         # Traditional behavior: create new pool for this job
         # Track results
@@ -280,7 +286,7 @@ class BatchQueueManager:
         if self.persistent_pool is not None:
             raise RuntimeError("Persistent pool already created. Call close_persistent_pool() first.")
 
-        logger.info(f"Creating persistent pool with {self.num_workers} workers for {self.model_type}")
+        logger.info(f"Creating persistent worker pool with {self.num_workers} workers for {self.model_type}")
 
         self.persistent_pool = PersistentWorkerPool(
             num_workers=self.num_workers,
@@ -290,7 +296,7 @@ class BatchQueueManager:
         )
         self.persistent_pool.create_pool()
 
-        logger.info("Persistent pool created successfully")
+        logger.info(f"Persistent worker pool created successfully (model_type={self.model_type})")
 
     def close_persistent_pool(self) -> None:
         """
