@@ -20,52 +20,47 @@ class TestPersistentPoolInitialization:
     def test_persistent_pool_creation(self):
         """Test basic PersistentWorkerPool creation."""
         from virnucpro.pipeline.persistent_pool import PersistentWorkerPool
-        from virnucpro.pipeline.parallel_esm import init_esm_worker, process_esm_files_persistent
 
         # Create pool with 2 workers
         pool = PersistentWorkerPool(
             num_workers=2,
-            initializer=init_esm_worker,
-            worker_func=process_esm_files_persistent
+            model_type='esm2'
         )
 
         assert pool.num_workers == 2
-        assert pool.pool is None  # Pool not created until first use
-        assert pool.initializer == init_esm_worker
-        assert pool.worker_func == process_esm_files_persistent
+        assert pool.model_type == 'esm2'
+        assert pool.pool is None  # Pool not created until create_pool() is called
 
     def test_pool_lifecycle(self):
         """Test pool creation and cleanup lifecycle."""
         from virnucpro.pipeline.persistent_pool import PersistentWorkerPool
-        from virnucpro.pipeline.parallel_esm import init_esm_worker, process_esm_files_persistent
 
         pool = PersistentWorkerPool(
             num_workers=2,
-            initializer=init_esm_worker,
-            worker_func=process_esm_files_persistent
+            model_type='dnabert'
         )
 
         # Create pool
-        pool._create_pool()
+        pool.create_pool()
         assert pool.pool is not None
+        assert pool.pool._processes is not None
 
         # Close pool
         pool.close()
-        # Note: Pool object still exists but is terminated
+        # Pool is closed and set to None
+        assert pool.pool is None
 
     @patch('torch.cuda.is_available', return_value=False)
     def test_pool_creation_without_cuda(self, mock_cuda):
         """Test pool creation works without CUDA (CPU mode)."""
         from virnucpro.pipeline.persistent_pool import PersistentWorkerPool
-        from virnucpro.pipeline.parallel_esm import init_esm_worker, process_esm_files_persistent
 
         pool = PersistentWorkerPool(
             num_workers=2,
-            initializer=init_esm_worker,
-            worker_func=process_esm_files_persistent
+            model_type='esm2'
         )
 
-        pool._create_pool()
+        pool.create_pool()
         assert pool.pool is not None
         pool.close()
 
