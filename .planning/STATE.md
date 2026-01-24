@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-01-22)
 
 **Core value:** Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs and automatically queue batches, reducing sample processing time from 45+ hours to under 10 hours.
-**Current focus:** Phase 2 - DNABERT-S Optimization
+**Current focus:** Phase 4 - Memory & Attention Optimization
 
 ## Current Position
 
-Phase: 3 of 6 (Checkpoint Robustness)
-Plan: 4 of 4
-Status: Phase complete (verified)
-Last activity: 2026-01-23 — Completed Phase 3 execution and verification
+Phase: 4 of 6 (Memory & Attention Optimization)
+Plan: 1 of 4
+Status: In progress
+Last activity: 2026-01-24 — Completed 04-01-PLAN.md (FlashAttention-2 Integration)
 
-Progress: [███████████] 100% (24/24 plans)
+Progress: [████████████░] 96% (25/26 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 24
+- Total plans completed: 25
 - Average duration: 3.5 minutes
-- Total execution time: 1.43 hours
+- Total execution time: 1.51 hours
 
 **By Phase:**
 
@@ -32,10 +32,11 @@ Progress: [███████████] 100% (24/24 plans)
 | 2     | 5     | 19.5m | 3.9m     |
 | 2.1   | 5     | 15.6m | 3.1m     |
 | 3     | 4     | 15.2m | 3.8m     |
+| 4     | 1     | 4.3m  | 4.3m     |
 
 **Recent Trend:**
-- Last 5 plans: 02.1-05 (2.1m), 03-01 (3.5m), 03-02 (3.7m), 03-03 (3.0m), 03-04 (5.0m)
-- Trend: Phase 3 complete with gap closure; checkpoint robustness fully integrated with 56 test cases total
+- Last 5 plans: 03-01 (3.5m), 03-02 (3.7m), 03-03 (3.0m), 03-04 (5.0m), 04-01 (4.3m)
+- Trend: Phase 4 started; FlashAttention-2 integration complete with GPU detection and automatic fallback
 
 *Updated after each plan completion*
 
@@ -162,6 +163,12 @@ Recent decisions affecting current work:
 - defensive-cleanup: Re-process files missing .done markers instead of trusting checkpoint existence
 - marker-check-order: Check .done marker before any checkpoint loading for performance (>1000x speedup)
 
+**From 04-01 execution:**
+- pytorch-sdpa-backend: Use PyTorch 2.2+ scaled_dot_product_attention (sdpa) as FlashAttention-2 backend (native integration, no separate flash-attn package)
+- compute-capability-8-ampere: Detect GPU compute capability 8.0+ for Ampere architecture requirement (FlashAttention-2 requires Ampere or newer)
+- model-wrapper-pattern: Wrap ESM-2 models instead of modifying fair-esm library (preserves upstream compatibility, easier maintenance)
+- flashattention-bf16-combined: Combine FlashAttention-2 with BF16 for maximum memory efficiency (both target Ampere+ GPUs, additive benefits)
+
 ### Pending Todos
 
 None yet.
@@ -185,13 +192,13 @@ None yet.
 - ✓ Checkpoint corruption from partial writes: Resolved via atomic temp-then-rename pattern centralized in checkpoint.py (03-01)
 - Batch size variability can fragment memory even with available VRAM — implement sequence sorting and expandable segments from start
 
-**Phase 4 Research:**
-- FlashAttention-2 compatibility with fair-esm library (ESM-2) needs verification during planning — DNABERT-S integration is straightforward
+**Phase 4:**
+- ✓ FlashAttention-2 compatibility with fair-esm library (ESM-2): Resolved via ESM2WithFlashAttention wrapper using PyTorch sdp_kernel context manager (04-01)
 
 ## Session Continuity
 
-Last session: 2026-01-23 23:17 UTC
-Stopped at: Completed 03-04-PLAN.md execution (.Done Marker Files - Gap Closure)
+Last session: 2026-01-24 01:05 UTC
+Stopped at: Completed 04-01-PLAN.md execution (FlashAttention-2 Integration for ESM-2)
 Resume file: None
 
 ## Phase 2 Complete
