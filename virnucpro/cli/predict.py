@@ -96,13 +96,16 @@ logger = logging.getLogger('virnucpro.cli.predict')
 @click.option('--cuda-streams/--no-cuda-streams',
               default=True,
               help='Use CUDA streams for I/O overlap (default: enabled)')
+@click.option('--persistent-models/--no-persistent-models',
+              default=False,
+              help='Keep models loaded in GPU memory between pipeline stages (reduces loading overhead but uses more memory)')
 @click.pass_context
 def predict(ctx, input_file, model_type, model_path, expected_length,
             output_dir, device, batch_size, num_workers,
             keep_intermediate, resume, force, no_progress,
             dnabert_batch_size, parallel, gpus, esm_batch_size, threads, verbose,
             skip_checkpoint_validation, force_resume, dataloader_workers, pin_memory,
-            expandable_segments, cache_clear_interval, cuda_streams):
+            expandable_segments, cache_clear_interval, cuda_streams, persistent_models):
     """
     Predict viral sequences from FASTA input.
 
@@ -237,6 +240,10 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
             logger.info(f"  Expandable segments: enabled")
         logger.info(f"  Cache clear interval: {cache_clear_interval} batches")
         logger.info(f"  CUDA streams: {'enabled' if cuda_streams else 'disabled'}")
+        if persistent_models:
+            logger.info(f"  Persistent models: enabled (models remain in GPU memory)")
+        else:
+            logger.info(f"  Persistent models: disabled (standard model loading)")
 
         # Import torch for CUDA validation
         import torch
@@ -275,7 +282,8 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
             pin_memory=pin_memory,
             expandable_segments=expandable_segments,
             cache_clear_interval=cache_clear_interval,
-            cuda_streams=cuda_streams
+            cuda_streams=cuda_streams,
+            persistent_models=persistent_models
         )
 
         if exit_code == 0:
