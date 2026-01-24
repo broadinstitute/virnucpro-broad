@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 4.1 of 6 (Persistent Model Loading)
-Plan: 4 of 4
-Status: Phase complete (gap closure)
-Last activity: 2026-01-24 — Completed 04.1-04-PLAN.md (Feature Extraction Refactoring)
+Plan: 5 of 5
+Status: Phase complete
+Last activity: 2026-01-24 — Completed 04.1-05-PLAN.md (Pipeline Persistent Pool Integration)
 
-Progress: [█████████████▓] 100% (32/32 plans)
+Progress: [█████████████▓] 100% (33/33 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 32
+- Total plans completed: 33
 - Average duration: 3.5 minutes
-- Total execution time: 1.87 hours
+- Total execution time: 1.92 hours
 
 **By Phase:**
 
@@ -33,11 +33,11 @@ Progress: [█████████████▓] 100% (32/32 plans)
 | 2.1   | 5     | 15.6m | 3.1m     |
 | 3     | 4     | 15.2m | 3.8m     |
 | 4     | 4     | 18.6m | 4.7m     |
-| 4.1   | 4     | 13.0m | 3.3m     |
+| 4.1   | 5     | 16.0m | 3.2m     |
 
 **Recent Trend:**
-- Last 5 plans: 04-03 (5.0m), 04-04 (4.4m), 04.1-01 (4.0m), 04.1-02 (3.0m), 04.1-03 (4.0m), 04.1-04 (2.0m)
-- Trend: Phase 4.1 COMPLETE with gap closure; extraction functions now accept pre-loaded models, eliminating redundant loading
+- Last 5 plans: 04-04 (4.4m), 04.1-01 (4.0m), 04.1-02 (3.0m), 04.1-03 (4.0m), 04.1-04 (2.0m), 04.1-05 (3.0m)
+- Trend: Phase 4.1 COMPLETE; persistent model loading fully integrated and functional end-to-end
 
 *Updated after each plan completion*
 
@@ -203,6 +203,11 @@ Recent decisions affecting current work:
 - optional-model-params: Feature extraction functions accept optional pre-loaded model parameters for persistent workers while maintaining backward compatibility (None triggers loading)
 - getattr-bf16-detection: Use getattr(model, 'use_bf16', False) for safe BF16 detection from pre-loaded models
 - device-reallocation: Ensure provided models moved to correct device before use (.to(device))
+
+**From 04.1-05 execution:**
+- separate-pools-per-model: Create separate persistent pools for DNABERT and ESM (different model_types require separate pools)
+- pool-lifecycle-logging: Log pool creation and closure for debugging and transparency
+- aggressive-cache-clearing: Extra torch.cuda.synchronize() + empty_cache() for persistent pools to prevent fragmentation
 
 ### Pending Todos
 
@@ -374,13 +379,14 @@ All 4 plans executed successfully:
 
 ## Phase 4.1 Complete
 
-**Persistent Model Loading - Complete with Gap Closure**
+**Persistent Model Loading - Complete**
 
-All 4 plans executed successfully:
+All 5 plans executed successfully:
 - 04.1-01: PersistentWorkerPool Infrastructure (4.0m)
 - 04.1-02: Persistent Worker Functions (3.0m)
 - 04.1-03: Pipeline & CLI Integration (4.0m)
-- 04.1-04: Feature Extraction Refactoring (2.0m) [GAP CLOSURE]
+- 04.1-04: Feature Extraction Refactoring (2.0m) [GAP CLOSURE 1]
+- 04.1-05: Pipeline Persistent Pool Integration (3.0m) [GAP CLOSURE 2]
 
 **Key achievements:**
 - PersistentWorkerPool class for long-lived workers with model caching
@@ -388,26 +394,35 @@ All 4 plans executed successfully:
 - Module-level globals store models for worker process lifetime
 - **Refactored extraction functions to accept pre-loaded models**
 - **Persistent workers pass cached models to extraction functions**
+- **Pipeline creates and manages persistent pools properly**
 - **Eliminated redundant model loading (models loaded once, reused for all files)**
 - Pipeline integration via persistent_models parameter
 - CLI --persistent-models flag for user control
 - 17 integration tests covering all scenarios (399 lines)
 - Backward compatibility maintained (default: False)
 - Memory management via periodic cache clearing and expandable segments
+- Enhanced logging for pool lifecycle and memory mode tracking
 
-**Phase duration:** 13.0 minutes (4 plans)
-**Average per plan:** 3.3 minutes
+**Phase duration:** 16.0 minutes (5 plans)
+**Average per plan:** 3.2 minutes
 
-**Gap closure (04.1-04):**
-Closed the critical gap where models were loaded twice:
+**Gap closure 1 (04.1-04):**
+Closed the gap where models were loaded twice:
 1. Once in persistent workers (`_load_model_lazy()`)
 2. Again in extraction functions (`load_esm2_model()`, `AutoModel.from_pretrained()`)
 
+**Gap closure 2 (04.1-05):**
+Closed the gap where pools were configured but never created:
+1. Pipeline created BatchQueueManager with `use_persistent_pool=True`
+2. But never called `create_persistent_pool()`
+3. Pools fell back to standard mode with warnings
+
 Now:
-- `extract_dnabert_features()` and `extract_esm_features()` accept optional model parameters
-- Persistent workers pass pre-loaded models via these parameters
-- No redundant loading occurs
-- Backward compatibility maintained (functions still work without pre-loaded models)
+- Pipeline calls `create_persistent_pool()` after BatchQueueManager initialization
+- Separate pools created for DNABERT-S and ESM-2 (different model_types)
+- Pools properly closed after each stage completes
+- Enhanced memory management with aggressive cache clearing for persistent mode
+- Logging confirms pool creation, usage, and closure
 
 **Persistent model loading benefits:**
 - Eliminates model re-loading overhead between pipeline stages AND within workers
@@ -432,4 +447,15 @@ Now:
 - Error handling and cleanup tests
 - GPU tests use @pytest.mark.gpu (skip gracefully without GPU)
 
-**Ready for production benchmarking to measure model loading overhead savings.**
+**Persistent model loading works end-to-end:**
+1. User runs: `virnucpro predict --persistent-models --parallel --gpus 0,1`
+2. Pipeline detects persistent_models=True
+3. Pipeline creates BatchQueueManager with use_persistent_pool=True, model_type='dnabert'
+4. Pipeline calls queue_manager.create_persistent_pool()
+5. Persistent workers load DNABERT models once on first task
+6. Models cached in module-level globals
+7. All DNABERT files processed with same loaded models
+8. Pool closed, models unloaded
+9. Process repeats for ESM-2 stage with model_type='esm2'
+
+**Ready for production benchmarking to measure end-to-end speedup from eliminating model loading overhead.**
