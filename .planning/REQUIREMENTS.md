@@ -14,17 +14,17 @@ Requirements for GPU optimization release. Each maps to roadmap phases.
 - [x] **DNABERT-01**: DNABERT-S uses optimized batching (better than current one-file-per-GPU)
 - [x] **DNABERT-02**: DNABERT-S automatically queues and processes multiple batches per GPU
 - [x] **GPU-01**: Mixed precision (BF16) enabled for both ESM-2 and DNABERT-S (2x speedup)
-- [x] **GPU-02**: Batch sizes optimized via profiling for target GPUs (2-4x increase from current)
+- [x] **GPU-02**: Batch sizes optimized via profiling for target GPUs (2-4x increase from current) [Phase 4: Integrated]
 
 ### Attention & Memory Optimization
 
-- [ ] **ATT-01**: FlashAttention-2 integrated for ESM-2 embeddings (2-4x attention speedup)
-- [ ] **ATT-02**: FlashAttention-2 integrated for DNABERT-S embeddings
-- [ ] **MEM-01**: DataLoader prefetching with optimized worker count (num_workers=4-8)
-- [ ] **MEM-02**: CUDA streams for async I/O overlap (hide 20-40% latency)
-- [ ] **MEM-03**: Memory fragmentation prevention via sequence sorting
-- [ ] **MEM-04**: Memory fragmentation prevention via expandable segments (PYTORCH_CUDA_ALLOC_CONF)
-- [ ] **MEM-05**: Periodic CUDA cache clearing between file batches
+- [x] **ATT-01**: FlashAttention-2 integrated for ESM-2 embeddings (2-4x attention speedup)
+- [x] **ATT-02**: FlashAttention-2 integrated for DNABERT-S embeddings
+- [x] **MEM-01**: DataLoader prefetching with optimized worker count (num_workers=4-8)
+- [x] **MEM-02**: CUDA streams for async I/O overlap (hide 20-40% latency)
+- [x] **MEM-03**: Memory fragmentation prevention via sequence sorting
+- [x] **MEM-04**: Memory fragmentation prevention via expandable segments (PYTORCH_CUDA_ALLOC_CONF)
+- [x] **MEM-05**: Periodic CUDA cache clearing between file batches
 
 ### Infrastructure & Checkpointing
 
@@ -62,7 +62,7 @@ Requirements for GPU optimization release. Each maps to roadmap phases.
 - [x] **TEST-02**: ESM-2 multi-GPU integration test compares output against single-GPU baseline
 - [x] **TEST-03**: DNABERT-S worker unit tests verify optimized batching matches vanilla output
 - [x] **TEST-04**: Checkpoint unit tests verify atomic writes, corruption handling, and resume capability
-- [ ] **TEST-05**: Memory/attention unit tests verify FlashAttention integration and fragmentation prevention
+- [x] **TEST-05**: Memory/attention unit tests verify FlashAttention integration and fragmentation prevention
 - [ ] **TEST-06**: End-to-end integration test compares full pipeline output (optimized vs vanilla)
 
 ## v2 Requirements

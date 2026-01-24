@@ -17,7 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: DNABERT-S Optimization** - Optimize DNABERT-S batching and queuing to match ESM-2
 - [x] **Phase 2.1: Parallel Embedding Merge (INSERTED)** - Parallelize embedding merge with multi-processing/multi-threading
 - [x] **Phase 3: Checkpoint Robustness** - Atomic writes, validation, backward compatibility
-- [ ] **Phase 4: Memory & Attention Optimization** - FlashAttention, prefetching, memory management
+- [x] **Phase 4: Memory & Attention Optimization** - FlashAttention, prefetching, memory management
 - [ ] **Phase 5: Load Balancing & Monitoring** - Efficient work distribution and GPU utilization visibility
 - [ ] **Phase 6: Performance Validation** - Verify <10 hour target and linear scaling
 
@@ -134,10 +134,10 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
-- [ ] 04-01-PLAN.md — Integrate FlashAttention-2 for ESM-2 with automatic fallback
-- [ ] 04-02-PLAN.md — Create optimized DataLoader and memory fragmentation prevention
-- [ ] 04-03-PLAN.md — Implement CUDA streams for I/O-compute overlap
-- [ ] 04-04-PLAN.md — Complete integration with CLI flags and DNABERT-S FlashAttention
+- [x] 04-01-PLAN.md — Integrate FlashAttention-2 for ESM-2 with automatic fallback
+- [x] 04-02-PLAN.md — Create optimized DataLoader and memory fragmentation prevention
+- [x] 04-03-PLAN.md — Implement CUDA streams for I/O-compute overlap
+- [x] 04-04-PLAN.md — Complete integration with CLI flags and DNABERT-S FlashAttention
 
 ### Phase 5: Load Balancing & Monitoring
 **Goal**: GPU utilization monitoring shows >80% usage, load-balanced file assignment prevents idle GPUs, and heterogeneous GPU configurations are supported.
