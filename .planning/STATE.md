@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 
 ## Current Position
 
-Phase: 4 of 6 (Memory & Attention Optimization)
-Plan: 4 of 4
-Status: Phase complete (verified)
-Last activity: 2026-01-24 — Completed Phase 4 execution and verification
+Phase: 4.1 of 6 (Persistent Model Loading)
+Plan: 1 of TBD
+Status: In progress
+Last activity: 2026-01-24 — Completed 04.1-01-PLAN.md (Persistent Worker Pool Infrastructure)
 
-Progress: [█████████████] 100% (28/28 plans)
+Progress: [█████████████▓] 100% (29/29 plans)
 
 ## Performance Metrics
 
@@ -182,6 +182,11 @@ Recent decisions affecting current work:
 - memory-manager-optional: MemoryManager gracefully handles CUDA unavailable without breaking pipeline
 - streams-enabled-default: CUDA streams enabled by default (--no-cuda-streams to disable)
 
+**From 04.1-01 execution:**
+- lazy-model-loading: Defer model loading to first task execution using _load_model_lazy() to allow device_id from task arguments
+- opt-in-persistent-pool: Add use_persistent_pool=False default parameter to BatchQueueManager for backward compatibility
+- periodic-cache-clearing-10: Call torch.cuda.empty_cache() every 10 files in persistent workers to prevent fragmentation
+
 ### Pending Todos
 
 None yet.
@@ -198,6 +203,11 @@ None yet.
   - Scope: Add multi-processing/multi-threading to embedding merge operations
   - Impact: Eliminates post-extraction bottleneck before checkpoint robustness work
 
+- **Phase 4.1 inserted after Phase 4** (2026-01-24): Persistent Model Loading (URGENT)
+  - Reason: Model re-loading overhead between jobs may be a significant bottleneck
+  - Scope: Evaluate keeping DNABERT-S and ESM-2 models in GPU memory persistently to avoid re-loading for each job
+  - Impact: Potential major speedup by eliminating repeated model loading overhead before load balancing work
+
 ### Blockers/Concerns
 
 **Phase 1 Critical:**
@@ -210,8 +220,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-24 01:20 UTC
-Stopped at: Completed 04-04-PLAN.md execution (Complete Integration & DNABERT-S FlashAttention)
+Last session: 2026-01-24 06:28 UTC
+Stopped at: Completed 04.1-01-PLAN.md execution (Persistent Worker Pool Infrastructure)
 Resume file: None
 
 ## Phase 2 Complete
