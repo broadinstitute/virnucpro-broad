@@ -104,7 +104,9 @@ def extract_esm_features(
     device: torch.device,
     truncation_length: int = 1024,
     toks_per_batch: int = 2048,
-    stream_processor=None
+    stream_processor=None,
+    model=None,
+    batch_converter=None
 ) -> Path:
     """
     Extract protein sequence embeddings using ESM-2.
@@ -122,6 +124,8 @@ def extract_esm_features(
         truncation_length: Maximum sequence length
         toks_per_batch: Tokens per batch for batching
         stream_processor: Optional StreamProcessor for I/O-compute overlap
+        model: Optional pre-loaded model (for persistent workers)
+        batch_converter: Optional pre-loaded batch_converter (for persistent workers)
 
     Returns:
         Path to saved feature file
@@ -130,17 +134,22 @@ def extract_esm_features(
 
     logger.info(f"Extracting ESM-2 features from {protein_file}")
 
-    # Load ESM-2 3B model with FlashAttention-2 support
-    # The wrapper automatically detects and enables FlashAttention-2 on Ampere+ GPUs
-    # and configures BF16 mixed precision
-    model, batch_converter = load_esm2_model(
-        model_name="esm2_t36_3B_UR50D",
-        device=str(device),
-        logger_instance=logger
-    )
+    # Only load if not provided (backward compatibility)
+    if model is None or batch_converter is None:
+        # Load ESM-2 3B model with FlashAttention-2 support
+        # The wrapper automatically detects and enables FlashAttention-2 on Ampere+ GPUs
+        # and configures BF16 mixed precision
+        model, batch_converter = load_esm2_model(
+            model_name="esm2_t36_3B_UR50D",
+            device=str(device),
+            logger_instance=logger
+        )
+    else:
+        # Ensure provided model is on correct device
+        model = model.to(device)
 
     # Get BF16 status from wrapper (already configured)
-    use_bf16 = model.use_bf16
+    use_bf16 = getattr(model, 'use_bf16', False)
 
     # Increase batch size with BF16 if using default
     if use_bf16 and toks_per_batch == 2048:
