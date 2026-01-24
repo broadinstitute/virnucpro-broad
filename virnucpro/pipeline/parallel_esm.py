@@ -17,6 +17,7 @@ from virnucpro.pipeline.base_worker import (
 )
 from virnucpro.pipeline.features import extract_esm_features
 from virnucpro.core.logging_setup import setup_worker_logging
+from virnucpro.cuda import StreamProcessor
 
 
 def _get_progress_queue():
@@ -84,12 +85,15 @@ def process_esm_files_worker(
     in its subset. Deferred CUDA initialization ensures no parent process
     CUDA context issues.
 
+    Supports optional CUDA stream-based processing for I/O-compute overlap
+    via enable_streams kwarg (default: False for backward compatibility).
+
     Args:
         file_subset: List of protein FASTA files to process
         device_id: CUDA device ID (e.g., 0 for cuda:0)
         toks_per_batch: Tokens per batch for ESM-2 processing (default: 2048)
         output_dir: Directory where output files should be saved
-        **kwargs: Additional arguments (log_level, log_format)
+        **kwargs: Additional arguments (log_level, log_format, enable_streams)
 
     Returns:
         Tuple of (processed_files, failed_files)
@@ -107,6 +111,9 @@ def process_esm_files_worker(
     # Get progress queue from module global (set by Pool initializer)
     progress_queue = _get_progress_queue()
 
+    # Check if streams are enabled
+    enable_streams = kwargs.get('enable_streams', False)
+
     processed_files = []
     failed_files = []
 
@@ -114,6 +121,12 @@ def process_esm_files_worker(
         # Deferred CUDA initialization - happens only in worker process
         device = torch.device(f'cuda:{device_id}')
         logger.info(f"Worker {device_id}: Initializing on {device}, processing {len(file_subset)} files")
+
+        # Initialize stream processor if enabled
+        stream_processor = None
+        if enable_streams:
+            stream_processor = StreamProcessor(device=device, enable_streams=True)
+            logger.info(f"Worker {device_id}: Stream-based processing enabled")
 
         # Wrap all inference in torch.no_grad() context
         with torch.no_grad():
@@ -126,7 +139,8 @@ def process_esm_files_worker(
                         file,
                         output_file,
                         device,
-                        toks_per_batch=toks_per_batch
+                        toks_per_batch=toks_per_batch,
+                        stream_processor=stream_processor
                     )
 
                     processed_files.append(output_file)

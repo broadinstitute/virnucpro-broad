@@ -29,6 +29,7 @@ from virnucpro.pipeline.base_worker import (
     detect_bf16_support
 )
 from virnucpro.core.logging_setup import setup_worker_logging
+from virnucpro.cuda import StreamProcessor
 
 
 def _get_progress_queue():
@@ -63,12 +64,15 @@ def process_dnabert_files_worker(
     as token count (abstracting k-mer complexity). Automatically enables
     BF16 mixed precision on Ampere+ GPUs for memory efficiency.
 
+    Supports optional CUDA stream-based processing for I/O-compute overlap
+    via enable_streams kwarg (default: False for backward compatibility).
+
     Args:
         file_subset: List of DNA FASTA files to process
         device_id: CUDA device ID (e.g., 0 for cuda:0)
         toks_per_batch: Tokens per batch for DNABERT-S processing (default: 2048)
         output_dir: Directory where output files should be saved
-        **kwargs: Additional arguments (log_level, log_format)
+        **kwargs: Additional arguments (log_level, log_format, enable_streams)
 
     Returns:
         Tuple of (processed_files, failed_files)
@@ -85,6 +89,9 @@ def process_dnabert_files_worker(
 
     # Get progress queue from module global (set by Pool initializer)
     progress_queue = _get_progress_queue()
+
+    # Check if streams are enabled
+    enable_streams = kwargs.get('enable_streams', False)
 
     processed_files = []
     failed_files = []
@@ -105,6 +112,12 @@ def process_dnabert_files_worker(
         # Check for BF16 support (batch size adjustment handled by pipeline)
         use_bf16 = detect_bf16_support(device)
         logger.info(f"Worker {device_id}: Using batch size {toks_per_batch}, BF16: {use_bf16}")
+
+        # Initialize stream processor if enabled
+        stream_processor = None
+        if enable_streams:
+            stream_processor = StreamProcessor(device=device, enable_streams=True)
+            logger.info(f"Worker {device_id}: Stream-based processing enabled")
 
         # Wrap all inference in torch.no_grad() context
         with torch.no_grad():
@@ -148,28 +161,66 @@ def process_dnabert_files_worker(
                             batch_seqs = [str(record.seq) for record in batch_records]
                             batch_labels = [record.id for record in batch_records]
 
-                            # Tokenize batch with padding
-                            inputs = tokenizer(batch_seqs, return_tensors='pt', padding=True)
-                            input_ids = inputs["input_ids"].to(device)
-                            attention_mask = inputs.get("attention_mask", None)
-                            if attention_mask is not None:
-                                attention_mask = attention_mask.to(device)
+                            if stream_processor is not None:
+                                # Stream-based processing with I/O-compute overlap
+                                def transfer_fn(seqs):
+                                    inputs = tokenizer(seqs, return_tensors='pt', padding=True)
+                                    input_ids = inputs["input_ids"].to(device, non_blocking=True)
+                                    attn_mask = inputs.get("attention_mask", None)
+                                    if attn_mask is not None:
+                                        attn_mask = attn_mask.to(device, non_blocking=True)
+                                    return (input_ids, attn_mask)
 
-                            # Forward pass - model returns tuple, take first element
-                            if attention_mask is not None:
-                                hidden_states = model(input_ids, attention_mask=attention_mask)[0]
-                            else:
-                                hidden_states = model(input_ids)[0]
+                                def compute_fn(inputs_tuple):
+                                    input_ids, attn_mask = inputs_tuple
+                                    if attn_mask is not None:
+                                        return model(input_ids, attention_mask=attn_mask)[0]
+                                    else:
+                                        return model(input_ids)[0]
 
-                            # Mean pool with attention mask to exclude padding
-                            if attention_mask is not None:
-                                embedding_means = (hidden_states * attention_mask.unsqueeze(-1)).sum(dim=1) / attention_mask.sum(dim=1, keepdim=True)
+                                def retrieve_fn(hidden_states):
+                                    return hidden_states.cpu()
+
+                                # Process with streams
+                                hidden_states = stream_processor.process_batch_async(
+                                    batch_seqs, transfer_fn, compute_fn, retrieve_fn
+                                )
+
+                                # Mean pool with attention mask (already on CPU)
+                                inputs = tokenizer(batch_seqs, return_tensors='pt', padding=True)
+                                attention_mask = inputs.get("attention_mask", None)
+                                if attention_mask is not None:
+                                    embedding_means = (hidden_states * attention_mask.unsqueeze(-1)).sum(dim=1) / attention_mask.sum(dim=1, keepdim=True)
+                                else:
+                                    embedding_means = torch.mean(hidden_states, dim=1)
                             else:
-                                embedding_means = torch.mean(hidden_states, dim=1)
+                                # Standard synchronous processing
+                                # Tokenize batch with padding
+                                inputs = tokenizer(batch_seqs, return_tensors='pt', padding=True)
+                                input_ids = inputs["input_ids"].to(device)
+                                attention_mask = inputs.get("attention_mask", None)
+                                if attention_mask is not None:
+                                    attention_mask = attention_mask.to(device)
+
+                                # Forward pass - model returns tuple, take first element
+                                if attention_mask is not None:
+                                    hidden_states = model(input_ids, attention_mask=attention_mask)[0]
+                                else:
+                                    hidden_states = model(input_ids)[0]
+
+                                # Mean pool with attention mask to exclude padding
+                                if attention_mask is not None:
+                                    embedding_means = (hidden_states * attention_mask.unsqueeze(-1)).sum(dim=1) / attention_mask.sum(dim=1, keepdim=True)
+                                else:
+                                    embedding_means = torch.mean(hidden_states, dim=1)
 
                             # Store results (convert BF16 to FP32 for compatibility)
                             for label, embedding_mean in zip(batch_labels, embedding_means):
-                                result = {"label": label, "mean_representation": embedding_mean.float().cpu().tolist()}
+                                if stream_processor is not None:
+                                    # Already on CPU
+                                    result = {"label": label, "mean_representation": embedding_mean.float().tolist()}
+                                else:
+                                    result = {"label": label, "mean_representation": embedding_mean.float().cpu().tolist()}
                                 nucleotide.append(label)
                                 data.append(result)
 

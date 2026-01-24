@@ -92,12 +92,17 @@ def extract_esm_features(
     output_file: Path,
     device: torch.device,
     truncation_length: int = 1024,
-    toks_per_batch: int = 2048
+    toks_per_batch: int = 2048,
+    stream_processor=None
 ) -> Path:
     """
     Extract protein sequence embeddings using ESM-2.
 
     Based on units.py:204-265
+
+    Supports optional CUDA stream-based processing for I/O-compute overlap.
+    When stream_processor is provided, uses pipelined processing to hide
+    data transfer latency.
 
     Args:
         protein_file: Input FASTA file with protein sequences
@@ -105,6 +110,7 @@ def extract_esm_features(
         device: PyTorch device for computation
         truncation_length: Maximum sequence length
         toks_per_batch: Tokens per batch for batching
+        stream_processor: Optional StreamProcessor for I/O-compute overlap
 
     Returns:
         Path to saved feature file
@@ -166,20 +172,45 @@ def extract_esm_features(
     with torch.no_grad():
         with autocast(dtype=torch.bfloat16, enabled=use_bf16):
             for batch_idx, batch in enumerate(batches):
-                # Convert batch
-                batch_labels, batch_strs, batch_tokens = batch_converter(batch)
-                batch_tokens = batch_tokens.to(device)
+                if stream_processor is not None:
+                    # Stream-based processing with I/O-compute overlap
+                    def transfer_fn(b):
+                        labels, strs, tokens = batch_converter(b)
+                        return tokens.to(device, non_blocking=True)
 
-                # Forward pass
-                results = model(batch_tokens, repr_layers=[36])
-                representations = results["representations"][36]  # Layer 36
+                    def compute_fn(tokens):
+                        results = model(tokens, repr_layers=[36])
+                        return results["representations"][36]
+
+                    def retrieve_fn(reps):
+                        return reps.cpu()
+
+                    # Convert batch
+                    batch_labels, batch_strs, _ = batch_converter(batch)
+
+                    # Process with streams
+                    representations = stream_processor.process_batch_async(
+                        batch, transfer_fn, compute_fn, retrieve_fn
+                    )
+                else:
+                    # Standard synchronous processing
+                    batch_labels, batch_strs, batch_tokens = batch_converter(batch)
+                    batch_tokens = batch_tokens.to(device)
+
+                    # Forward pass
+                    results = model(batch_tokens, repr_layers=[36])
+                    representations = results["representations"][36]  # Layer 36
 
                 # Mean pool over sequence (excluding special tokens)
                 for i, (seq_id, seq_str) in enumerate(batch):
                     truncate_len = min(truncation_length, len(seq_str))
                     # Mean pool positions 1 to truncate_len+1 (skip BOS token)
                     # Convert to FP32 for storage compatibility
-                    embedding = representations[i, 1:truncate_len + 1].mean(dim=0).clone().float().to('cpu')  # (2560,)
+                    if stream_processor is not None:
+                        # Already on CPU from retrieve_fn
+                        embedding = representations[i, 1:truncate_len + 1].mean(dim=0).clone().float()
+                    else:
+                        embedding = representations[i, 1:truncate_len + 1].mean(dim=0).clone().float().to('cpu')
                     proteins.append(seq_id)
                     data.append(embedding)
 
