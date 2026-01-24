@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 4.1 of 6 (Persistent Model Loading)
-Plan: 5 of 5
-Status: Phase complete
-Last activity: 2026-01-24 — Completed 04.1-05-PLAN.md (Pipeline Persistent Pool Integration)
+Plan: 6 of 6
+Status: Phase complete (gap closure)
+Last activity: 2026-01-24 — Completed 04.1-06-PLAN.md (Integration Test Gap Closure)
 
-Progress: [█████████████▓] 100% (33/33 plans)
+Progress: [█████████████▓] 100% (34/34 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 33
-- Average duration: 3.5 minutes
-- Total execution time: 1.92 hours
+- Total plans completed: 34
+- Average duration: 3.4 minutes
+- Total execution time: 1.95 hours
 
 **By Phase:**
 
@@ -33,11 +33,11 @@ Progress: [█████████████▓] 100% (33/33 plans)
 | 2.1   | 5     | 15.6m | 3.1m     |
 | 3     | 4     | 15.2m | 3.8m     |
 | 4     | 4     | 18.6m | 4.7m     |
-| 4.1   | 5     | 16.0m | 3.2m     |
+| 4.1   | 6     | 18.0m | 3.0m     |
 
 **Recent Trend:**
-- Last 5 plans: 04-04 (4.4m), 04.1-01 (4.0m), 04.1-02 (3.0m), 04.1-03 (4.0m), 04.1-04 (2.0m), 04.1-05 (3.0m)
-- Trend: Phase 4.1 COMPLETE; persistent model loading fully integrated and functional end-to-end
+- Last 5 plans: 04.1-02 (3.0m), 04.1-03 (4.0m), 04.1-04 (2.0m), 04.1-05 (3.0m), 04.1-06 (2.0m)
+- Trend: Phase 4.1 COMPLETE with gap closure; integration tests now match actual API and verify model persistence
 
 *Updated after each plan completion*
 
@@ -242,8 +242,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-24 16:15 UTC
-Stopped at: Completed 04.1-04-PLAN.md execution (Feature Extraction Refactoring - Gap Closure)
+Last session: 2026-01-24 16:27 UTC
+Stopped at: Completed 04.1-06-PLAN.md execution (Integration Test Gap Closure)
 Resume file: None
 
 ## Phase 2 Complete
@@ -381,12 +381,13 @@ All 4 plans executed successfully:
 
 **Persistent Model Loading - Complete**
 
-All 5 plans executed successfully:
+All 6 plans executed successfully:
 - 04.1-01: PersistentWorkerPool Infrastructure (4.0m)
 - 04.1-02: Persistent Worker Functions (3.0m)
 - 04.1-03: Pipeline & CLI Integration (4.0m)
 - 04.1-04: Feature Extraction Refactoring (2.0m) [GAP CLOSURE 1]
 - 04.1-05: Pipeline Persistent Pool Integration (3.0m) [GAP CLOSURE 2]
+- 04.1-06: Integration Test Gap Closure (2.0m) [GAP CLOSURE 3]
 
 **Key achievements:**
 - PersistentWorkerPool class for long-lived workers with model caching
@@ -396,15 +397,16 @@ All 5 plans executed successfully:
 - **Persistent workers pass cached models to extraction functions**
 - **Pipeline creates and manages persistent pools properly**
 - **Eliminated redundant model loading (models loaded once, reused for all files)**
+- **Integration tests fixed to match actual API and verify model persistence**
 - Pipeline integration via persistent_models parameter
 - CLI --persistent-models flag for user control
-- 17 integration tests covering all scenarios (399 lines)
+- Complete integration test coverage (587 lines) with proper API usage
 - Backward compatibility maintained (default: False)
 - Memory management via periodic cache clearing and expandable segments
 - Enhanced logging for pool lifecycle and memory mode tracking
 
-**Phase duration:** 16.0 minutes (5 plans)
-**Average per plan:** 3.2 minutes
+**Phase duration:** 18.0 minutes (6 plans)
+**Average per plan:** 3.0 minutes
 
 **Gap closure 1 (04.1-04):**
 Closed the gap where models were loaded twice:
@@ -424,6 +426,21 @@ Now:
 - Enhanced memory management with aggressive cache clearing for persistent mode
 - Logging confirms pool creation, usage, and closure
 
+**Gap closure 3 (04.1-06):**
+Closed the gap where integration tests used wrong API:
+1. Tests called `pool._create_pool()` (private method) instead of `create_pool()`
+2. Tests used `initializer`/`worker_func` params that don't exist
+3. Tests used `num_gpus`/`worker_func` instead of `num_workers`/`worker_function`
+4. No tests verified models aren't reloaded between files
+
+Now:
+- All tests use correct public API (create_pool(), close())
+- Tests use correct parameters (model_type='esm2'/'dnabert')
+- Added TestModelPersistence class verifying models loaded once
+- Added complete BatchQueueManager lifecycle tests
+- Tests verify behavior via log analysis (non-invasive)
+- All tests can actually run (no API mismatches)
+
 **Persistent model loading benefits:**
 - Eliminates model re-loading overhead between pipeline stages AND within workers
 - Models remain in GPU memory for DNABERT-S and ESM-2 processing
@@ -439,13 +456,16 @@ Now:
 - Help text explains memory trade-offs
 
 **Testing coverage:**
-- Pool initialization and lifecycle tests
-- BatchQueueManager integration tests
+- Pool initialization and lifecycle tests (corrected API)
+- Model persistence verification tests (log analysis)
+- BatchQueueManager integration tests (complete lifecycle)
+- Fallback behavior tests (pool not created)
 - Memory management verification
 - Output equivalence tests
 - CLI flag parsing and parameter passing tests
 - Error handling and cleanup tests
 - GPU tests use @pytest.mark.gpu (skip gracefully without GPU)
+- 587 total lines of integration tests with correct API usage
 
 **Persistent model loading works end-to-end:**
 1. User runs: `virnucpro predict --persistent-models --parallel --gpus 0,1`
