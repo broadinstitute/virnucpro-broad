@@ -131,12 +131,13 @@ Plans:
   5. Memory fragmentation prevented via sequence sorting, expandable segments, and periodic cache clearing
   6. Pipeline processes sequences without OOM errors despite variable length batches
   7. Unit tests verify FlashAttention-2 integration and memory fragmentation prevention mechanisms
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 04-01: TBD
-- [ ] 04-02: TBD
-- [ ] 04-03: TBD
+- [ ] 04-01-PLAN.md — Integrate FlashAttention-2 for ESM-2 with automatic fallback
+- [ ] 04-02-PLAN.md — Create optimized DataLoader and memory fragmentation prevention
+- [ ] 04-03-PLAN.md — Implement CUDA streams for I/O-compute overlap
+- [ ] 04-04-PLAN.md — Complete integration with CLI flags and DNABERT-S FlashAttention
 
 ### Phase 5: Load Balancing & Monitoring
 **Goal**: GPU utilization monitoring shows >80% usage, load-balanced file assignment prevents idle GPUs, and heterogeneous GPU configurations are supported.
