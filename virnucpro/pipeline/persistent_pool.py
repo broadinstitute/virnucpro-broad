@@ -94,7 +94,7 @@ def _load_model_lazy(device_id: int) -> None:
                 device=str(_device),
                 logger_instance=logger
             )
-            logger.info(f"Worker {device_id}: ESM-2 model loaded and ready")
+            logger.info(f"Worker {device_id}: ESM-2 model loaded and ready - will reuse for all files")
 
         elif _model_type == 'dnabert':
             # Load DNABERT-S model
@@ -105,7 +105,7 @@ def _load_model_lazy(device_id: int) -> None:
             _tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
             _model = AutoModel.from_pretrained(model_name, trust_remote_code=True).to(_device)
             _model.eval()
-            logger.info(f"Worker {device_id}: DNABERT-S model loaded and ready")
+            logger.info(f"Worker {device_id}: DNABERT-S model loaded and ready - will reuse for all files")
 
         else:
             raise ValueError(f"Unknown model_type: {_model_type}. Expected 'esm2' or 'dnabert'")
@@ -174,16 +174,15 @@ def process_files_persistent(
                         stream_processor = kwargs.get('stream_processor', None)
 
                         from virnucpro.pipeline.features import extract_esm_features
-                        # Note: extract_esm_features currently loads its own model
-                        # This will need to be refactored to accept pre-loaded model
-                        # For now, this is a placeholder implementation
-                        logger.warning(f"Worker {device_id}: extract_esm_features not yet refactored for persistent models")
+                        # Pass pre-loaded model and batch_converter
                         extract_esm_features(
                             file,
                             output_file,
                             _device,
                             toks_per_batch=toks_per_batch,
-                            stream_processor=stream_processor
+                            stream_processor=stream_processor,
+                            model=_model,  # Pass pre-loaded model
+                            batch_converter=_batch_converter  # Pass pre-loaded batch_converter
                         )
 
                     elif _model_type == 'dnabert':
@@ -191,15 +190,14 @@ def process_files_persistent(
                         batch_size = kwargs.get('batch_size', 256)
 
                         from virnucpro.pipeline.features import extract_dnabert_features
-                        # Note: extract_dnabert_features currently loads its own model
-                        # This will need to be refactored to accept pre-loaded model
-                        # For now, this is a placeholder implementation
-                        logger.warning(f"Worker {device_id}: extract_dnabert_features not yet refactored for persistent models")
+                        # Pass pre-loaded model and tokenizer
                         extract_dnabert_features(
                             file,
                             output_file,
                             _device,
-                            batch_size=batch_size
+                            batch_size=batch_size,
+                            model=_model,  # Pass pre-loaded model
+                            tokenizer=_tokenizer  # Pass pre-loaded tokenizer
                         )
 
                     processed_files.append(output_file)
