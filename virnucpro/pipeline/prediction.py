@@ -476,9 +476,14 @@ def run_prediction(
                         # Clear cache after DNABERT-S stage if memory manager active
                         if memory_manager:
                             memory_manager.clear_cache()
+                            if persistent_models:
+                                # Extra aggressive clearing for persistent models
+                                torch.cuda.synchronize()
+                                torch.cuda.empty_cache()
                             if not quiet:
                                 stats = memory_manager.get_memory_stats()
-                                logger.info(f"  Post-DNABERT memory: {stats['allocated']:.2f}GB allocated, "
+                                mode = "persistent" if persistent_models else "standard"
+                                logger.info(f"  Post-DNABERT memory ({mode}): {stats['allocated']:.2f}GB allocated, "
                                            f"{stats['free']:.2f}GB free")
 
                         # Log any failures
@@ -674,9 +679,14 @@ def run_prediction(
                         # Clear cache after ESM-2 stage if memory manager active
                         if memory_manager:
                             memory_manager.clear_cache()
+                            if persistent_models:
+                                # Extra aggressive clearing for persistent models
+                                torch.cuda.synchronize()
+                                torch.cuda.empty_cache()
                             if not quiet:
                                 stats = memory_manager.get_memory_stats()
-                                logger.info(f"  Post-ESM-2 memory: {stats['allocated']:.2f}GB allocated, "
+                                mode = "persistent" if persistent_models else "standard"
+                                logger.info(f"  Post-ESM-2 memory ({mode}): {stats['allocated']:.2f}GB allocated, "
                                            f"{stats['free']:.2f}GB free")
 
                         # Close persistent pool if created
