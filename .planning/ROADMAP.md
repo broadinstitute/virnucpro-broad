@@ -18,6 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2.1: Parallel Embedding Merge (INSERTED)** - Parallelize embedding merge with multi-processing/multi-threading
 - [x] **Phase 3: Checkpoint Robustness** - Atomic writes, validation, backward compatibility
 - [x] **Phase 4: Memory & Attention Optimization** - FlashAttention, prefetching, memory management
+- [ ] **Phase 4.1: Persistent Model Loading (INSERTED)** - Keep models in GPU memory to avoid re-loading overhead
 - [ ] **Phase 5: Load Balancing & Monitoring** - Efficient work distribution and GPU utilization visibility
 - [ ] **Phase 6: Performance Validation** - Verify <10 hour target and linear scaling
 
@@ -139,9 +140,30 @@ Plans:
 - [x] 04-03-PLAN.md — Implement CUDA streams for I/O-compute overlap
 - [x] 04-04-PLAN.md — Complete integration with CLI flags and DNABERT-S FlashAttention
 
+### Phase 4.1: Persistent Model Loading (INSERTED)
+**Goal**: Keep models in GPU memory persistently to eliminate re-loading overhead between pipeline stages
+**Depends on**: Phase 4
+**Requirements**: None (uses existing PyTorch and multiprocessing)
+**Success Criteria** (what must be TRUE):
+  1. Workers load models once during pool initialization, not per file batch
+  2. Models remain in GPU memory across multiple file processing jobs
+  3. Memory management prevents fragmentation via expandable segments and periodic cache clearing
+  4. CLI flag --persistent-models enables the feature (default: disabled for backward compatibility)
+  5. Output with persistent models matches standard worker output exactly
+  6. Integration tests verify memory management and output correctness
+**Plans**: 3 plans
+
+Plans:
+- [ ] 04.1-01-PLAN.md — Create persistent worker pool infrastructure
+- [ ] 04.1-02-PLAN.md — Implement persistent worker functions for models
+- [ ] 04.1-03-PLAN.md — Integrate into pipeline with CLI and testing
+
+**Details:**
+Persistent model loading eliminates the 2-5 minute overhead of loading ESM-2 3B and DNABERT-S models for each pipeline stage. By keeping models in GPU memory using long-lived worker processes with `maxtasksperchild=None`, the pipeline avoids reloading models between DNABERT-S and ESM-2 extraction stages. Memory fragmentation is managed through PyTorch's expandable segments feature and periodic cache clearing.
+
 ### Phase 5: Load Balancing & Monitoring
 **Goal**: GPU utilization monitoring shows >80% usage, load-balanced file assignment prevents idle GPUs, and heterogeneous GPU configurations are supported.
-**Depends on**: Phase 4
+**Depends on**: Phase 4.1
 **Requirements**: MON-01, MON-02, MON-03, LOAD-01, LOAD-03
 **Success Criteria** (what must be TRUE):
   1. nvitop logs GPU compute % and memory usage every 10 seconds during embedding stages
