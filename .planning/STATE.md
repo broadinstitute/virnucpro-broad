@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 4.1 of 6 (Persistent Model Loading)
-Plan: 2 of TBD
-Status: In progress
-Last activity: 2026-01-24 — Completed 04.1-02-PLAN.md (Persistent Worker Functions)
+Plan: 3 of 3
+Status: Phase complete
+Last activity: 2026-01-24 — Completed 04.1-03-PLAN.md (Pipeline & CLI Integration)
 
-Progress: [█████████████▓] 100% (30/30 plans)
+Progress: [█████████████▓] 100% (31/31 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 29
+- Total plans completed: 30
 - Average duration: 3.6 minutes
-- Total execution time: 1.78 hours
+- Total execution time: 1.85 hours
 
 **By Phase:**
 
@@ -33,11 +33,11 @@ Progress: [█████████████▓] 100% (30/30 plans)
 | 2.1   | 5     | 15.6m | 3.1m     |
 | 3     | 4     | 15.2m | 3.8m     |
 | 4     | 4     | 18.6m | 4.7m     |
-| 4.1   | 2     | 7.0m  | 3.5m     |
+| 4.1   | 3     | 11.0m | 3.7m     |
 
 **Recent Trend:**
-- Last 5 plans: 03-04 (5.0m), 04-01 (4.3m), 04-03 (5.0m), 04-04 (4.4m), 04.1-01 (4.0m)
-- Trend: Phase 4.1 IN PROGRESS; persistent model loading infrastructure and worker functions complete
+- Last 5 plans: 04-01 (4.3m), 04-03 (5.0m), 04-04 (4.4m), 04.1-01 (4.0m), 04.1-02 (3.0m), 04.1-03 (4.0m)
+- Trend: Phase 4.1 COMPLETE; persistent model loading fully integrated with CLI and comprehensive testing
 
 *Updated after each plan completion*
 
@@ -193,6 +193,12 @@ Recent decisions affecting current work:
 - persistent-worker-pattern: Worker initializer loads model once (init_esm_worker/init_dnabert_worker), process function reuses from globals
 - expandable-segments-before-cuda: Set PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True' BEFORE torch.device() to enable memory allocator
 
+**From 04.1-03 execution:**
+- opt-in-cli-flag: CLI --persistent-models flag defaults to False for conservative memory usage (backward compatible)
+- parameter-plumbing-pattern: CLI flag → run_prediction(persistent_models=...) → BatchQueueManager(use_persistent_pool=...) for clean integration
+- gpu-test-markers: Use @pytest.mark.gpu decorator for integration tests that require GPU (skip gracefully in CI without GPU)
+- persistent-logging: Log when persistent models enabled for user transparency ("models will remain in GPU memory")
+
 ### Pending Todos
 
 None yet.
@@ -226,8 +232,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-24 06:33 UTC
-Stopped at: Completed 04.1-02-PLAN.md execution (Persistent Worker Functions)
+Last session: 2026-01-24 06:39 UTC
+Stopped at: Completed 04.1-03-PLAN.md execution (Pipeline & CLI Integration)
 Resume file: None
 
 ## Phase 2 Complete
@@ -360,3 +366,50 @@ All 4 plans executed successfully:
 - Backward compatible (all flags optional with defaults)
 
 **Ready for Phase 5 (Production Testing & Benchmarking).**
+
+## Phase 4.1 Complete
+
+**Persistent Model Loading - Complete**
+
+All 3 plans executed successfully:
+- 04.1-01: PersistentWorkerPool Infrastructure (4.0m)
+- 04.1-02: Persistent Worker Functions (3.0m)
+- 04.1-03: Pipeline & CLI Integration (4.0m)
+
+**Key achievements:**
+- PersistentWorkerPool class for long-lived workers with model caching
+- Persistent worker functions for both ESM-2 and DNABERT-S
+- Module-level globals store models for worker process lifetime
+- Pipeline integration via persistent_models parameter
+- CLI --persistent-models flag for user control
+- 17 integration tests covering all scenarios (399 lines)
+- Backward compatibility maintained (default: False)
+- Memory management via periodic cache clearing and expandable segments
+
+**Phase duration:** 11.0 minutes (3 plans)
+**Average per plan:** 3.7 minutes
+
+**Persistent model loading benefits:**
+- Eliminates model re-loading overhead between pipeline stages
+- Models remain in GPU memory for DNABERT-S and ESM-2 processing
+- Periodic cache clearing (every 10 files) prevents fragmentation
+- Expandable segments configured before CUDA operations
+- Opt-in via CLI flag maintains conservative memory usage by default
+- Recommended for processing multiple samples in sequence
+
+**User control:**
+- `--persistent-models` enables persistent model loading
+- `--no-persistent-models` uses standard per-job model loading (default)
+- Logging indicates when persistent mode is active
+- Help text explains memory trade-offs
+
+**Testing coverage:**
+- Pool initialization and lifecycle tests
+- BatchQueueManager integration tests
+- Memory management verification
+- Output equivalence tests
+- CLI flag parsing and parameter passing tests
+- Error handling and cleanup tests
+- GPU tests use @pytest.mark.gpu (skip gracefully without GPU)
+
+**Ready for production benchmarking to measure model loading overhead savings.**
