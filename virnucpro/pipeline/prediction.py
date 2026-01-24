@@ -456,8 +456,15 @@ def run_prediction(
                             num_gpus,
                             process_dnabert_files_worker,
                             progress_queue=progress_queue,
-                            use_persistent_pool=persistent_models
+                            use_persistent_pool=persistent_models,
+                            model_type='dnabert' if persistent_models else None
                         )
+
+                        # Create persistent pool if enabled
+                        if persistent_models:
+                            logger.info("Creating persistent worker pool for DNABERT-S...")
+                            queue_manager.create_persistent_pool()
+
                         processed, failed = queue_manager.process_files(
                             file_assignments,
                             toks_per_batch=effective_dnabert_batch,
@@ -479,6 +486,11 @@ def run_prediction(
                             logger.warning(f"Failed to process {len(failed)} DNABERT-S files")
                             for file_path, error in failed:
                                 logger.error(f"  {file_path}: {error}")
+
+                        # Close persistent pool if created
+                        if persistent_models and queue_manager:
+                            logger.info("Closing DNABERT-S persistent worker pool...")
+                            queue_manager.close_persistent_pool()
                     finally:
                         # Stop monitor thread and complete dashboard
                         stop_event.set()
@@ -640,8 +652,15 @@ def run_prediction(
                             num_gpus,
                             process_esm_files_worker,
                             progress_queue=progress_queue,
-                            use_persistent_pool=persistent_models
+                            use_persistent_pool=persistent_models,
+                            model_type='esm2' if persistent_models else None
                         )
+
+                        # Create persistent pool if enabled
+                        if persistent_models:
+                            logger.info("Creating persistent worker pool for ESM-2...")
+                            queue_manager.create_persistent_pool()
+
                         processed, failed = queue_manager.process_files(
                             file_assignments,
                             toks_per_batch=toks_per_batch,
@@ -659,6 +678,11 @@ def run_prediction(
                                 stats = memory_manager.get_memory_stats()
                                 logger.info(f"  Post-ESM-2 memory: {stats['allocated']:.2f}GB allocated, "
                                            f"{stats['free']:.2f}GB free")
+
+                        # Close persistent pool if created
+                        if persistent_models and queue_manager:
+                            logger.info("Closing ESM-2 persistent worker pool...")
+                            queue_manager.close_persistent_pool()
                     finally:
                         # Stop monitor thread and complete dashboard
                         stop_event.set()
