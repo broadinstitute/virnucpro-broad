@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 4.1 of 6 (Persistent Model Loading)
-Plan: 1 of TBD
+Plan: 2 of TBD
 Status: In progress
-Last activity: 2026-01-24 — Completed 04.1-01-PLAN.md (Persistent Worker Pool Infrastructure)
+Last activity: 2026-01-24 — Completed 04.1-02-PLAN.md (Persistent Worker Functions)
 
-Progress: [█████████████▓] 100% (29/29 plans)
+Progress: [█████████████▓] 100% (30/30 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 27
+- Total plans completed: 29
 - Average duration: 3.6 minutes
-- Total execution time: 1.67 hours
+- Total execution time: 1.78 hours
 
 **By Phase:**
 
@@ -33,10 +33,11 @@ Progress: [█████████████▓] 100% (29/29 plans)
 | 2.1   | 5     | 15.6m | 3.1m     |
 | 3     | 4     | 15.2m | 3.8m     |
 | 4     | 4     | 18.6m | 4.7m     |
+| 4.1   | 2     | 7.0m  | 3.5m     |
 
 **Recent Trend:**
-- Last 5 plans: 03-03 (3.0m), 03-04 (5.0m), 04-01 (4.3m), 04-03 (5.0m), 04-04 (4.4m)
-- Trend: Phase 4 COMPLETE; memory optimization pipeline integrated with CLI control, DNABERT-S FlashAttention, OOM handling
+- Last 5 plans: 03-04 (5.0m), 04-01 (4.3m), 04-03 (5.0m), 04-04 (4.4m), 04.1-01 (4.0m)
+- Trend: Phase 4.1 IN PROGRESS; persistent model loading infrastructure and worker functions complete
 
 *Updated after each plan completion*
 
@@ -187,6 +188,11 @@ Recent decisions affecting current work:
 - opt-in-persistent-pool: Add use_persistent_pool=False default parameter to BatchQueueManager for backward compatibility
 - periodic-cache-clearing-10: Call torch.cuda.empty_cache() every 10 files in persistent workers to prevent fragmentation
 
+**From 04.1-02 execution:**
+- module-globals-model-storage: Use module-level globals (_esm_model, _batch_converter, _device) to store models for worker process lifetime
+- persistent-worker-pattern: Worker initializer loads model once (init_esm_worker/init_dnabert_worker), process function reuses from globals
+- expandable-segments-before-cuda: Set PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True' BEFORE torch.device() to enable memory allocator
+
 ### Pending Todos
 
 None yet.
@@ -220,8 +226,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-24 06:28 UTC
-Stopped at: Completed 04.1-01-PLAN.md execution (Persistent Worker Pool Infrastructure)
+Last session: 2026-01-24 06:33 UTC
+Stopped at: Completed 04.1-02-PLAN.md execution (Persistent Worker Functions)
 Resume file: None
 
 ## Phase 2 Complete
