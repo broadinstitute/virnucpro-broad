@@ -48,7 +48,8 @@ def run_prediction(
     pin_memory: Optional[bool] = None,
     expandable_segments: bool = False,
     cache_clear_interval: int = 100,
-    cuda_streams: bool = True
+    cuda_streams: bool = True,
+    persistent_models: bool = False
 ) -> int:
     """
     Main prediction pipeline orchestration.
@@ -79,6 +80,7 @@ def run_prediction(
         expandable_segments: Enable expandable CUDA memory segments (optional, default: False)
         cache_clear_interval: Clear CUDA cache every N batches (optional, default: 100)
         cuda_streams: Use CUDA streams for I/O overlap (optional, default: True)
+        persistent_models: Keep models loaded in GPU memory between pipeline stages (optional, default: False)
 
     Returns:
         Exit code: 0 for success, 1 for total failure, 2 for partial success, 4 for OOM
@@ -118,6 +120,10 @@ def run_prediction(
                 stats = memory_manager.get_memory_stats()
                 logger.info(f"  Initial GPU memory: {stats['allocated']:.2f}GB allocated, "
                            f"{stats['free']:.2f}GB free")
+
+            # Log persistent model mode
+            if persistent_models:
+                logger.info("Using persistent model loading - models will remain in GPU memory between pipeline stages")
         except Exception as e:
             logger.warning(f"Memory optimization initialization failed: {e}")
             logger.warning("Continuing without memory optimization")
@@ -446,7 +452,12 @@ def run_prediction(
 
                     try:
                         # Process with queue manager using DNABERT-S worker
-                        queue_manager = BatchQueueManager(num_gpus, process_dnabert_files_worker, progress_queue=progress_queue)
+                        queue_manager = BatchQueueManager(
+                            num_gpus,
+                            process_dnabert_files_worker,
+                            progress_queue=progress_queue,
+                            use_persistent_pool=persistent_models
+                        )
                         processed, failed = queue_manager.process_files(
                             file_assignments,
                             toks_per_batch=effective_dnabert_batch,
@@ -625,7 +636,12 @@ def run_prediction(
 
                     try:
                         # Process with queue manager
-                        queue_manager = BatchQueueManager(num_gpus, process_esm_files_worker, progress_queue=progress_queue)
+                        queue_manager = BatchQueueManager(
+                            num_gpus,
+                            process_esm_files_worker,
+                            progress_queue=progress_queue,
+                            use_persistent_pool=persistent_models
+                        )
                         processed, failed = queue_manager.process_files(
                             file_assignments,
                             toks_per_batch=toks_per_batch,
