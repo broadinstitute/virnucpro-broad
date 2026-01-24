@@ -138,9 +138,9 @@ Plans:
 - [x] 04.1-01-PLAN.md — Create PersistentWorkerPool infrastructure
 - [x] 04.1-02-PLAN.md — Implement persistent worker functions
 - [x] 04.1-03-PLAN.md — Pipeline & CLI Integration
-- [ ] 04.1-04-PLAN.md — Refactor feature extraction to accept pre-loaded models
-- [ ] 04.1-05-PLAN.md — Wire pipeline to create and use persistent pools
-- [ ] 04.1-06-PLAN.md — Fix integration tests and verify model persistence
+- [x] 04.1-04-PLAN.md — Refactor feature extraction to accept pre-loaded models
+- [x] 04.1-05-PLAN.md — Wire pipeline to create and use persistent pools
+- [x] 04.1-06-PLAN.md — Fix integration tests and verify model persistence
 
 ### Phase 5: Advanced Load Balancing
 **Goal**: Work stealing and dynamic rebalancing ensure no GPU sits idle while others have queued work.
