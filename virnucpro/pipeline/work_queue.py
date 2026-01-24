@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import List, Callable, Tuple, Dict, Any, Optional
 import time
 
+from virnucpro.pipeline.persistent_pool import PersistentWorkerPool
+
 logger = logging.getLogger('virnucpro.work_queue')
 
 # Module-level globals for worker processes (set by Pool initializer)
@@ -85,7 +87,9 @@ class BatchQueueManager:
         num_workers: int,
         worker_function: Callable,
         spawn_context: bool = True,
-        progress_queue: Optional[multiprocessing.Queue] = None
+        progress_queue: Optional[multiprocessing.Queue] = None,
+        use_persistent_pool: bool = False,
+        model_type: Optional[str] = None
     ):
         """
         Initialize batch queue manager.
@@ -95,27 +99,38 @@ class BatchQueueManager:
             worker_function: Function to execute in workers
             spawn_context: Use spawn context for CUDA safety (default: True)
             progress_queue: Optional queue for workers to report progress events
+            use_persistent_pool: Use persistent worker pool (default: False for backward compatibility)
+            model_type: Model type for persistent pool ('esm2' or 'dnabert', required if use_persistent_pool=True)
 
         Raises:
-            ValueError: If worker_function signature is invalid
+            ValueError: If worker_function signature is invalid or model_type missing when use_persistent_pool=True
         """
-        # Validate worker function signature
-        sig = inspect.signature(worker_function)
-        params = list(sig.parameters.keys())
-        if len(params) < 2:
-            raise ValueError(
-                f"Worker function must accept at least (file_subset, device_id, **kwargs), "
-                f"got parameters: {params}"
-            )
+        # Validate worker function signature (skip if using persistent pool)
+        if not use_persistent_pool:
+            sig = inspect.signature(worker_function)
+            params = list(sig.parameters.keys())
+            if len(params) < 2:
+                raise ValueError(
+                    f"Worker function must accept at least (file_subset, device_id, **kwargs), "
+                    f"got parameters: {params}"
+                )
+
+        # Validate persistent pool configuration
+        if use_persistent_pool and model_type is None:
+            raise ValueError("model_type is required when use_persistent_pool=True")
 
         self.num_workers = num_workers
         self.worker_function = worker_function
         self.ctx = multiprocessing.get_context('spawn') if spawn_context else multiprocessing
         self.worker_status = {i: WorkerStatus.IDLE for i in range(num_workers)}
         self.progress_queue = progress_queue
+        self.use_persistent_pool = use_persistent_pool
+        self.model_type = model_type
+        self.persistent_pool = None
 
         logger.info(f"Initialized BatchQueueManager with {num_workers} workers "
-                   f"({'spawn' if spawn_context else 'default'} context)")
+                   f"({'spawn' if spawn_context else 'default'} context, "
+                   f"persistent_pool={'enabled' if use_persistent_pool else 'disabled'})")
 
     def process_files(
         self,
@@ -124,6 +139,9 @@ class BatchQueueManager:
     ) -> Tuple[List[Path], List[Tuple[Path, str]]]:
         """
         Process files across multiple workers in parallel.
+
+        If persistent pool is enabled, uses pre-loaded models from persistent workers.
+        Otherwise, creates a new pool for this job (traditional behavior).
 
         Args:
             file_assignments: List of file lists, one per worker
@@ -142,6 +160,12 @@ class BatchQueueManager:
                 f"Expected {self.num_workers} file assignments, got {len(file_assignments)}"
             )
 
+        # Check if using persistent pool
+        if self.use_persistent_pool and self.persistent_pool is not None:
+            logger.info("Using persistent worker pool (models already loaded)")
+            return self.persistent_pool.process_job(file_assignments, **worker_kwargs)
+
+        # Traditional behavior: create new pool for this job
         # Track results
         all_processed = []
         all_failed = []
@@ -236,3 +260,49 @@ class BatchQueueManager:
             status in (WorkerStatus.COMPLETED, WorkerStatus.FAILED)
             for status in self.worker_status.values()
         )
+
+    def create_persistent_pool(self) -> None:
+        """
+        Create persistent worker pool with model pre-loading.
+
+        This method initializes a persistent pool that loads models once and
+        reuses them across multiple process_files() calls. Only available when
+        use_persistent_pool=True was set during initialization.
+
+        Raises:
+            RuntimeError: If persistent pool not enabled or already created
+        """
+        if not self.use_persistent_pool:
+            raise RuntimeError(
+                "Persistent pool not enabled. Set use_persistent_pool=True during initialization."
+            )
+
+        if self.persistent_pool is not None:
+            raise RuntimeError("Persistent pool already created. Call close_persistent_pool() first.")
+
+        logger.info(f"Creating persistent pool with {self.num_workers} workers for {self.model_type}")
+
+        self.persistent_pool = PersistentWorkerPool(
+            num_workers=self.num_workers,
+            model_type=self.model_type,
+            spawn_context=True,
+            progress_queue=self.progress_queue
+        )
+        self.persistent_pool.create_pool()
+
+        logger.info("Persistent pool created successfully")
+
+    def close_persistent_pool(self) -> None:
+        """
+        Close persistent worker pool and release resources.
+
+        This method gracefully shuts down the persistent pool, terminating
+        worker processes and releasing GPU memory.
+
+        Safe to call even if pool doesn't exist (no-op).
+        """
+        if self.persistent_pool is not None:
+            logger.info("Closing persistent pool")
+            self.persistent_pool.close()
+            self.persistent_pool = None
+            logger.info("Persistent pool closed")
