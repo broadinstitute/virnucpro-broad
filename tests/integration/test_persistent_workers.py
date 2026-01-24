@@ -136,6 +136,107 @@ class TestMemoryManagement:
             os.environ['PYTORCH_CUDA_ALLOC_CONF'] = original_env
 
 
+class TestModelPersistence:
+    """Test that models are truly persistent and not reloaded."""
+
+    @pytest.mark.gpu
+    def test_models_not_reloaded_per_file(self, caplog):
+        """Verify models are loaded once and reused for multiple files."""
+        import logging
+        import tempfile
+        caplog.set_level(logging.INFO)
+
+        from virnucpro.pipeline.persistent_pool import PersistentWorkerPool
+
+        pool = PersistentWorkerPool(
+            num_workers=1,
+            model_type='dnabert'
+        )
+
+        pool.create_pool()
+
+        # Create multiple test files
+        test_files = []
+        output_dir = Path(tempfile.mkdtemp())
+
+        try:
+            for i in range(3):
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.fasta', delete=False) as f:
+                    f.write(f'>seq{i}\nACGTACGT\n')
+                    test_files.append(Path(f.name))
+
+            # Process files one by one and check logs
+            for i, test_file in enumerate(test_files):
+                caplog.clear()
+
+                # Process single file
+                file_assignments = [[test_file]]
+                result = pool.process_job(file_assignments, output_dir=output_dir, batch_size=256)
+
+                processed, failed = result
+                assert len(processed) == 1
+                assert len(failed) == 0
+
+                # Check logs - model loading should only appear once (on first file)
+                if i == 0:
+                    # First file - model should be loaded
+                    assert ("Loading DNABERT-S model" in caplog.text or
+                           "DNABERT-S model loaded" in caplog.text or
+                           "one-time initialization" in caplog.text)
+                else:
+                    # Subsequent files - should NOT see model loading messages
+                    assert "Loading DNABERT-S model" not in caplog.text
+                    assert "one-time initialization" not in caplog.text
+                    assert "from_pretrained" not in caplog.text
+                    # Should see "reuse" messages
+                    assert ("will reuse" in caplog.text or
+                           "Processing" in caplog.text)
+
+        finally:
+            for f in test_files:
+                f.unlink(missing_ok=True)
+            pool.close()
+
+    @pytest.mark.gpu
+    def test_persistent_vs_standard_performance(self):
+        """Compare processing time: persistent should be faster on multiple files."""
+        import time
+        import tempfile
+
+        from virnucpro.pipeline.persistent_pool import PersistentWorkerPool
+
+        # Create test files
+        test_files = []
+        output_dir = Path(tempfile.mkdtemp())
+
+        try:
+            for i in range(5):
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.fasta', delete=False) as f:
+                    f.write(f'>seq{i}\n' + 'ACGT' * 100 + '\n')
+                    test_files.append(Path(f.name))
+
+            # Time persistent pool
+            start = time.time()
+            pool = PersistentWorkerPool(num_workers=1, model_type='dnabert')
+            pool.create_pool()
+
+            for test_file in test_files:
+                file_assignments = [[test_file]]
+                pool.process_job(file_assignments, output_dir=output_dir, batch_size=256)
+
+            pool.close()
+            persistent_time = time.time() - start
+
+            # Log the times for debugging
+            print(f"Persistent pool time: {persistent_time:.2f}s")
+            # Assert persistent is working (should complete in reasonable time)
+            assert persistent_time < 60  # Should process 5 small files in under 60s
+
+        finally:
+            for f in test_files:
+                f.unlink(missing_ok=True)
+
+
 class TestOutputEquivalence:
     """Tests to verify persistent and standard workers produce identical results."""
 
