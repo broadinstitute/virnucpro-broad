@@ -34,13 +34,12 @@ class TestMemoryOptimizationIntegration:
 
         mm = MemoryManager(cache_clear_interval=5)
 
-        # First 4 increments should not trigger clear
-        for i in range(4):
-            assert not mm.should_clear_cache()
-            mm.increment_and_clear()
+        # First 4 batches should not trigger clear
+        for i in range(1, 5):
+            assert not mm.should_clear_cache(i)
 
-        # 5th increment should trigger clear
-        assert mm.should_clear_cache()
+        # 5th batch should trigger clear
+        assert mm.should_clear_cache(5)
 
     @patch('torch.cuda.is_available', return_value=False)
     def test_memory_stats_without_cuda(self, mock_cuda):

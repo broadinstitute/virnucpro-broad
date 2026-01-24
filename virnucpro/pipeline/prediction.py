@@ -456,7 +456,7 @@ def run_prediction(
                         nucleotide_feature_files.extend(processed)
 
                         # Clear cache after DNABERT-S stage if memory manager active
-                        if memory_manager and memory_manager.should_clear_cache():
+                        if memory_manager:
                             memory_manager.clear_cache()
                             if not quiet:
                                 stats = memory_manager.get_memory_stats()
@@ -637,7 +637,7 @@ def run_prediction(
                         failed_files.extend(failed)
 
                         # Clear cache after ESM-2 stage if memory manager active
-                        if memory_manager and memory_manager.should_clear_cache():
+                        if memory_manager:
                             memory_manager.clear_cache()
                             if not quiet:
                                 stats = memory_manager.get_memory_stats()
