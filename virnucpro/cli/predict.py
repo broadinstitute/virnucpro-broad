@@ -77,12 +77,32 @@ logger = logging.getLogger('virnucpro.cli.predict')
 @click.option('--force-resume',
               is_flag=True,
               help='Force resume even if some checkpoints are corrupted')
+@click.option('--dataloader-workers',
+              type=int,
+              default=None,
+              help='Number of DataLoader workers (default: auto-detect based on CPU/GPU ratio)')
+@click.option('--pin-memory',
+              is_flag=True,
+              default=None,
+              help='Pin memory for faster GPU transfer (default: auto based on available RAM)')
+@click.option('--expandable-segments',
+              is_flag=True,
+              default=False,
+              help='Enable expandable CUDA memory segments for fragmentation prevention')
+@click.option('--cache-clear-interval',
+              type=int,
+              default=100,
+              help='Clear CUDA cache every N batches (0 to disable)')
+@click.option('--cuda-streams/--no-cuda-streams',
+              default=True,
+              help='Use CUDA streams for I/O overlap (default: enabled)')
 @click.pass_context
 def predict(ctx, input_file, model_type, model_path, expected_length,
             output_dir, device, batch_size, num_workers,
             keep_intermediate, resume, force, no_progress,
             dnabert_batch_size, parallel, gpus, esm_batch_size, threads, verbose,
-            skip_checkpoint_validation, force_resume):
+            skip_checkpoint_validation, force_resume, dataloader_workers, pin_memory,
+            expandable_segments, cache_clear_interval, cuda_streams):
     """
     Predict viral sequences from FASTA input.
 
@@ -204,6 +224,27 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
         if force_resume:
             logger.warning(f"  Force resume: enabled (will ignore corrupted checkpoints)")
 
+        # Log memory optimization settings
+        if dataloader_workers:
+            logger.info(f"  DataLoader workers: {dataloader_workers}")
+        else:
+            logger.info(f"  DataLoader workers: auto-detect")
+        if pin_memory is not None:
+            logger.info(f"  Pin memory: {pin_memory}")
+        else:
+            logger.info(f"  Pin memory: auto-detect")
+        if expandable_segments:
+            logger.info(f"  Expandable segments: enabled")
+        logger.info(f"  Cache clear interval: {cache_clear_interval} batches")
+        logger.info(f"  CUDA streams: {'enabled' if cuda_streams else 'disabled'}")
+
+        # Import torch for CUDA validation
+        import torch
+
+        # Validate CUDA streams flag
+        if cuda_streams and not torch.cuda.is_available():
+            logger.warning("  CUDA streams requested but CUDA not available, will be disabled")
+
         # Import and run prediction pipeline
         from virnucpro.pipeline.prediction import run_prediction
 
@@ -229,7 +270,12 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
             quiet=not verbose,
             gpus=gpus,
             skip_checkpoint_validation=skip_checkpoint_validation,
-            force_resume=force_resume
+            force_resume=force_resume,
+            dataloader_workers=dataloader_workers,
+            pin_memory=pin_memory,
+            expandable_segments=expandable_segments,
+            cache_clear_interval=cache_clear_interval,
+            cuda_streams=cuda_streams
         )
 
         if exit_code == 0:
