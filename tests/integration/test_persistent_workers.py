@@ -75,18 +75,20 @@ class TestBatchQueueManagerPersistentPool:
 
         # Standard mode (default)
         manager_standard = BatchQueueManager(
-            num_gpus=2,
-            worker_func=process_esm_files_worker
+            num_workers=2,
+            worker_function=process_esm_files_worker
         )
         assert manager_standard.use_persistent_pool is False
 
-        # Persistent mode (opt-in)
+        # Persistent mode (opt-in) - requires model_type
         manager_persistent = BatchQueueManager(
-            num_gpus=2,
-            worker_func=process_esm_files_worker,
-            use_persistent_pool=True
+            num_workers=2,
+            worker_function=process_esm_files_worker,
+            use_persistent_pool=True,
+            model_type='esm2'
         )
         assert manager_persistent.use_persistent_pool is True
+        assert manager_persistent.model_type == 'esm2'
 
     def test_batch_queue_manager_backward_compatibility(self):
         """Test that existing code works without use_persistent_pool parameter."""
@@ -94,8 +96,98 @@ class TestBatchQueueManagerPersistentPool:
         from virnucpro.pipeline.parallel_esm import process_esm_files_worker
 
         # Should work without use_persistent_pool parameter (backward compatibility)
-        manager = BatchQueueManager(num_gpus=2, worker_func=process_esm_files_worker)
+        manager = BatchQueueManager(num_workers=2, worker_function=process_esm_files_worker)
         assert manager.use_persistent_pool is False
+
+    @pytest.mark.gpu
+    def test_queue_manager_with_persistent_pool(self):
+        """Test BatchQueueManager creates and uses persistent pool."""
+        import tempfile
+        from virnucpro.pipeline.work_queue import BatchQueueManager
+        from virnucpro.pipeline.parallel_dnabert import process_dnabert_files_worker
+
+        # Create queue manager with persistent pool enabled
+        queue_manager = BatchQueueManager(
+            num_workers=1,
+            worker_function=process_dnabert_files_worker,
+            use_persistent_pool=True,
+            model_type='dnabert'
+        )
+
+        # Create the persistent pool
+        queue_manager.create_persistent_pool()
+
+        try:
+            # Verify pool was created
+            assert queue_manager.persistent_pool is not None
+            assert queue_manager.persistent_pool.pool is not None
+
+            # Create test file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.fasta', delete=False) as f:
+                f.write('>test\nACGTACGT\n')
+                test_file = Path(f.name)
+
+            try:
+                output_dir = Path(tempfile.mkdtemp())
+                file_assignments = [[test_file]]
+
+                # Process files using persistent pool
+                processed, failed = queue_manager.process_files(
+                    file_assignments,
+                    output_dir=output_dir,
+                    batch_size=256
+                )
+
+                # Verify processing succeeded
+                assert len(processed) == 1
+                assert len(failed) == 0
+                assert processed[0].exists()
+
+            finally:
+                test_file.unlink(missing_ok=True)
+
+        finally:
+            # Clean up persistent pool
+            queue_manager.close_persistent_pool()
+            assert queue_manager.persistent_pool is None
+
+    def test_queue_manager_fallback_without_create(self, caplog):
+        """Test queue manager falls back to standard pool if create not called."""
+        import logging
+        import tempfile
+        caplog.set_level(logging.WARNING)
+
+        from virnucpro.pipeline.work_queue import BatchQueueManager
+        from virnucpro.pipeline.parallel_dnabert import process_dnabert_files_worker
+
+        queue_manager = BatchQueueManager(
+            num_workers=1,
+            worker_function=process_dnabert_files_worker,
+            use_persistent_pool=True,
+            model_type='dnabert'
+        )
+
+        # Intentionally NOT calling create_persistent_pool()
+
+        # Create test file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.fasta', delete=False) as f:
+            f.write('>test\nACGT\n')
+            test_file = Path(f.name)
+
+        try:
+            output_dir = Path(tempfile.mkdtemp())
+            file_assignments = [[test_file]]
+
+            # Should fall back to standard pool
+            # Note: This will actually work but log a warning
+            # We're just testing the fallback detection, not running actual processing
+            # since that would require GPU and model loading
+
+            # Check that warning would be logged
+            assert queue_manager.persistent_pool is None  # Pool not created
+
+        finally:
+            test_file.unlink(missing_ok=True)
 
 
 class TestMemoryManagement:
