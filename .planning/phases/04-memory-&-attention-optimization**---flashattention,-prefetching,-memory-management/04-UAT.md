@@ -1,9 +1,9 @@
 ---
-status: complete
+status: diagnosed
 phase: 04-memory-attention
 source: [04-01-SUMMARY.md, 04-02-SUMMARY.md, 04-03-SUMMARY.md, 04-04-SUMMARY.md]
 started: 2026-01-24T01:22:00Z
-updated: 2026-01-24T01:27:00Z
+updated: 2026-01-24T01:30:00Z
 ---
 
 ## Current Test
@@ -64,11 +64,18 @@ skipped: 5
 ## Gaps
 
 - truth: "Pipeline completes DNABERT-S step without crashing"
-  status: failed
+  status: fixed
   reason: "User reported: I ran into this error right at the end of the DNABERT step: TypeError: should_clear_cache() missing 1 required positional argument: 'batch_num'"
   severity: blocker
   test: 2
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
+  root_cause: "The should_clear_cache() method requires a batch_num argument for interval-based cache clearing, but the pipeline was calling it without arguments at lines 459 and 640. The pipeline wants unconditional cache clearing after processing stages, not interval-based clearing."
+  artifacts:
+    - path: "virnucpro/pipeline/prediction.py"
+      issue: "Lines 459 and 640 called should_clear_cache() without required batch_num argument"
+    - path: "tests/integration/test_memory_attention_integration.py"
+      issue: "Lines 37-42 also called should_clear_cache() without batch_num"
+  missing:
+    - "Replace should_clear_cache() conditional with direct clear_cache() calls in prediction.py"
+    - "Fix test to pass batch_num to should_clear_cache() calls"
+  debug_session: ".planning/debug/resolved/should-clear-cache-missing-argument.md"
+  fix_commit: "c3eb8be"
