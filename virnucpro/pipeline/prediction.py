@@ -15,6 +15,9 @@ from virnucpro.pipeline.parallel_esm import assign_files_round_robin, process_es
 from virnucpro.pipeline.parallel_dnabert import process_dnabert_files_worker, assign_files_by_sequences
 from virnucpro.pipeline.parallel_merge import parallel_merge_with_progress
 from virnucpro.pipeline.work_queue import BatchQueueManager
+from virnucpro.cuda.memory_manager import MemoryManager, configure_memory_optimization
+from virnucpro.data.dataloader_utils import create_optimized_dataloader, get_optimal_workers
+from virnucpro.models.esm2_flash import load_esm2_model
 # Import other pipeline components as they're refactored
 
 logger = logging.getLogger('virnucpro.pipeline.prediction')
@@ -38,7 +41,14 @@ def run_prediction(
     translation_threads: int = None,
     merge_threads: int = None,
     quiet: bool = False,
-    gpus: str = None
+    gpus: str = None,
+    skip_checkpoint_validation: bool = False,
+    force_resume: bool = False,
+    dataloader_workers: Optional[int] = None,
+    pin_memory: Optional[bool] = None,
+    expandable_segments: bool = False,
+    cache_clear_interval: int = 100,
+    cuda_streams: bool = True
 ) -> int:
     """
     Main prediction pipeline orchestration.
@@ -62,9 +72,16 @@ def run_prediction(
         merge_threads: Number of CPU threads for parallel embedding merge (optional, default: auto-detect)
         quiet: Disable dashboard and verbose logging (optional)
         gpus: GPU IDs to use (comma-separated, optional)
+        skip_checkpoint_validation: Skip checkpoint validation (optional)
+        force_resume: Force resume even if checkpoints corrupted (optional)
+        dataloader_workers: Number of DataLoader workers (optional, auto-detect)
+        pin_memory: Pin memory for faster GPU transfer (optional, auto-detect)
+        expandable_segments: Enable expandable CUDA memory segments (optional, default: False)
+        cache_clear_interval: Clear CUDA cache every N batches (optional, default: 100)
+        cuda_streams: Use CUDA streams for I/O overlap (optional, default: True)
 
     Returns:
-        Exit code: 0 for success, 1 for total failure, 2 for partial success
+        Exit code: 0 for success, 1 for total failure, 2 for partial success, 4 for OOM
     """
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -84,6 +101,28 @@ def run_prediction(
     }
 
     checkpoint_manager = CheckpointManager(checkpoint_dir, pipeline_config)
+
+    # Initialize memory management (must be before any CUDA operations)
+    memory_manager = None
+    if torch.cuda.is_available():
+        try:
+            memory_manager = configure_memory_optimization(
+                enable_expandable=expandable_segments,
+                cache_interval=cache_clear_interval,
+                verbose=not quiet
+            )
+            logger.info("Memory optimization initialized")
+
+            # Log initial memory status
+            if memory_manager and not quiet:
+                stats = memory_manager.get_memory_stats()
+                logger.info(f"  Initial GPU memory: {stats['allocated']:.2f}GB allocated, "
+                           f"{stats['free']:.2f}GB free")
+        except Exception as e:
+            logger.warning(f"Memory optimization initialization failed: {e}")
+            logger.warning("Continuing without memory optimization")
+    else:
+        logger.info("CUDA not available, skipping memory optimization")
 
     # Load state (or create new)
     if resume:
@@ -122,6 +161,7 @@ def run_prediction(
     protein_file = output_dir / f"{input_file.stem}_protein.faa"
 
     try:
+        # Wrap GPU operations for OOM handling
         # Stage 1: Chunking
         if start_stage == PipelineStage.CHUNKING or not checkpoint_manager.can_skip_stage(state, PipelineStage.CHUNKING):
             logger.info("=== Stage 1: Sequence Chunking ===")
@@ -410,9 +450,18 @@ def run_prediction(
                         processed, failed = queue_manager.process_files(
                             file_assignments,
                             toks_per_batch=effective_dnabert_batch,
-                            output_dir=nucleotide_split_dir
+                            output_dir=nucleotide_split_dir,
+                            enable_streams=cuda_streams and torch.cuda.is_available()
                         )
                         nucleotide_feature_files.extend(processed)
+
+                        # Clear cache after DNABERT-S stage if memory manager active
+                        if memory_manager and memory_manager.should_clear_cache():
+                            memory_manager.clear_cache()
+                            if not quiet:
+                                stats = memory_manager.get_memory_stats()
+                                logger.info(f"  Post-DNABERT memory: {stats['allocated']:.2f}GB allocated, "
+                                           f"{stats['free']:.2f}GB free")
 
                         # Log any failures
                         if failed:
@@ -580,11 +629,20 @@ def run_prediction(
                         processed, failed = queue_manager.process_files(
                             file_assignments,
                             toks_per_batch=toks_per_batch,
-                            output_dir=protein_split_dir
+                            output_dir=protein_split_dir,
+                            enable_streams=cuda_streams and torch.cuda.is_available()
                         )
 
                         protein_feature_files.extend(processed)
                         failed_files.extend(failed)
+
+                        # Clear cache after ESM-2 stage if memory manager active
+                        if memory_manager and memory_manager.should_clear_cache():
+                            memory_manager.clear_cache()
+                            if not quiet:
+                                stats = memory_manager.get_memory_stats()
+                                logger.info(f"  Post-ESM-2 memory: {stats['allocated']:.2f}GB allocated, "
+                                           f"{stats['free']:.2f}GB free")
                     finally:
                         # Stop monitor thread and complete dashboard
                         stop_event.set()
@@ -808,6 +866,35 @@ def run_prediction(
         else:
             return 0  # Complete success
 
+    except RuntimeError as e:
+        # Handle OOM errors specifically
+        if "out of memory" in str(e).lower() or "oom" in str(e).lower():
+            logger.error("=" * 60)
+            logger.error("OUT OF MEMORY ERROR")
+            logger.error("=" * 60)
+
+            # Log memory diagnostics if manager available
+            if memory_manager and torch.cuda.is_available():
+                try:
+                    stats = memory_manager.get_memory_stats()
+                    logger.error(f"Memory at failure: {stats['allocated']:.2f}GB allocated, "
+                               f"{stats['reserved']:.2f}GB reserved, {stats['free']:.2f}GB free")
+                    frag_ratio = memory_manager.get_fragmentation_ratio()
+                    logger.error(f"Fragmentation ratio: {frag_ratio:.2%}")
+                except Exception:
+                    pass
+
+            logger.error("\nSuggestions:")
+            logger.error("  1. Reduce batch size: --esm-batch-size 1024 or --dnabert-batch-size 1024")
+            logger.error("  2. Enable expandable segments: --expandable-segments")
+            logger.error("  3. Increase cache clearing: --cache-clear-interval 50")
+            logger.error("  4. Use fewer GPUs or process files sequentially")
+            logger.error("=" * 60)
+            return 4  # OOM exit code
+        else:
+            # Other runtime errors
+            logger.exception("Pipeline failed with runtime error")
+            return 1
     except Exception as e:
         # Mark current stage as failed
         # (determine current stage from state)
