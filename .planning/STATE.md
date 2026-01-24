@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 4.1 of 6 (Persistent Model Loading)
-Plan: 3 of 3
-Status: Phase complete
-Last activity: 2026-01-24 — Completed 04.1-03-PLAN.md (Pipeline & CLI Integration)
+Plan: 4 of 4
+Status: Phase complete (gap closure)
+Last activity: 2026-01-24 — Completed 04.1-04-PLAN.md (Feature Extraction Refactoring)
 
-Progress: [█████████████▓] 100% (31/31 plans)
+Progress: [█████████████▓] 100% (32/32 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 30
-- Average duration: 3.6 minutes
-- Total execution time: 1.85 hours
+- Total plans completed: 32
+- Average duration: 3.5 minutes
+- Total execution time: 1.87 hours
 
 **By Phase:**
 
@@ -33,11 +33,11 @@ Progress: [█████████████▓] 100% (31/31 plans)
 | 2.1   | 5     | 15.6m | 3.1m     |
 | 3     | 4     | 15.2m | 3.8m     |
 | 4     | 4     | 18.6m | 4.7m     |
-| 4.1   | 3     | 11.0m | 3.7m     |
+| 4.1   | 4     | 13.0m | 3.3m     |
 
 **Recent Trend:**
-- Last 5 plans: 04-01 (4.3m), 04-03 (5.0m), 04-04 (4.4m), 04.1-01 (4.0m), 04.1-02 (3.0m), 04.1-03 (4.0m)
-- Trend: Phase 4.1 COMPLETE; persistent model loading fully integrated with CLI and comprehensive testing
+- Last 5 plans: 04-03 (5.0m), 04-04 (4.4m), 04.1-01 (4.0m), 04.1-02 (3.0m), 04.1-03 (4.0m), 04.1-04 (2.0m)
+- Trend: Phase 4.1 COMPLETE with gap closure; extraction functions now accept pre-loaded models, eliminating redundant loading
 
 *Updated after each plan completion*
 
@@ -199,6 +199,11 @@ Recent decisions affecting current work:
 - gpu-test-markers: Use @pytest.mark.gpu decorator for integration tests that require GPU (skip gracefully in CI without GPU)
 - persistent-logging: Log when persistent models enabled for user transparency ("models will remain in GPU memory")
 
+**From 04.1-04 execution:**
+- optional-model-params: Feature extraction functions accept optional pre-loaded model parameters for persistent workers while maintaining backward compatibility (None triggers loading)
+- getattr-bf16-detection: Use getattr(model, 'use_bf16', False) for safe BF16 detection from pre-loaded models
+- device-reallocation: Ensure provided models moved to correct device before use (.to(device))
+
 ### Pending Todos
 
 None yet.
@@ -232,8 +237,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-24 06:39 UTC
-Stopped at: Completed 04.1-03-PLAN.md execution (Pipeline & CLI Integration)
+Last session: 2026-01-24 16:15 UTC
+Stopped at: Completed 04.1-04-PLAN.md execution (Feature Extraction Refactoring - Gap Closure)
 Resume file: None
 
 ## Phase 2 Complete
@@ -369,28 +374,43 @@ All 4 plans executed successfully:
 
 ## Phase 4.1 Complete
 
-**Persistent Model Loading - Complete**
+**Persistent Model Loading - Complete with Gap Closure**
 
-All 3 plans executed successfully:
+All 4 plans executed successfully:
 - 04.1-01: PersistentWorkerPool Infrastructure (4.0m)
 - 04.1-02: Persistent Worker Functions (3.0m)
 - 04.1-03: Pipeline & CLI Integration (4.0m)
+- 04.1-04: Feature Extraction Refactoring (2.0m) [GAP CLOSURE]
 
 **Key achievements:**
 - PersistentWorkerPool class for long-lived workers with model caching
 - Persistent worker functions for both ESM-2 and DNABERT-S
 - Module-level globals store models for worker process lifetime
+- **Refactored extraction functions to accept pre-loaded models**
+- **Persistent workers pass cached models to extraction functions**
+- **Eliminated redundant model loading (models loaded once, reused for all files)**
 - Pipeline integration via persistent_models parameter
 - CLI --persistent-models flag for user control
 - 17 integration tests covering all scenarios (399 lines)
 - Backward compatibility maintained (default: False)
 - Memory management via periodic cache clearing and expandable segments
 
-**Phase duration:** 11.0 minutes (3 plans)
-**Average per plan:** 3.7 minutes
+**Phase duration:** 13.0 minutes (4 plans)
+**Average per plan:** 3.3 minutes
+
+**Gap closure (04.1-04):**
+Closed the critical gap where models were loaded twice:
+1. Once in persistent workers (`_load_model_lazy()`)
+2. Again in extraction functions (`load_esm2_model()`, `AutoModel.from_pretrained()`)
+
+Now:
+- `extract_dnabert_features()` and `extract_esm_features()` accept optional model parameters
+- Persistent workers pass pre-loaded models via these parameters
+- No redundant loading occurs
+- Backward compatibility maintained (functions still work without pre-loaded models)
 
 **Persistent model loading benefits:**
-- Eliminates model re-loading overhead between pipeline stages
+- Eliminates model re-loading overhead between pipeline stages AND within workers
 - Models remain in GPU memory for DNABERT-S and ESM-2 processing
 - Periodic cache clearing (every 10 files) prevents fragmentation
 - Expandable segments configured before CUDA operations
