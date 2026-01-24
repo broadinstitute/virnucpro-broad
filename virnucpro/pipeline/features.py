@@ -16,7 +16,9 @@ def extract_dnabert_features(
     nucleotide_file: Path,
     output_file: Path,
     device: torch.device,
-    batch_size: int = 256
+    batch_size: int = 256,
+    model=None,
+    tokenizer=None
 ) -> Path:
     """
     Extract DNA sequence embeddings using DNABERT-S.
@@ -28,6 +30,8 @@ def extract_dnabert_features(
         output_file: Output .pt file for features
         device: PyTorch device for computation
         batch_size: Batch size for processing
+        model: Optional pre-loaded model (for persistent workers)
+        tokenizer: Optional pre-loaded tokenizer (for persistent workers)
 
     Returns:
         Path to saved feature file
@@ -36,10 +40,17 @@ def extract_dnabert_features(
 
     logger.info(f"Extracting DNABERT-S features from {nucleotide_file}")
 
-    # Load model and tokenizer
-    model_name = "zhihan1996/DNABERT-S"
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-    model = AutoModel.from_pretrained(model_name, trust_remote_code=True).to(device)
+    # Only load if not provided (backward compatibility)
+    if model is None or tokenizer is None:
+        model_name = "zhihan1996/DNABERT-S"
+        if tokenizer is None:
+            tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        if model is None:
+            model = AutoModel.from_pretrained(model_name, trust_remote_code=True).to(device)
+    else:
+        # Ensure provided model is on correct device
+        model = model.to(device)
+
     model.eval()
 
     # Load all sequences
@@ -115,23 +126,21 @@ def extract_esm_features(
     Returns:
         Path to saved feature file
     """
-    import esm
+    from virnucpro.models.esm2_flash import load_esm2_model
 
     logger.info(f"Extracting ESM-2 features from {protein_file}")
 
-    # Load ESM-2 3B model
-    model, alphabet = esm.pretrained.esm2_t36_3B_UR50D()
-    model = model.to(device)
-    model.eval()
-    batch_converter = alphabet.get_batch_converter()
+    # Load ESM-2 3B model with FlashAttention-2 support
+    # The wrapper automatically detects and enables FlashAttention-2 on Ampere+ GPUs
+    # and configures BF16 mixed precision
+    model, batch_converter = load_esm2_model(
+        model_name="esm2_t36_3B_UR50D",
+        device=str(device),
+        logger_instance=logger
+    )
 
-    # Check for BF16 support
-    use_bf16 = False
-    if str(device).startswith('cuda'):
-        capability = torch.cuda.get_device_capability(device)
-        use_bf16 = capability[0] >= 8  # Ampere or newer
-        if use_bf16:
-            logger.info("Using BF16 mixed precision for memory efficiency")
+    # Get BF16 status from wrapper (already configured)
+    use_bf16 = model.use_bf16
 
     # Increase batch size with BF16 if using default
     if use_bf16 and toks_per_batch == 2048:
