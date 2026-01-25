@@ -240,10 +240,16 @@ None yet.
 **Phase 4:**
 - ✓ FlashAttention-2 compatibility with fair-esm library (ESM-2): Resolved via ESM2WithFlashAttention wrapper using PyTorch sdp_kernel context manager (04-01)
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 001 | Create a python script that allows me to compare VirNucPro output (predictions) between our refactored version and the original vanilla implementation | 2026-01-24 | ab88868 | [001-create-a-python-script-that-allows-me-to](./quick/001-create-a-python-script-that-allows-me-to/) |
+
 ## Session Continuity
 
-Last session: 2026-01-24 16:27 UTC
-Stopped at: Completed 04.1-06-PLAN.md execution (Integration Test Gap Closure)
+Last session: 2026-01-24
+Last activity: 2026-01-24 — Completed quick task 001: Create comparison script for VirNucPro outputs
 Resume file: None
 
 ## Phase 2 Complete
