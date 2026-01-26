@@ -172,11 +172,14 @@ Plans:
   4. Speedup is near-linear: 2 GPUs = ~1.8x, 4 GPUs = ~3.5x, 8 GPUs = ~7x faster than single GPU
   5. Performance report generated showing throughput, memory usage, and bottleneck analysis
   6. Integration tests confirm optimized pipeline produces identical predictions to vanilla
-**Plans**: TBD
+**Plans**: 5 plans
 
 Plans:
-- [ ] 06-01: TBD
-- [ ] 06-02: TBD
+- [ ] 06-01-PLAN.md — Create benchmark infrastructure with synthetic data generation
+- [ ] 06-02-PLAN.md — Implement GPU scaling validation and per-stage throughput benchmarks
+- [ ] 06-03-PLAN.md — Validate end-to-end performance and memory usage patterns
+- [ ] 06-04-PLAN.md — Test optimized vs vanilla output equivalence
+- [ ] 06-05-PLAN.md — Generate performance reports and add CLI benchmark command
 
 ### Phase 7: Security & Dependency Updates
 **Goal**: Upgrade transformers library to address 12 security vulnerabilities (RCE, ReDoS, URL validation bypass) and validate compatibility with optimized pipeline.
