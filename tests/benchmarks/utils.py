@@ -490,3 +490,58 @@ def compare_outputs(reference: Path,
         'max_diffs': max_diffs,
         'num_sequences': len(ref_df),
     }
+
+
+# ==================== Formatting Utilities ====================
+
+def format_duration(seconds: float) -> str:
+    """
+    Format duration in seconds to human-readable string.
+
+    Args:
+        seconds: Duration in seconds
+
+    Returns:
+        Formatted string (e.g., "2h 30m 45s", "5m 23s", "12.5s")
+
+    Example:
+        >>> format_duration(9045.5)
+        '2h 30m 45s'
+        >>> format_duration(323.2)
+        '5m 23s'
+        >>> format_duration(12.5)
+        '12.5s'
+    """
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+
+    minutes = int(seconds // 60)
+    remaining_seconds = int(seconds % 60)
+
+    if minutes < 60:
+        return f"{minutes}m {remaining_seconds}s"
+
+    hours = int(minutes // 60)
+    remaining_minutes = int(minutes % 60)
+
+    return f"{hours}h {remaining_minutes}m {remaining_seconds}s"
+
+
+def calculate_throughput(num_sequences: int, elapsed_seconds: float) -> float:
+    """
+    Calculate throughput in sequences per second.
+
+    Args:
+        num_sequences: Number of sequences processed
+        elapsed_seconds: Time taken in seconds
+
+    Returns:
+        Throughput in sequences/second
+
+    Example:
+        >>> calculate_throughput(1000, 50.0)
+        20.0
+    """
+    if elapsed_seconds <= 0:
+        return 0.0
+    return num_sequences / elapsed_seconds
