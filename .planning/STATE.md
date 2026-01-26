@@ -10,19 +10,19 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 6 of 7 (Performance Validation)
-Plan: 3 of 5
+Plan: 4 of 5
 Status: In progress
-Last activity: 2026-01-26 — Completed 06-03: End-to-end performance and memory validation
+Last activity: 2026-01-26 — Completed 06-04: Vanilla equivalence validation
 Next phase: Phase 7 (Security & Dependency Updates)
 
-Progress: [███████████████░] 97% (37/38 plans)
+Progress: [███████████████░] 100% (38/38 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 37
+- Total plans completed: 38
 - Average duration: 3.4 minutes
-- Total execution time: 2.13 hours
+- Total execution time: 2.20 hours
 
 **By Phase:**
 
@@ -35,11 +35,11 @@ Progress: [███████████████░] 97% (37/38 plans)
 | 3     | 4     | 15.2m | 3.8m     |
 | 4     | 4     | 18.6m | 4.7m     |
 | 4.1   | 6     | 18.0m | 3.0m     |
-| 6     | 3     | 12.0m | 4.0m     |
+| 6     | 4     | 16.0m | 4.0m     |
 
 **Recent Trend:**
-- Last 5 plans: 04.1-05 (3.0m), 04.1-06 (2.0m), 06-01 (5.0m), 06-02 (3.0m), 06-03 (4.0m)
-- Trend: Phase 6 in progress; end-to-end performance validation complete with <10 hour target confirmed
+- Last 5 plans: 04.1-06 (2.0m), 06-01 (5.0m), 06-02 (3.0m), 06-03 (4.0m), 06-04 (4.0m)
+- Trend: Phase 6 validation complete; vanilla equivalence confirms optimizations maintain correctness
 
 *Updated after each plan completion*
 
@@ -234,6 +234,12 @@ Recent decisions affecting current work:
 - memory-efficiency-threshold-70pct: Assert memory efficiency (allocated/reserved ratio) >=70% for healthy memory usage (detects fragmentation)
 - persistent-models-tradeoff: Validate persistent models by direct comparison measuring memory overhead and speedup (tradeoff reasonable if speedup >1.2x when overhead >50%)
 
+**From 06-04 execution:**
+- bf16-fp32-tolerance: Use rtol=1e-3 and atol=1e-5 for BF16/FP32 precision difference tolerance (research recommendations for comparing BF16 optimized vs FP32 vanilla outputs)
+- vanilla-all-optimizations-disabled: Vanilla configuration disables all optimizations to match original 45-hour baseline (single GPU, no parallel processing, no FlashAttention, no BF16, no CUDA streams, no persistent models)
+- incremental-optimization-testing: Test each optimization individually (BF16 only, FlashAttention only, CUDA streams only, all combined) to identify which specific optimization causes numerical divergence
+- consensus-exact-match: Consensus sequences must match exactly (no tolerance) because consensus generation is deterministic with no floating point operations
+
 ### Pending Todos
 
 None yet.
@@ -279,7 +285,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-01-26
-Last activity: 2026-01-26 — Completed 06-03: End-to-end performance and memory validation
+Last activity: 2026-01-26 — Completed 06-04: Vanilla equivalence validation
 Resume file: None
 
 ## Phase 2 Complete
