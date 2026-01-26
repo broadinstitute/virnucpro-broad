@@ -10,19 +10,19 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 6 of 7 (Performance Validation)
-Plan: 1 of 3
+Plan: 2 of 5
 Status: In progress
-Last activity: 2026-01-26 — Completed 06-01: Benchmark infrastructure
+Last activity: 2026-01-26 — Completed 06-02: GPU Scaling and Throughput Benchmarks
 Next phase: Phase 7 (Security & Dependency Updates)
 
-Progress: [███████████████] 100% (35/37 plans)
+Progress: [███████████████░] 94% (36/38 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 35
+- Total plans completed: 36
 - Average duration: 3.4 minutes
-- Total execution time: 2.03 hours
+- Total execution time: 2.08 hours
 
 **By Phase:**
 
@@ -35,11 +35,11 @@ Progress: [███████████████] 100% (35/37 plans)
 | 3     | 4     | 15.2m | 3.8m     |
 | 4     | 4     | 18.6m | 4.7m     |
 | 4.1   | 6     | 18.0m | 3.0m     |
-| 6     | 1     | 5.0m  | 5.0m     |
+| 6     | 2     | 8.0m  | 4.0m     |
 
 **Recent Trend:**
-- Last 5 plans: 04.1-03 (4.0m), 04.1-04 (2.0m), 04.1-05 (3.0m), 04.1-06 (2.0m), 06-01 (5.0m)
-- Trend: Phase 6 started; benchmark infrastructure complete with pytest fixtures, synthetic data generation, and enhanced GPU monitoring
+- Last 5 plans: 04.1-04 (2.0m), 04.1-05 (3.0m), 04.1-06 (2.0m), 06-01 (5.0m), 06-02 (3.0m)
+- Trend: Phase 6 in progress; scaling and throughput benchmarks complete with GPU utilization validation
 
 *Updated after each plan completion*
 
@@ -218,6 +218,15 @@ Recent decisions affecting current work:
 - benchmark-timer-wrapper: Wrap torch.utils.benchmark.Timer to handle CUDA synchronization automatically (prevents measuring kernel launch time)
 - per-stage-tracking: Enhanced monitor tracks pipeline stage transitions (translation, DNABERT, ESM-2, merge) for bottleneck identification
 
+**From 06-02 execution:**
+- cli-subprocess-for-scaling: Use subprocess to invoke virnucpro CLI for scaling tests (end-to-end validation including all optimizations)
+- module-imports-for-stages: Use direct module imports for stage throughput tests (isolated performance measurement without pipeline overhead)
+- 80-percent-gpu-threshold: Set GPU utilization threshold at ≥80% for DNABERT and ESM-2 stages (PERF-02 requirement enforced via assertions)
+- 30-percent-time-bottleneck: Define bottleneck as stage consuming >30% of total pipeline time (focuses optimization efforts)
+- medium-preset-scaling: Use MEDIUM preset (1000 sequences) for scaling tests (balance between runtime and scaling visibility)
+- small-preset-stages: Use SMALL preset (100 sequences) for stage tests (fast iteration while showing meaningful throughput)
+- shared-json-results: Store intermediate results in shared JSON files for cross-test analysis (enables parametrized test result aggregation)
+
 ### Pending Todos
 
 None yet.
@@ -263,7 +272,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-01-26
-Last activity: 2026-01-26 — Completed 06-01: Benchmark infrastructure with synthetic data and GPU monitoring
+Last activity: 2026-01-26 — Completed 06-02: GPU Scaling and Throughput Benchmarks
 Resume file: None
 
 ## Phase 2 Complete
