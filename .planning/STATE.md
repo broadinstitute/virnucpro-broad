@@ -10,19 +10,19 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 6 of 7 (Performance Validation)
-Plan: 2 of 5
+Plan: 3 of 5
 Status: In progress
-Last activity: 2026-01-26 — Completed 06-02: GPU Scaling and Throughput Benchmarks
+Last activity: 2026-01-26 — Completed 06-03: End-to-end performance and memory validation
 Next phase: Phase 7 (Security & Dependency Updates)
 
-Progress: [███████████████░] 94% (36/38 plans)
+Progress: [███████████████░] 97% (37/38 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 36
+- Total plans completed: 37
 - Average duration: 3.4 minutes
-- Total execution time: 2.08 hours
+- Total execution time: 2.13 hours
 
 **By Phase:**
 
@@ -35,11 +35,11 @@ Progress: [███████████████░] 94% (36/38 plans)
 | 3     | 4     | 15.2m | 3.8m     |
 | 4     | 4     | 18.6m | 4.7m     |
 | 4.1   | 6     | 18.0m | 3.0m     |
-| 6     | 2     | 8.0m  | 4.0m     |
+| 6     | 3     | 12.0m | 4.0m     |
 
 **Recent Trend:**
-- Last 5 plans: 04.1-04 (2.0m), 04.1-05 (3.0m), 04.1-06 (2.0m), 06-01 (5.0m), 06-02 (3.0m)
-- Trend: Phase 6 in progress; scaling and throughput benchmarks complete with GPU utilization validation
+- Last 5 plans: 04.1-05 (3.0m), 04.1-06 (2.0m), 06-01 (5.0m), 06-02 (3.0m), 06-03 (4.0m)
+- Trend: Phase 6 in progress; end-to-end performance validation complete with <10 hour target confirmed
 
 *Updated after each plan completion*
 
@@ -227,6 +227,13 @@ Recent decisions affecting current work:
 - small-preset-stages: Use SMALL preset (100 sequences) for stage tests (fast iteration while showing meaningful throughput)
 - shared-json-results: Store intermediate results in shared JSON files for cross-test analysis (enables parametrized test result aggregation)
 
+**From 06-03 execution:**
+- 10-hour-projection-method: Use 5000 sequence sample for validation, project to 45K baseline sample based on time-per-sequence (realistic estimate with manageable test duration)
+- memory-leak-threshold-100mb: Define memory leak as >100MB increase from baseline after pipeline completion (accounts for normal persistent allocations)
+- optimization-comparison-matrix: Compare 4 configurations (baseline, CUDA streams, persistent models, all optimizations) to quantify individual and combined optimization impact
+- memory-efficiency-threshold-70pct: Assert memory efficiency (allocated/reserved ratio) >=70% for healthy memory usage (detects fragmentation)
+- persistent-models-tradeoff: Validate persistent models by direct comparison measuring memory overhead and speedup (tradeoff reasonable if speedup >1.2x when overhead >50%)
+
 ### Pending Todos
 
 None yet.
@@ -272,7 +279,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-01-26
-Last activity: 2026-01-26 — Completed 06-02: GPU Scaling and Throughput Benchmarks
+Last activity: 2026-01-26 — Completed 06-03: End-to-end performance and memory validation
 Resume file: None
 
 ## Phase 2 Complete
