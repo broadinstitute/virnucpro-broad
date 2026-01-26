@@ -219,43 +219,6 @@ def single_gpu():
     }
 
 
-# ==================== pytest-benchmark Configuration ====================
-
-def pytest_benchmark_update_json(config, benchmarks, output_json):
-    """
-    Customize pytest-benchmark JSON output with additional metadata.
-
-    Adds:
-    - PyTorch version
-    - CUDA version
-    - GPU count and models
-    - BF16 support
-    """
-    if torch.cuda.is_available():
-        gpu_info = []
-        for i in range(torch.cuda.device_count()):
-            props = torch.cuda.get_device_properties(i)
-            gpu_info.append({
-                'id': i,
-                'name': props.name,
-                'memory_gb': props.total_memory / 1024**3,
-                'compute_capability': f"{props.major}.{props.minor}",
-            })
-
-        # Check BF16 support on GPU 0
-        compute_capability = torch.cuda.get_device_capability(0)
-        bf16_support = compute_capability[0] >= 8
-
-        output_json['machine_info']['gpu'] = {
-            'count': torch.cuda.device_count(),
-            'devices': gpu_info,
-            'bf16_support': bf16_support,
-            'cuda_version': torch.version.cuda,
-        }
-
-    output_json['machine_info']['pytorch_version'] = torch.__version__
-
-
 # ==================== Data Generation Helpers ====================
 
 @pytest.fixture
