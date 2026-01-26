@@ -11,6 +11,7 @@ from virnucpro import __version__
 from virnucpro.cli import predict
 from virnucpro.cli import profile
 from virnucpro.cli import utils
+from virnucpro.cli import benchmark
 
 
 @click.group(context_settings={'help_option_names': ['-h', '--help']})
@@ -75,6 +76,7 @@ def cli(ctx, verbose, quiet, log_file, config):
 cli.add_command(predict.predict)
 cli.add_command(profile.profile)
 cli.add_command(utils.utils)
+cli.add_command(benchmark.benchmark)
 
 
 if __name__ == '__main__':
