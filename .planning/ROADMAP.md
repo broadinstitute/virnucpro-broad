@@ -152,12 +152,14 @@ Plans:
   3. GPU dashboard shows real-time utilization, file progress, and per-GPU throughput
   4. Heterogeneous GPUs (e.g., 3090+4090) get work proportional to their compute capability
   5. Unit tests verify load balancing algorithm fairly distributes sequences by compute time
-**Plans**: TBD
+**Plans**: 5 plans
 
 Plans:
-- [ ] 05-01: TBD
-- [ ] 05-02: TBD
-- [ ] 05-03: TBD
+- [ ] 05-01-PLAN.md — Work stealing infrastructure with shared queues
+- [ ] 05-02-PLAN.md — GPU capability weighting for file assignment
+- [ ] 05-03-PLAN.md — Real-time monitoring dashboard
+- [ ] 05-04-PLAN.md — Pipeline integration and CLI support
+- [ ] 05-05-PLAN.md — Comprehensive testing suite
 
 ### Phase 6: Performance Validation
 **Goal**: System benchmarking proves <10 hour processing time for typical samples and demonstrates linear GPU scaling up to 8 GPUs.
@@ -175,6 +177,35 @@ Plans:
 Plans:
 - [ ] 06-01: TBD
 - [ ] 06-02: TBD
+
+### Phase 7: Security & Dependency Updates
+**Goal**: Upgrade transformers library to address 12 security vulnerabilities (RCE, ReDoS, URL validation bypass) and validate compatibility with optimized pipeline.
+**Depends on**: Phase 6
+**Requirements**: None (security maintenance)
+**Success Criteria** (what must be TRUE):
+  1. Transformers upgraded from 4.30.0 to 4.53.0+ (addresses all CVEs)
+  2. All deserialization RCE vulnerabilities resolved (CVE fixes from 4.36.0+)
+  3. All ReDoS vulnerabilities resolved (fixes from 4.50.0, 4.51.0, 4.52.1, 4.53.0)
+  4. URL validation bypass resolved (fix from 4.52.1)
+  5. Existing tests pass with new transformers version (no breaking changes)
+  6. Model loading and checkpoint compatibility verified
+  7. Performance benchmarks show no regression from version upgrade
+**Plans**: 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 7 to break down)
+
+**Details:**
+**Critical vulnerabilities addressed:**
+- Deserialization RCE (4 CVEs) - affects model checkpoint loading
+- ReDoS vulnerabilities (7 CVEs) - could cause processing hangs
+- URL validation bypass (1 CVE) - low impact for VirNucPro
+
+**Testing focus:**
+- DNABERT-S and ESM-2 model loading compatibility
+- Checkpoint format compatibility across versions
+- Integration test suite passes
+- Performance benchmarks show no regression
 
 ## Completion Criteria
 
