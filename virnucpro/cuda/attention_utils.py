@@ -54,24 +54,34 @@ def get_attention_implementation() -> Literal["flash_attention_2", "standard_att
 
         # Test if FlashAttention-2 is available in PyTorch backend
         # PyTorch 2.2+ provides scaled_dot_product_attention with flash kernel
-        if not hasattr(torch.backends.cuda, 'sdp_kernel'):
-            logger.debug(
-                "torch.backends.cuda.sdp_kernel not available, "
-                "requires PyTorch 2.2+"
-            )
-            return "standard_attention"
+        # Note: New API (torch.nn.attention.sdpa_kernel) uses different parameters than old API
 
         # Try to create a context with FlashAttention enabled
         # This will fail if flash-attn is not installed or incompatible
         try:
-            with torch.backends.cuda.sdp_kernel(
-                enable_flash=True,
-                enable_math=False,
-                enable_mem_efficient=False
-            ):
-                # Successfully created context - FlashAttention-2 is available
-                return "flash_attention_2"
-        except (RuntimeError, AttributeError) as e:
+            # Try new API first (PyTorch 2.5+)
+            if hasattr(torch.nn.attention, 'sdpa_kernel') and hasattr(torch.nn.attention, 'SDPBackend'):
+                from torch.nn.attention import SDPBackend
+                # New API uses SDPBackend enum
+                with torch.nn.attention.sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+                    # Successfully created context - FlashAttention-2 is available
+                    return "flash_attention_2"
+            # Fall back to old deprecated API (PyTorch 2.2-2.4)
+            elif hasattr(torch.backends.cuda, 'sdp_kernel'):
+                with torch.backends.cuda.sdp_kernel(
+                    enable_flash=True,
+                    enable_math=False,
+                    enable_mem_efficient=False
+                ):
+                    # Successfully created context - FlashAttention-2 is available
+                    return "flash_attention_2"
+            else:
+                logger.debug(
+                    "Neither torch.nn.attention.sdpa_kernel nor torch.backends.cuda.sdp_kernel available, "
+                    "requires PyTorch 2.2+"
+                )
+                return "standard_attention"
+        except (RuntimeError, AttributeError, ImportError) as e:
             logger.debug(f"FlashAttention-2 context creation failed: {e}")
             return "standard_attention"
 
@@ -128,13 +138,15 @@ def configure_flash_attention(
 
         # Configure model for FlashAttention-2
         if hasattr(model, 'config'):
-            # Set attention implementation to use scaled_dot_product_attention
+            # HuggingFace models: Set attention implementation via config
             model.config._attn_implementation = "sdpa"
             model.config.use_flash_attention_2 = True
         else:
-            log.warning(
-                "Model does not have config attribute, "
-                "FlashAttention-2 may not be activated"
+            # Non-HuggingFace models (e.g., fair-esm): FlashAttention-2 will be
+            # activated via sdp_kernel context manager in forward pass
+            log.debug(
+                "Model does not have config attribute (non-HuggingFace model). "
+                "FlashAttention-2 will be activated via context manager."
             )
 
     else:

@@ -34,6 +34,7 @@ logger = logging.getLogger('virnucpro.benchmarks.scaling')
 
 
 @pytest.mark.gpu
+@pytest.mark.scaling
 class TestGPUScaling:
     """
     Multi-GPU scaling validation tests.
@@ -103,7 +104,7 @@ class TestGPUScaling:
         """
         # Prepare command
         cmd = [
-            "virnucpro", "predict",
+            "python", "-m", "virnucpro", "predict",
             str(input_fasta),
             "--output-dir", str(output_dir),
             "--model-type", "500",

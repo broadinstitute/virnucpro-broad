@@ -40,6 +40,7 @@ class MemoryThresholds:
 # ==================== Test Class ====================
 
 @pytest.mark.gpu
+@pytest.mark.memory
 class TestMemoryUsage:
     """
     Memory usage profiling and stability validation.

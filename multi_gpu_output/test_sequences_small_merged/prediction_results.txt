@@ -1,1 +1,0 @@
-Sequence_ID	Prediction	score1	score2

@@ -43,6 +43,7 @@ class StageThroughputResult:
 
 
 @pytest.mark.gpu
+@pytest.mark.throughput
 class TestStageThroughput:
     """
     Per-stage throughput benchmarks.

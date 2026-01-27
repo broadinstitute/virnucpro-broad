@@ -27,6 +27,21 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "multi_gpu: mark test as requiring multiple GPUs"
     )
+    config.addinivalue_line(
+        "markers", "scaling: GPU scaling validation tests"
+    )
+    config.addinivalue_line(
+        "markers", "throughput: per-stage throughput benchmarks"
+    )
+    config.addinivalue_line(
+        "markers", "memory: memory usage profiling tests"
+    )
+    config.addinivalue_line(
+        "markers", "equivalence: output equivalence validation tests"
+    )
+    config.addinivalue_line(
+        "markers", "slow: slow-running end-to-end tests"
+    )
 
 
 def pytest_collection_modifyitems(config, items):

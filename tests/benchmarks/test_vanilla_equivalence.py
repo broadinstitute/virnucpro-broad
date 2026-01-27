@@ -42,6 +42,7 @@ EQUIVALENCE_TOLERANCE = {
 
 @pytest.mark.gpu
 @pytest.mark.slow
+@pytest.mark.equivalence
 class TestVanillaEquivalence:
     """
     Validate optimized pipeline produces equivalent results to vanilla.

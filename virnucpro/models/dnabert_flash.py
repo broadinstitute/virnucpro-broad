@@ -114,11 +114,31 @@ class DNABERTWithFlashAttention(nn.Module):
         # Use FlashAttention-2 context manager if available
         if self.attention_impl == "flash_attention_2":
             # Enable only FlashAttention kernel, disable fallbacks
-            with torch.backends.cuda.sdp_kernel(
-                enable_flash=True,
-                enable_math=False,
-                enable_mem_efficient=False
-            ):
+            # Use new API if available (PyTorch 2.5+), fall back to deprecated API (PyTorch 2.2-2.4)
+            try:
+                if hasattr(torch.nn.attention, 'sdpa_kernel') and hasattr(torch.nn.attention, 'SDPBackend'):
+                    from torch.nn.attention import SDPBackend
+                    # New API uses SDPBackend enum
+                    with torch.nn.attention.sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+                        return self.model(
+                            input_ids=input_ids,
+                            attention_mask=attention_mask,
+                            **kwargs
+                        )
+                else:
+                    # Old deprecated API
+                    with torch.backends.cuda.sdp_kernel(
+                        enable_flash=True,
+                        enable_math=False,
+                        enable_mem_efficient=False
+                    ):
+                        return self.model(
+                            input_ids=input_ids,
+                            attention_mask=attention_mask,
+                            **kwargs
+                        )
+            except Exception:
+                # If FlashAttention context fails, fall back to standard path
                 return self.model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
