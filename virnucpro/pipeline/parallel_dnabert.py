@@ -107,16 +107,17 @@ def process_dnabert_files_worker(
         device = torch.device(f'cuda:{device_id}')
         logger.info(f"Worker {device_id}: Initializing on {device}, processing {len(file_subset)} files")
 
-        # Load DNABERT-S model (defer to worker to avoid parent CUDA context)
-        from transformers import AutoTokenizer, AutoModel
+        # Load DNABERT-S model with Flash-enabled wrapper (SDPA + BF16)
+        from virnucpro.models.dnabert_flash import load_dnabert_model
 
-        model_name = "zhihan1996/DNABERT-S"
-        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-        model = AutoModel.from_pretrained(model_name, trust_remote_code=True).to(device)
-        model.eval()
+        model, tokenizer = load_dnabert_model(
+            model_name="zhihan1996/DNABERT-S",
+            device=str(device),
+            logger_instance=logger
+        )
 
-        # Check for BF16 support (batch size adjustment handled by pipeline)
-        use_bf16 = detect_bf16_support(device)
+        # Get BF16 status from wrapper (already configured)
+        use_bf16 = getattr(model, 'use_bf16', False)
         logger.info(f"Worker {device_id}: Using batch size {toks_per_batch}, BF16: {use_bf16}")
 
         # Initialize stream processor if enabled
@@ -143,7 +144,8 @@ def process_dnabert_files_worker(
 
                     for record in records:
                         seq_str = str(record.seq)
-                        seq_tokens = len(seq_str)  # For DNA, each base = ~1 token
+                        # DNABERT-S uses 6-mer tokenization: ~6 bases per token, plus special tokens
+                        seq_tokens = max(len(seq_str) // 6 + 2, 1)
 
                         if current_tokens + seq_tokens > toks_per_batch and current_batch:
                             batches.append(current_batch)
@@ -439,7 +441,8 @@ def process_dnabert_files_persistent(
 
                     for record in records:
                         seq_str = str(record.seq)
-                        seq_tokens = len(seq_str)  # For DNA, each base = ~1 token
+                        # DNABERT-S uses 6-mer tokenization: ~6 bases per token, plus special tokens
+                        seq_tokens = max(len(seq_str) // 6 + 2, 1)
 
                         if current_tokens + seq_tokens > toks_per_batch and current_batch:
                             batches.append(current_batch)
