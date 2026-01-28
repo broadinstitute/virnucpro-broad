@@ -6,13 +6,23 @@ standard attention on older hardware.
 
 FlashAttention-2 provides 2-4x attention speedup for transformer models without
 changing model outputs or accuracy.
+
+NOTE: DNABERT-S (MosaicBERT) has a known issue where its Triton-based attention
+falls back to FP32 PyTorch matmul when Triton is unavailable. This module patches
+the attention to use PyTorch's native scaled_dot_product_attention (SDPA) which:
+- Supports BF16 natively
+- Uses Flash Attention kernels without requiring Triton
+- Provides 2-4x speedup on Ampere+ GPUs
 """
 
+import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from typing import Optional, Tuple, Any
 import logging
 from transformers import AutoModel, AutoTokenizer
+from einops import rearrange
 
 from virnucpro.cuda.attention_utils import (
     get_attention_implementation,
@@ -20,6 +30,144 @@ from virnucpro.cuda.attention_utils import (
 )
 
 logger = logging.getLogger('virnucpro.models.dnabert_flash')
+
+# Flag to track if patch has been applied
+_DNABERT_ATTENTION_PATCHED = False
+
+
+def _patch_dnabert_attention():
+    """
+    Monkey-patch DNABERT-S attention to use PyTorch SDPA instead of broken Triton fallback.
+
+    The original MosaicBERT attention has a fallback path that uses torch.matmul
+    which doesn't handle BF16 correctly. This patch replaces it with PyTorch's
+    scaled_dot_product_attention which:
+    1. Handles BF16 natively
+    2. Uses Flash Attention kernels automatically (no Triton needed)
+    3. Provides the same speedup as Triton Flash Attention
+
+    This patch is applied once at module load time.
+    """
+    global _DNABERT_ATTENTION_PATCHED
+    if _DNABERT_ATTENTION_PATCHED:
+        return
+
+    try:
+        # Import the DNABERT-S bert_layers module from HuggingFace cache
+        from transformers.dynamic_module_utils import get_class_from_dynamic_module
+
+        # Try to get the module - this may fail if model hasn't been loaded yet
+        # We'll handle that case in load_dnabert_model
+        import importlib
+        import sys
+
+        # Check if the module is already loaded (from a previous model load)
+        bert_layers_module = None
+        for module_name in list(sys.modules.keys()):
+            if 'DNABERT-S' in module_name and 'bert_layers' in module_name:
+                bert_layers_module = sys.modules[module_name]
+                break
+
+        if bert_layers_module is None:
+            logger.debug("DNABERT-S bert_layers not yet loaded, patch will be applied on model load")
+            return
+
+        _apply_attention_patch(bert_layers_module)
+        _DNABERT_ATTENTION_PATCHED = True
+
+    except Exception as e:
+        logger.warning(f"Could not patch DNABERT attention: {e}")
+
+
+def _apply_attention_patch(bert_layers_module):
+    """Apply the actual attention patch to a loaded bert_layers module."""
+    global _DNABERT_ATTENTION_PATCHED
+
+    if not hasattr(bert_layers_module, 'BertUnpadSelfAttention'):
+        logger.warning("BertUnpadSelfAttention not found in bert_layers module")
+        return
+
+    BertUnpadSelfAttention = bert_layers_module.BertUnpadSelfAttention
+
+    # Store original forward for reference
+    original_forward = BertUnpadSelfAttention.forward
+
+    def patched_forward(self, hidden_states: torch.Tensor, cu_seqlens: torch.Tensor,
+                        max_seqlen_in_batch: int, indices: torch.Tensor,
+                        attn_mask: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
+        """
+        Patched attention forward using PyTorch SDPA.
+
+        This replaces the original fallback path (torch.matmul) with PyTorch's
+        scaled_dot_product_attention which properly supports BF16 and uses
+        Flash Attention kernels automatically.
+        """
+        # Import padding utilities from the same module
+        pad_input = bert_layers_module.pad_input
+        unpad_input_only = bert_layers_module.unpad_input_only
+
+        qkv = self.Wqkv(hidden_states)
+        qkv = pad_input(qkv, indices, cu_seqlens.shape[0] - 1,
+                        max_seqlen_in_batch)  # batch, max_seqlen_in_batch, thd
+        qkv = rearrange(qkv,
+                        'b s (t h d) -> b s t h d',
+                        t=3,
+                        h=self.num_attention_heads)
+
+        # Extract Q, K, V and reshape for SDPA: (batch, heads, seq, dim)
+        q = qkv[:, :, 0, :, :].permute(0, 2, 1, 3)  # b h s d
+        k = qkv[:, :, 1, :, :].permute(0, 2, 1, 3)  # b h s d
+        v = qkv[:, :, 2, :, :].permute(0, 2, 1, 3)  # b h s d
+
+        # Use PyTorch's scaled_dot_product_attention
+        # This automatically uses Flash Attention on compatible GPUs
+        # and properly handles BF16 without dtype issues
+
+        # Convert ALiBi bias to attention mask format for SDPA
+        # bias shape: (batch, heads, seq, seq)
+        # SDPA expects attn_mask to be additive (added to attention scores before softmax)
+        # CRITICAL: Cast bias to match query dtype to avoid SDPA dtype mismatch
+        attn_mask_sdpa = bias.to(dtype=q.dtype)
+
+        # Apply dropout only during training
+        dropout_p = self.p_dropout if self.training else 0.0
+
+        # Use SDPA with Flash Attention
+        attention = F.scaled_dot_product_attention(
+            q, k, v,
+            attn_mask=attn_mask_sdpa,
+            dropout_p=dropout_p,
+            is_causal=False,  # BERT uses bidirectional attention
+            scale=1.0 / math.sqrt(self.attention_head_size)
+        )
+
+        # Reshape back: (batch, heads, seq, dim) -> (batch, seq, heads, dim)
+        attention = attention.permute(0, 2, 1, 3)  # b s h d
+
+        # attn_mask is 1 for attend and 0 for don't
+        attention = unpad_input_only(attention, torch.squeeze(attn_mask) == 1)
+        return rearrange(attention, 'nnz h d -> nnz (h d)')
+
+    # Apply the patch
+    BertUnpadSelfAttention.forward = patched_forward
+    _DNABERT_ATTENTION_PATCHED = True
+    logger.info("DNABERT-S attention patched to use PyTorch SDPA (BF16 + Flash Attention enabled)")
+
+
+def _ensure_attention_patched():
+    """Ensure DNABERT attention is patched after model is loaded."""
+    global _DNABERT_ATTENTION_PATCHED
+    if _DNABERT_ATTENTION_PATCHED:
+        return
+
+    import sys
+    for module_name in list(sys.modules.keys()):
+        if 'DNABERT-S' in module_name and 'bert_layers' in module_name:
+            bert_layers_module = sys.modules[module_name]
+            _apply_attention_patch(bert_layers_module)
+            return
+
+    logger.warning("Could not find DNABERT-S bert_layers module to patch")
 
 
 class DNABERTWithFlashAttention(nn.Module):
@@ -201,6 +349,10 @@ def load_dnabert_model(
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
 
     log.info(f"Model loaded: {model_name}")
+
+    # CRITICAL: Patch DNABERT-S attention BEFORE moving to GPU or converting to BF16
+    # This replaces the broken Triton fallback with PyTorch SDPA
+    _ensure_attention_patched()
 
     # Convert device string to torch.device
     device_obj = torch.device(device)
