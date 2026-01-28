@@ -134,7 +134,7 @@ def profile_dnabert_batch_size(
     min_batch: int = 512,
     max_batch: int = 8192,
     step: int = 512,
-    num_test_sequences: int = 100,
+    num_test_sequences: int = 500,  # Increased for meaningful batch testing
     sequence_length: int = 300
 ) -> Dict:
     """
@@ -200,15 +200,22 @@ def profile_dnabert_batch_size(
     batch_sizes = list(range(min_batch, max_batch + 1, step))
 
     for batch_size in batch_sizes:
-        logger.info(f"\nTesting batch size: {batch_size} tokens")
-
         # Clear CUDA cache
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
         try:
-            # Prepare batch
-            sequences = [seq for _, seq in test_sequences[:min(len(test_sequences), 50)]]
+            # Calculate number of sequences that fit in this token batch size
+            # DNABERT tokenization produces roughly 1 token per 6 nucleotides (k-mer)
+            # Plus padding tokens. Estimate ~sequence_length/6 + 2 tokens per sequence
+            tokens_per_seq = max(sequence_length // 6 + 2, 50)
+            num_seqs_in_batch = max(1, batch_size // tokens_per_seq)
+            num_seqs_in_batch = min(num_seqs_in_batch, len(test_sequences))
+
+            logger.info(f"\nTesting batch size: {batch_size} tokens ({num_seqs_in_batch} sequences)")
+
+            # Prepare batch with calculated number of sequences
+            sequences = [seq for _, seq in test_sequences[:num_seqs_in_batch]]
 
             # Tokenize
             inputs = tokenizer(
@@ -293,8 +300,8 @@ def profile_esm_batch_size(
     min_batch: int = 512,
     max_batch: int = 8192,
     step: int = 512,
-    num_test_sequences: int = 100,
-    sequence_length: int = 100
+    num_test_sequences: int = 500,  # Increased for meaningful batch testing
+    sequence_length: int = 200  # Longer sequences for better profiling
 ) -> Dict:
     """
     Profile ESM-2 to find optimal batch size.
@@ -365,15 +372,21 @@ def profile_esm_batch_size(
     batch_sizes = list(range(min_batch, max_batch + 1, step))
 
     for batch_size in batch_sizes:
-        logger.info(f"\nTesting batch size: {batch_size} tokens")
-
         # Clear CUDA cache
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
         try:
-            # Prepare batch
-            sequences = test_sequences[:min(len(test_sequences), 50)]
+            # Calculate number of sequences that fit in this token batch size
+            # ESM-2 adds 2 tokens (BOS/EOS) per sequence
+            tokens_per_seq = sequence_length + 2
+            num_seqs_in_batch = max(1, batch_size // tokens_per_seq)
+            num_seqs_in_batch = min(num_seqs_in_batch, len(test_sequences))
+
+            logger.info(f"\nTesting batch size: {batch_size} tokens ({num_seqs_in_batch} sequences)")
+
+            # Prepare batch with calculated number of sequences
+            sequences = test_sequences[:num_seqs_in_batch]
 
             # Convert batch
             batch_labels, batch_strs, batch_tokens = batch_converter(sequences)
