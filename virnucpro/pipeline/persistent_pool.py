@@ -70,6 +70,11 @@ def _load_model_lazy(device_id: int) -> None:
     This allows device_id to be assigned per-worker from task arguments
     rather than during pool initialization.
 
+    IMPORTANT: Uses staggered loading delay to prevent concurrent model loading
+    race conditions. When multiple workers start simultaneously, concurrent calls
+    to HuggingFace's from_pretrained() can cause cache corruption, resulting in
+    one worker loading a broken model that silently produces empty outputs.
+
     Args:
         device_id: CUDA device ID for this worker
     """
@@ -82,6 +87,15 @@ def _load_model_lazy(device_id: int) -> None:
     # Initialize CUDA context
     _device = torch.device(f'cuda:{device_id}')
     torch.cuda.set_per_process_memory_fraction(0.9, _device)
+
+    # Add small staggered delay to reduce concurrent model loading race conditions
+    # Worker 0 loads immediately, worker 1 waits 1s, worker 2 waits 2s, etc.
+    # This prevents simultaneous HuggingFace cache access that can cause corruption
+    import time
+    if device_id > 0:
+        delay = device_id * 1.0  # 1 second per worker ID
+        logger.info(f"Worker {device_id}: Waiting {delay}s to stagger model loading")
+        time.sleep(delay)
 
     try:
         if _model_type == 'esm2':
@@ -97,10 +111,11 @@ def _load_model_lazy(device_id: int) -> None:
             logger.info(f"Worker {device_id}: ESM-2 model loaded and ready - will reuse for all files")
 
         elif _model_type == 'dnabert':
-            # Load DNABERT-S model
+            # Load vanilla DNABERT-S model (no wrapper for vanilla equivalence testing)
+            # NOTE: This reverts the race condition fix temporarily for testing
             from transformers import AutoTokenizer, AutoModel
 
-            logger.info(f"Worker {device_id}: Loading DNABERT-S model (one-time initialization)")
+            logger.info(f"Worker {device_id}: Loading DNABERT-S model (vanilla mode, one-time initialization)")
             model_name = "zhihan1996/DNABERT-S"
             _tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
             _model = AutoModel.from_pretrained(model_name, trust_remote_code=True).to(_device)
