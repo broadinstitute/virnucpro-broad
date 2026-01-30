@@ -111,16 +111,15 @@ def _load_model_lazy(device_id: int) -> None:
             logger.info(f"Worker {device_id}: ESM-2 model loaded and ready - will reuse for all files")
 
         elif _model_type == 'dnabert':
-            # Load DNABERT-S model using Flash-enabled wrapper
-            # This aligns with non-persistent code path and provides better CUDA handling
-            from virnucpro.models.dnabert_flash import load_dnabert_model
+            # Load vanilla DNABERT-S model (no wrapper for vanilla equivalence testing)
+            # NOTE: This reverts the race condition fix temporarily for testing
+            from transformers import AutoTokenizer, AutoModel
 
-            logger.info(f"Worker {device_id}: Loading DNABERT-S model (one-time initialization)")
-            _model, _tokenizer = load_dnabert_model(
-                model_name="zhihan1996/DNABERT-S",
-                device=str(_device),
-                logger_instance=logger
-            )
+            logger.info(f"Worker {device_id}: Loading DNABERT-S model (vanilla mode, one-time initialization)")
+            model_name = "zhihan1996/DNABERT-S"
+            _tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+            _model = AutoModel.from_pretrained(model_name, trust_remote_code=True).to(_device)
+            _model.eval()
             logger.info(f"Worker {device_id}: DNABERT-S model loaded and ready - will reuse for all files")
 
         else:

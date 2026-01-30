@@ -74,17 +74,10 @@ class ESM2WithFlashAttention(nn.Module):
         # Configure FlashAttention-2 if available
         self.model = configure_flash_attention(self.model, log)
 
-        # Check BF16 support for memory efficiency
+        # EXPERIMENTAL: Force FP32 to test vanilla compatibility
+        # Original code checked capability[0] >= 8 for BF16
         self.use_bf16 = False
-        if str(device).startswith('cuda'):
-            capability = torch.cuda.get_device_capability(device)
-            self.use_bf16 = capability[0] >= 8  # Ampere or newer
-
-            if self.use_bf16:
-                log.info("Using BF16 mixed precision for memory efficiency")
-                self.model = self.model.bfloat16()
-            else:
-                log.debug("BF16 not available, using FP32")
+        log.info("EXPERIMENTAL: Forcing FP32 precision (BF16 disabled for vanilla compatibility test)")
 
     def forward(
         self,
