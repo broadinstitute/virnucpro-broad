@@ -215,3 +215,18 @@ pixi.toml
 
 # claude
 .claude
+
+# Analysis and debug files
+# Large CSV files from mismatch analysis and debugging
+mismatch*.csv
+problematic_sequences_report.csv
+problematic_*_seq_ids.txt
+
+# Debug scripts
+debug_gpu_issue.py
+test_env.py
+test_multiprocessing_issue.py
+isolate_problematic_sequences.py
+
+# Benchmark test data
+benchmark_test/
