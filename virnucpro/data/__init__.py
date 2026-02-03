@@ -5,6 +5,8 @@ from virnucpro.data.dataloader_utils import (
     get_optimal_workers,
     create_sequence_dataloader,
     estimate_memory_usage,
+    create_async_dataloader,
+    cuda_safe_worker_init,
 )
 from virnucpro.data.sequence_dataset import SequenceDataset
 from virnucpro.data.collators import VarlenCollator
@@ -14,6 +16,8 @@ __all__ = [
     'get_optimal_workers',
     'create_sequence_dataloader',
     'estimate_memory_usage',
+    'create_async_dataloader',
+    'cuda_safe_worker_init',
     'SequenceDataset',
     'VarlenCollator',
 ]
