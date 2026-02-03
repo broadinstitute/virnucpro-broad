@@ -351,3 +351,157 @@ def calculate_token_budget(
     )
 
     return token_budget
+
+
+def validate_packed_equivalence(
+    model,
+    batch_converter,
+    sequences: List[Tuple[str, str]],
+    device: torch.device,
+    strict_threshold: float = 0.999,
+    lenient_threshold: float = 0.995,
+    lenient_fraction: float = 0.01,
+) -> Tuple[bool, Dict[str, Any]]:
+    """
+    Validate packed embeddings match unpacked baseline.
+
+    This is the gold standard test for FlashAttention varlen correctness.
+    If packed == unpacked (cosine similarity >0.999), there's no cross-sequence
+    contamination and position IDs are correct.
+
+    Args:
+        model: ESM2WithFlashAttention model
+        batch_converter: ESM alphabet batch converter
+        sequences: List of (id, sequence) tuples
+        device: CUDA device
+        strict_threshold: Cosine similarity threshold for most sequences (0.999)
+        lenient_threshold: Lower threshold allowed for small fraction (0.995)
+        lenient_fraction: Fraction allowed below strict threshold (0.01 = 1%)
+
+    Returns:
+        Tuple of (passed: bool, details: dict)
+        details contains:
+            - per_sequence: Dict[seq_id, cosine_sim]
+            - strict_pass_rate: float
+            - min_similarity: float
+            - max_similarity: float
+            - failed_sequences: List[str] (IDs with sim < lenient_threshold)
+            - num_sequences: int
+    """
+    from virnucpro.data import VarlenCollator
+
+    if not sequences:
+        return True, {
+            'per_sequence': {},
+            'strict_pass_rate': 1.0,
+            'min_similarity': 1.0,
+            'max_similarity': 1.0,
+            'failed_sequences': [],
+            'num_sequences': 0,
+        }
+
+    # Step 1: Process each sequence individually (unpacked baseline)
+    unpacked_embeddings = {}
+    model.eval()
+
+    with torch.no_grad():
+        for seq_id, seq_str in sequences:
+            # Single sequence batch
+            labels, strs, tokens = batch_converter([(seq_id, seq_str)])
+            tokens = tokens.to(device)
+
+            # Forward pass - standard unpacked
+            output = model(tokens, repr_layers=[36])
+            # Extract mean-pooled embedding (skip BOS token at position 0)
+            seq_len = min(len(seq_str), 1022)  # ESM-2 max
+            embedding = output['representations'][36][0, 1:seq_len + 1].mean(dim=0)
+
+            # Store in FP32 for comparison
+            unpacked_embeddings[seq_id] = embedding.float().cpu()
+
+    # Step 2: Pack all sequences using VarlenCollator
+    collator = VarlenCollator(
+        batch_converter,
+        max_tokens_per_batch=16384,  # Large budget to fit all sequences
+        enable_packing=False,  # Direct processing (no buffer)
+    )
+
+    batch_items = [{'id': seq_id, 'sequence': seq_str} for seq_id, seq_str in sequences]
+    packed_batch = collator(batch_items)
+
+    # Step 3: Run model.forward_packed
+    with torch.no_grad():
+        packed_output = model.forward_packed(
+            input_ids=packed_batch['input_ids'].to(device),
+            cu_seqlens=packed_batch['cu_seqlens'].to(device),
+            max_seqlen=packed_batch['max_seqlen'],
+            repr_layers=[36],
+        )
+
+    # Step 4: Extract embeddings using cu_seqlens
+    packed_embeddings = {}
+    cu_seqlens = packed_batch['cu_seqlens']
+    packed_repr = packed_output['representations'][36]  # Shape: [total_tokens, hidden_dim]
+
+    for i, seq_id in enumerate(packed_batch['sequence_ids']):
+        start = cu_seqlens[i].item()
+        end = cu_seqlens[i + 1].item()
+
+        # Mean-pool this sequence's embeddings (skip BOS at position 0 relative to sequence start)
+        # In packed format, BOS is at start, EOS at end-1
+        # Mean over positions start+1 to end-1 (exclude BOS and EOS)
+        seq_embedding = packed_repr[start + 1:end - 1].mean(dim=0)
+
+        # Store in FP32 for comparison
+        packed_embeddings[seq_id] = seq_embedding.float().cpu()
+
+    # Step 5: Compare with F.cosine_similarity
+    per_sequence = {}
+    similarities = []
+
+    for seq_id in unpacked_embeddings.keys():
+        unpacked_emb = unpacked_embeddings[seq_id]
+        packed_emb = packed_embeddings[seq_id]
+
+        # Cosine similarity (higher is better, 1.0 = perfect match)
+        cos_sim = F.cosine_similarity(
+            unpacked_emb.unsqueeze(0),
+            packed_emb.unsqueeze(0),
+            dim=1
+        ).item()
+
+        per_sequence[seq_id] = cos_sim
+        similarities.append(cos_sim)
+
+    # Step 6: Return pass/fail with detailed metrics
+    min_similarity = min(similarities)
+    max_similarity = max(similarities)
+
+    # Count sequences passing strict threshold
+    strict_pass_count = sum(1 for sim in similarities if sim >= strict_threshold)
+    strict_pass_rate = strict_pass_count / len(similarities)
+
+    # Find failed sequences (below lenient threshold)
+    failed_sequences = [
+        seq_id for seq_id, sim in per_sequence.items()
+        if sim < lenient_threshold
+    ]
+
+    # Pass conditions:
+    # 1. No sequences below lenient threshold
+    # 2. At least (1 - lenient_fraction) sequences pass strict threshold
+    passed = (
+        len(failed_sequences) == 0 and
+        strict_pass_rate >= (1.0 - lenient_fraction)
+    )
+
+    details = {
+        'per_sequence': per_sequence,
+        'strict_pass_rate': strict_pass_rate,
+        'min_similarity': min_similarity,
+        'max_similarity': max_similarity,
+        'failed_sequences': failed_sequences,
+        'num_sequences': len(sequences),
+    }
+
+    return passed, details
