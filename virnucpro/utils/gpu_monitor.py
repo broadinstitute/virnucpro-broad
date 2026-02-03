@@ -213,6 +213,13 @@ class NvitopMonitor:
         self._lock = threading.Lock()
         self._current_stage: Optional[str] = None
 
+        # DataLoader metrics tracking
+        self._dataloader_metrics: List[DataLoaderMetrics] = []
+        self._batch_log_interval: int = 10  # Log every N batches
+        self._total_sequences: int = 0
+        self._total_tokens: int = 0
+        self._inference_start_time: Optional[float] = None
+
         # Setup log file
         if log_file is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -299,6 +306,175 @@ class NvitopMonitor:
         with self._lock:
             self._current_stage = stage
             logger.info(f"GPU monitoring: entering stage '{stage}'")
+
+    def record_dataloader_wait(
+        self,
+        wait_time_ms: float,
+        batch_idx: int,
+        sequences_in_batch: int,
+        tokens_in_batch: int = 0,
+        avg_sequence_length: float = 0.0,
+        max_sequence_length: int = 0
+    ) -> None:
+        """
+        Record DataLoader fetch timing for bottleneck detection.
+
+        Args:
+            wait_time_ms: Time spent waiting for DataLoader to return next batch
+            batch_idx: Current batch index
+            sequences_in_batch: Number of sequences in batch
+            tokens_in_batch: Total tokens in batch (for packed batches)
+            avg_sequence_length: Average tokens per sequence
+            max_sequence_length: Longest sequence in batch
+        """
+        metrics = DataLoaderMetrics(
+            timestamp=time.time(),
+            wait_time_ms=wait_time_ms,
+            batch_idx=batch_idx,
+            sequences_in_batch=sequences_in_batch,
+            tokens_in_batch=tokens_in_batch,
+            avg_sequence_length=avg_sequence_length,
+            max_sequence_length=max_sequence_length,
+            queue_state=infer_queue_state(wait_time_ms)
+        )
+        with self._lock:
+            self._dataloader_metrics.append(metrics)
+            self._total_sequences += sequences_in_batch
+            self._total_tokens += tokens_in_batch
+
+        # Log every N batches per CONTEXT.md decision
+        if batch_idx % self._batch_log_interval == 0:
+            logger.info(
+                f"Batch {batch_idx}: wait={wait_time_ms:.1f}ms, "
+                f"seqs={sequences_in_batch}, tokens={tokens_in_batch}, "
+                f"queue_state={metrics.queue_state}"
+            )
+
+    def check_bottleneck(self, recent_samples: int = 10) -> Tuple[bool, str, float]:
+        """
+        Check if GPU is idle too often indicating I/O bottleneck.
+
+        Tiered thresholds to avoid false positives with short sequences:
+        - <50%: Critical bottleneck (definitely I/O bound)
+        - <80%: Mild bottleneck (may be batch size or I/O issue)
+        - ≥80%: No bottleneck
+
+        Returns:
+            Tuple of (is_bottleneck, severity, avg_utilization)
+            severity: 'critical' | 'mild' | 'none'
+        """
+        with self._lock:
+            if len(self._metrics) < recent_samples:
+                return False, 'none', 0.0
+
+            recent = self._metrics[-recent_samples:]
+            avg_util = sum(m.gpu_util for m in recent) / len(recent)
+
+        # Tiered bottleneck detection
+        if avg_util < 50:
+            logger.warning(
+                f"CRITICAL I/O bottleneck: GPU utilization {avg_util:.1f}% "
+                f"(threshold: 50%). DataLoader is starving the GPU."
+            )
+            return True, 'critical', avg_util
+        elif avg_util < 80:
+            logger.info(
+                f"Mild I/O bottleneck: GPU utilization {avg_util:.1f}% "
+                f"(threshold: 80%). Consider increasing batch size or prefetch_factor."
+            )
+            return True, 'mild', avg_util
+        else:
+            return False, 'none', avg_util
+
+    def get_dataloader_statistics(self) -> Dict[str, Any]:
+        """Get aggregated DataLoader performance statistics."""
+        with self._lock:
+            metrics = self._dataloader_metrics.copy()
+            total_sequences = self._total_sequences
+            total_tokens = self._total_tokens
+
+        if not metrics:
+            return {}
+
+        wait_times = [m.wait_time_ms for m in metrics]
+        queue_states = [m.queue_state for m in metrics]
+
+        # Calculate packing efficiency from batch composition
+        seq_lengths = [m.avg_sequence_length for m in metrics if m.avg_sequence_length > 0]
+        max_lengths = [m.max_sequence_length for m in metrics if m.max_sequence_length > 0]
+
+        # Packing efficiency: actual_tokens / (num_sequences * max_length_in_batch)
+        # For packed batches: high efficiency means less padding waste
+        total_actual_tokens = sum(m.tokens_in_batch for m in metrics)
+        total_theoretical_tokens = sum(
+            m.sequences_in_batch * m.max_sequence_length
+            for m in metrics if m.max_sequence_length > 0
+        )
+        packing_efficiency = (
+            total_actual_tokens / total_theoretical_tokens
+            if total_theoretical_tokens > 0 else 0.0
+        )
+
+        # Queue state distribution
+        queue_state_counts = {
+            'full': sum(1 for s in queue_states if s == 'full'),
+            'normal': sum(1 for s in queue_states if s == 'normal'),
+            'starved': sum(1 for s in queue_states if s == 'starved'),
+        }
+
+        return {
+            # Wait time metrics
+            'avg_wait_time_ms': sum(wait_times) / len(wait_times),
+            'max_wait_time_ms': max(wait_times),
+            'min_wait_time_ms': min(wait_times),
+            'p95_wait_time_ms': sorted(wait_times)[int(len(wait_times) * 0.95)] if wait_times else 0,
+
+            # Queue state heuristic (not actual queue depth)
+            'queue_state_distribution': queue_state_counts,
+            'pct_starved': queue_state_counts['starved'] / len(metrics) * 100 if metrics else 0,
+
+            # Batch composition
+            'avg_sequence_length': sum(seq_lengths) / len(seq_lengths) if seq_lengths else 0,
+            'avg_max_length': sum(max_lengths) / len(max_lengths) if max_lengths else 0,
+
+            # Packing efficiency
+            'packing_efficiency': packing_efficiency,
+
+            # Volume
+            'total_batches': len(metrics),
+            'total_sequences': total_sequences,
+            'total_tokens': total_tokens,
+        }
+
+    def start_inference_timer(self) -> None:
+        """Start timer for throughput calculation."""
+        self._inference_start_time = time.time()
+
+    def get_throughput(self) -> Dict[str, float]:
+        """
+        Get throughput metrics.
+
+        Returns both sequences/sec and tokens/sec.
+        tokens/sec is more stable for packed batches with variable sequence lengths.
+        """
+        if self._inference_start_time is None:
+            return {
+                'sequences_per_sec': 0.0,
+                'tokens_per_sec': 0.0,
+                'elapsed_seconds': 0.0
+            }
+
+        elapsed = time.time() - self._inference_start_time
+        seqs_per_sec = self._total_sequences / elapsed if elapsed > 0 else 0.0
+        tokens_per_sec = self._total_tokens / elapsed if elapsed > 0 else 0.0
+
+        return {
+            'sequences_per_sec': seqs_per_sec,
+            'tokens_per_sec': tokens_per_sec,
+            'elapsed_seconds': elapsed,
+            'total_sequences': self._total_sequences,
+            'total_tokens': self._total_tokens,
+        }
 
     def _monitor_loop(self):
         """Background monitoring loop."""
@@ -439,6 +615,12 @@ class NvitopMonitor:
                     }
 
             stats[device_id] = device_stats
+
+        # Add DataLoader statistics (device-agnostic)
+        dataloader_stats = self.get_dataloader_statistics()
+        if dataloader_stats:
+            # Return as a special entry in the stats dict
+            stats['dataloader'] = dataloader_stats
 
         return stats
 
