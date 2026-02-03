@@ -8,6 +8,19 @@ A performance optimization project for VirNucPro, a viral nucleotide prediction 
 
 Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs and automatically queue batches, reducing sample processing time from 45+ hours to under 10 hours.
 
+## Current Milestone: v2.0 Async Architecture + Sequence Packing
+
+**Goal:** Replace multi-worker-per-GPU architecture with single-process-per-GPU + async DataLoader, add sequence packing, and switch to FP16 precision for maximum throughput.
+
+**Target features:**
+- Single-process-per-GPU architecture (1 GPU process per GPU, not N workers per GPU)
+- Async DataLoader with CPU workers for I/O (eliminate serialization overhead, continuous GPU utilization)
+- Sequence packing optimization (pack multiple sequences into batches, reduce padding waste for 2-3x throughput gain)
+- FP16 mixed precision (2x memory/speed gain vs current forced FP32)
+- Breaking changes acceptable (v2.0 major refactor)
+
+**Architectural shift:** From multiprocessing.Pool with N workers per GPU → single process per GPU with async DataLoader pattern. Addresses v1.0 limitations: N×11GB memory overhead, pickle serialization tax, GPU starvation from small batches.
+
 ## Requirements
 
 ### Validated
@@ -52,9 +65,10 @@ Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs and
 ### Out of Scope
 
 - Optimizing non-embedding pipeline stages (chunking, translation, prediction) — benchmark these later, focus is embeddings only
-- Changing CLI interface for users — must remain `virnucpro predict --input X --output-dir Y`
+- ~~Changing CLI interface for users~~ — **v2.0 allows breaking changes** (major refactor justifies it)
 - Distributed multi-node processing — single-machine multi-GPU only
 - CPU-only optimization — GPUs are the target environment
+- Maintaining v1.0 multi-worker architecture — v2.0 replaces it entirely (v1.x remains on stable branch if needed)
 
 ## Context
 
@@ -84,11 +98,12 @@ Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs and
 
 ## Constraints
 
-- **CLI Compatibility**: Must not break existing `virnucpro predict` interface — users should not need to change commands
-- **Checkpoint Compatibility**: Must support resuming from existing pre-optimization checkpoint files
+- **CLI Compatibility**: ~~v1.0 required backward compatibility~~ — **v2.0 allows breaking changes** for architectural improvements
+- **Checkpoint Compatibility**: Must support resuming from existing checkpoint files where feasible (migration path acceptable)
 - **GPU Variability**: Must work across different GPU counts (1, 4, 8+) without code changes
-- **Dependencies**: Open to new dependencies (DeepSpeed, Ray, etc.) if they provide significant speedup
-- **Memory**: ESM-2 3B model is large; GPU memory limits batch sizes
+- **Dependencies**: Open to new dependencies if they provide significant speedup (torch DataLoader, sequence packing libraries)
+- **Memory**: ESM-2 3B model is large; single copy per GPU (not N copies) enables larger batch sizes
+- **Precision**: FP16 mixed precision (not BF16, not FP32) for 2x memory/speed gain
 
 ## Key Decisions
 
@@ -102,5 +117,7 @@ Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs and
 | Persistent model loading | Eliminate re-loading overhead | ✓ Good - opt-in feature working |
 | FlashAttention-2 via PyTorch SDPA | Native integration vs separate flash-attn package | ✓ Good - simpler maintenance |
 
+| Async architecture for v2.0 | Multi-worker-per-GPU causes N×11GB memory overhead, serialization tax, GPU starvation | — Pending - architectural shift underway |
+
 ---
-*Last updated: 2026-02-02 after v1.0 milestone*
+*Last updated: 2026-02-02 after v2.0 milestone started*

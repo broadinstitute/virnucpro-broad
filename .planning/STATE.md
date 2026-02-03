@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-02)
 
 **Core value:** Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs and automatically queue batches, reducing sample processing time from 45+ hours to under 10 hours.
-**Current focus:** Planning v2.0 milestone
+**Current focus:** v2.0 milestone - Async Architecture + Sequence Packing
 
 ## Current Position
 
-Phase: v1.0 complete, planning v2.0
+Phase: Not started (defining requirements)
 Plan: —
-Status: Milestone complete
-Last activity: 2026-02-02 — v1.0 milestone completed (Phases 1-4.1)
+Status: Defining requirements for v2.0
+Last activity: 2026-02-02 — Milestone v2.0 started
 
-Progress: v1.0 shipped ✓
+Progress: Initializing v2.0
 
 ## v1.0 Milestone Complete
 
