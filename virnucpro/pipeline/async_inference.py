@@ -362,6 +362,18 @@ class AsyncInferenceRunner:
                 avg_seq_len = tokens_in_batch / num_sequences if num_sequences > 0 else 0
                 max_seq_len = batch.get('max_seqlen', 0)
 
+                # Compute packing efficiency for this batch
+                packing_efficiency = None
+                if 'cu_seqlens' in batch and 'max_seqlen' in batch:
+                    from virnucpro.data.packing import compute_batch_efficiency
+                    efficiency_stats = compute_batch_efficiency(
+                        num_tokens=tokens_in_batch,
+                        num_sequences=num_sequences,
+                        max_seqlen=batch['max_seqlen'],
+                        max_tokens_per_batch=batch.get('token_budget', 4096)
+                    )
+                    packing_efficiency = efficiency_stats['token_utilization']
+
                 # Record DataLoader metrics
                 self.monitor.record_dataloader_wait(
                     wait_time_ms=fetch_time_ms,
@@ -369,13 +381,24 @@ class AsyncInferenceRunner:
                     sequences_in_batch=num_sequences,
                     tokens_in_batch=tokens_in_batch,
                     avg_sequence_length=avg_seq_len,
-                    max_sequence_length=max_seq_len
+                    max_sequence_length=max_seq_len,
+                    packing_efficiency=packing_efficiency
                 )
 
                 # Check for bottleneck every 10 batches
                 if batch_idx % 10 == 0 and batch_idx > 0:
                     is_bottleneck, severity, avg_util = self.monitor.check_bottleneck()
-                    self.monitor.sample()  # Take GPU utilization sample
+
+                # Periodic logging every 100 batches
+                if batch_idx % 100 == 0 and batch_idx > 0:
+                    dl_stats = self.monitor.get_dataloader_statistics()
+                    throughput = self.monitor.get_throughput()
+                    logger.info(
+                        f"Batch {batch_idx}: "
+                        f"{dl_stats.get('avg_packing_efficiency', 0):.1%} avg efficiency, "
+                        f"{throughput.get('tokens_per_sec', 0):.0f} tokens/sec, "
+                        f"{throughput.get('sequences_per_sec', 0):.1f} seq/sec"
+                    )
 
                 # Progress callback
                 if progress_callback:
