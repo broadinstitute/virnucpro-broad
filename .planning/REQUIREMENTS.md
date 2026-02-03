@@ -109,13 +109,62 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (To be filled by roadmapper) | | |
+| ARCH-01 | Phase 5 | Pending |
+| ARCH-02 | Phase 5 | Pending |
+| ARCH-03 | Phase 5 | Pending |
+| ARCH-04 | Phase 5 | Pending |
+| ARCH-05 | Phase 5 | Pending |
+| ARCH-06 | Phase 7 | Pending |
+| ARCH-07 | Phase 7 | Pending |
+| ARCH-08 | Phase 7 | Pending |
+| ARCH-09 | Phase 6 | Pending |
+| ARCH-10 | Phase 6 | Pending |
+| ARCH-11 | Phase 6 | Pending |
+| SAFE-01 | Phase 5 | Pending |
+| SAFE-02 | Phase 5 | Pending |
+| SAFE-03 | Phase 5 | Pending |
+| SAFE-04 | Phase 5 | Pending |
+| SAFE-05 | Phase 5 | Pending |
+| PACK-01 | Phase 6 | Pending |
+| PACK-02 | Phase 6 | Pending |
+| PACK-03 | Phase 6 | Pending |
+| PACK-04 | Phase 6 | Pending |
+| PACK-04b | Phase 6 | Pending |
+| PACK-05 | Phase 6 | Pending |
+| PACK-06 | Phase 6 | Pending |
+| PACK-06a | Phase 6 | Pending |
+| PREC-01 | Phase 8 | Pending |
+| PREC-02 | Phase 8 | Pending |
+| PREC-03 | Phase 8 | Pending |
+| GPU-01 | Phase 7 | Pending |
+| GPU-02 | Phase 7 | Pending |
+| GPU-03 | Phase 7 | Pending |
+| GPU-04 | Phase 7 | Pending |
+| CKPT-01 | Phase 9 | Pending |
+| CKPT-02 | Phase 9 | Pending |
+| CKPT-03 | Phase 9 | Pending |
+| CKPT-04 | Phase 9 | Pending |
+| CKPT-05 | Phase 9 | Pending |
+| CKPT-06 | Phase 9 | Pending |
+| PERF-01 | Phase 10 | Pending |
+| PERF-02 | Phase 10 | Pending |
+| PERF-03 | Phase 10 | Pending |
+| PERF-04 | Phase 10 | Pending |
+| PERF-05 | Phase 10 | Pending |
 
 **Coverage:**
-- v2.0 requirements: TBD total
-- Mapped to phases: TBD
-- Unmapped: TBD
+- v2.0 requirements: 42 total
+- Mapped to phases: 42/42 (100%)
+- Unmapped: 0
+
+**By Phase:**
+- Phase 5: 10 requirements (ARCH-01 to ARCH-05, SAFE-01 to SAFE-05)
+- Phase 6: 11 requirements (ARCH-09 to ARCH-11, PACK-01 to PACK-06a)
+- Phase 7: 7 requirements (ARCH-06 to ARCH-08, GPU-01 to GPU-04)
+- Phase 8: 3 requirements (PREC-01 to PREC-03)
+- Phase 9: 6 requirements (CKPT-01 to CKPT-06)
+- Phase 10: 5 requirements (PERF-01 to PERF-05)
 
 ---
 *Requirements defined: 2026-02-02*
-*Last updated: 2026-02-02 with checkpointing, CUDA safety, and buffer handling details*
+*Last updated: 2026-02-03 with phase mappings for v2.0 roadmap*
