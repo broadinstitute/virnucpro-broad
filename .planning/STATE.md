@@ -11,18 +11,18 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 6 of 10 (Sequence Packing Integration)
-Plan: 2 of 8 in current phase
+Plan: 3 of 8 in current phase
 Status: In progress
-Last activity: 2026-02-03 — Completed 06-02-PLAN.md
+Last activity: 2026-02-03 — Completed 06-03-PLAN.md
 
-Progress: [█████░░░░░] 41/TBD plans (v1.0: 34/34 complete, v2.0: 7/TBD)
+Progress: [█████░░░░░] 42/TBD plans (v1.0: 34/34 complete, v2.0: 8/TBD)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 41 (v1.0: 34, v2.0: 7)
-- Average duration: 3.1 min
-- Total execution time: 2.7 hours
+- Total plans completed: 42 (v1.0: 34, v2.0: 8)
+- Average duration: 3.0 min
+- Total execution time: 2.8 hours
 
 **By Phase:**
 
@@ -34,10 +34,10 @@ Progress: [█████░░░░░] 41/TBD plans (v1.0: 34/34 complete, v
 | 4 | 12 | 41 min | 3.4 min |
 | 4.1 | 3 | 10 min | 3.3 min |
 | 5 | 5 | 13 min | 2.6 min |
-| 6 | 2 | 11 min | 5.5 min |
+| 6 | 3 | 14 min | 4.7 min |
 
 **Recent Trend:**
-- Last 5 plans (Phase 5-6): ~2.6 min average
+- Last 5 plans (Phase 5-6): ~2.5 min average
 - Trend: Faster (streamlined implementation, focused scope)
 
 *Updated after each plan completion*
@@ -74,6 +74,8 @@ Recent decisions affecting current work:
 - **Position ID reset at boundaries (06-02)**: Position IDs must reset to 0 at each cu_seqlens boundary for correct positional embeddings in packed format
 - **FlashAttention dtype validation (06-02)**: Validate FP16/BF16 before calling flash_attn_varlen_func - provides clear error messages vs cryptic kernel errors
 - **flash-attn version check (06-02)**: Warn if <2.6.0 but don't block - allows testing while encouraging upgrade for bug fixes
+- **Layer-level FlashAttention integration (06-03)**: Extract Q/K/V from in_proj_weight and wrap attention with flash_attn_varlen_wrapper - avoids modifying ESM layer classes
+- **Unpack/repack fallback (06-03)**: When FlashAttention unavailable, unpack to 2D padded, run standard forward, repack to 1D - ensures universal compatibility
 
 ### Pending Todos
 
@@ -89,8 +91,8 @@ None yet.
 **Phase 6 (Sequence Packing Integration):**
 - ✅ Position ID generator: Implemented with boundary reset validation (06-02)
 - ✅ FlashAttention wrapper: Implemented with dtype/format validation (06-02)
-- ⏳ ESM-2 forward pass: Need to integrate position IDs and varlen attention (06-03)
-- ⏳ Packing correctness: Need validation tests (packed == unpacked output for same sequences)
+- ✅ ESM-2 forward pass: forward_packed method with layer-level FlashAttention varlen integration (06-03)
+- ⏳ Packing correctness: Need validation tests (packed == unpacked output for same sequences) (06-04)
 
 **Phase 8 (FP16 Precision Validation):**
 - Numerical precision: LayerNorm may have limited dynamic range in FP16 - may need selective FP32 for specific layers while keeping rest in FP16
@@ -98,7 +100,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed 06-02-PLAN.md - Position ID generator and FlashAttention varlen wrapper
+Stopped at: Completed 06-03-PLAN.md - ESM-2 packed forward pass with FlashAttention varlen
 Resume file: None
 
-**Next step:** Continue with 06-03-PLAN.md to integrate packed attention into ESM-2 forward pass
+**Next step:** Continue with 06-04-PLAN.md to validate packed attention correctness
