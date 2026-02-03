@@ -21,6 +21,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset, IterableDataset
+from virnucpro.data.packing import calculate_token_budget
 
 logger = logging.getLogger('virnucpro.dataloader')
 
@@ -234,6 +235,9 @@ def create_async_dataloader(
     prefetch_factor: int = 4,
     pin_memory: bool = True,
     timeout: float = 600.0,
+    token_budget: Optional[int] = None,
+    device_id: int = 0,
+    model_memory_gb: float = 5.0,
 ) -> DataLoader:
     """
     Create DataLoader with CUDA-safe configuration for async GPU inference.
@@ -261,6 +265,11 @@ def create_async_dataloader(
         pin_memory: Enable pinned memory for fast GPU transfer (default: True)
         timeout: Timeout in seconds for worker operations (default: 600 = 10 minutes,
             increased from 5 minutes to handle large FASTA parsing)
+        token_budget: Optional explicit token budget. If None and CUDA available,
+            calculates dynamically using calculate_token_budget (PACK-03).
+            If None and CUDA unavailable, uses collator's default.
+        device_id: CUDA device for dynamic budget calculation
+        model_memory_gb: Estimated model memory for budget calculation
 
     Returns:
         Configured DataLoader ready for async GPU inference
@@ -270,6 +279,7 @@ def create_async_dataloader(
         >>> dataset = SequenceDataset(fasta_files)
         >>> collator = VarlenCollator(batch_converter, max_tokens_per_batch=4096)
         >>> # batch_size=None lets VarlenCollator control batching via token budget
+        >>> # token_budget=None enables dynamic budget calculation (PACK-03)
         >>> loader = create_async_dataloader(dataset, collator, batch_size=None)
         >>> for batch in loader:
         ...     # batch has pinned tensors ready for GPU transfer
@@ -289,6 +299,24 @@ def create_async_dataloader(
             f"Async DataLoader requires num_workers >= 1, got {num_workers}. "
             "Use create_optimized_dataloader for single-threaded loading."
         )
+
+    # Calculate dynamic token budget if not explicitly provided (PACK-03)
+    if token_budget is None:
+        if torch.cuda.is_available():
+            token_budget = calculate_token_budget(
+                device_id=device_id,
+                model_memory_gb=model_memory_gb,
+            )
+            # Update collator's token budget
+            collate_fn.max_tokens_per_batch = token_budget
+            if collate_fn.packer is not None:
+                collate_fn.packer.max_tokens_per_batch = token_budget
+            logger.info(f"Dynamic token budget: {token_budget}")
+    elif token_budget is not None:
+        # Explicit budget provided - update collator
+        collate_fn.max_tokens_per_batch = token_budget
+        if collate_fn.packer is not None:
+            collate_fn.packer.max_tokens_per_batch = token_budget
 
     logger.info(
         f"Creating async DataLoader: batch_size={batch_size}, num_workers={num_workers}, "
