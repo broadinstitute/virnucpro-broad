@@ -11,16 +11,16 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 6 of 10 (Sequence Packing Integration)
-Plan: 3 of 8 in current phase
+Plan: 4 of 8 in current phase
 Status: In progress
-Last activity: 2026-02-03 — Completed 06-03-PLAN.md
+Last activity: 2026-02-03 — Completed 06-08-PLAN.md
 
-Progress: [█████░░░░░] 42/TBD plans (v1.0: 34/34 complete, v2.0: 8/TBD)
+Progress: [█████░░░░░] 43/TBD plans (v1.0: 34/34 complete, v2.0: 9/TBD)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 42 (v1.0: 34, v2.0: 8)
+- Total plans completed: 43 (v1.0: 34, v2.0: 9)
 - Average duration: 3.0 min
 - Total execution time: 2.8 hours
 
@@ -34,7 +34,7 @@ Progress: [█████░░░░░] 42/TBD plans (v1.0: 34/34 complete, v
 | 4 | 12 | 41 min | 3.4 min |
 | 4.1 | 3 | 10 min | 3.3 min |
 | 5 | 5 | 13 min | 2.6 min |
-| 6 | 3 | 14 min | 4.7 min |
+| 6 | 4 | 17 min | 4.3 min |
 
 **Recent Trend:**
 - Last 5 plans (Phase 5-6): ~2.5 min average
@@ -76,6 +76,9 @@ Recent decisions affecting current work:
 - **flash-attn version check (06-02)**: Warn if <2.6.0 but don't block - allows testing while encouraging upgrade for bug fixes
 - **Layer-level FlashAttention integration (06-03)**: Extract Q/K/V from in_proj_weight and wrap attention with flash_attn_varlen_wrapper - avoids modifying ESM layer classes
 - **Unpack/repack fallback (06-03)**: When FlashAttention unavailable, unpack to 2D padded, run standard forward, repack to 1D - ensures universal compatibility
+- **Stateful collator with buffer (06-08)**: VarlenCollator maintains buffer and packed_queue for streaming architecture - accumulates 2000 sequences before packing (PACK-02)
+- **flush() for completeness (06-08)**: Collator.flush() ensures no data loss at end-of-dataset by packing remaining buffer and queue
+- **Dataloader dynamic budget (06-08)**: create_async_dataloader calculates token budget from GPU memory when token_budget=None (PACK-03 integration)
 
 ### Pending Todos
 
@@ -100,7 +103,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed 06-03-PLAN.md - ESM-2 packed forward pass with FlashAttention varlen
+Stopped at: Completed 06-08-PLAN.md - Buffer-based packing integration with dynamic token budget
 Resume file: None
 
-**Next step:** Continue with 06-04-PLAN.md to validate packed attention correctness
+**Next step:** Continue with remaining Phase 6 plans (06-04 through 06-07) to complete sequence packing integration
