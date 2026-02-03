@@ -1,584 +1,341 @@
-# Technology Stack for GPU Optimization
+# Stack Research: Async DataLoader & Sequence Packing
 
-**Research Date:** 2026-01-22
-**Research Focus:** Multi-GPU optimization stack for ESM-2 3B and DNABERT-S embeddings
-**Target:** Reduce 45+ hour bottleneck to <10 hours
-
----
+**Domain:** High-throughput protein/DNA sequence processing with async I/O and sequence packing
+**Researched:** 2026-02-02
+**Confidence:** HIGH
 
 ## Executive Summary
 
-This document outlines the recommended technology stack for optimizing VirNucPro's embedding pipeline across multiple GPUs. The primary bottleneck is ESM-2 3B (45 hours, single GPU), with DNABERT-S underutilized despite multi-GPU support. The recommended stack prioritizes **PyTorch DistributedDataParallel (DDP)** over alternatives due to native integration, strong community support, and proven performance with transformer models.
+This document outlines the recommended technology stack for VirNucPro v2.0's async DataLoader architecture and sequence packing optimization. The v1.0 multi-GPU implementation using multiprocessing.Pool suffers from N×11GB memory overhead (multiple model copies), pickle serialization tax, and GPU starvation from small batches. The v2.0 architecture replaces this with single-process-per-GPU + async DataLoader pattern using native PyTorch capabilities.
+
+**Key Finding:** All required technologies are already in PyTorch >=2.8.0. No external dependencies needed for async DataLoader, FP16 mixed precision, or CUDA streams. Sequence packing requires custom implementation (no suitable off-the-shelf library for inference-only ESM-2/DNABERT workloads).
 
 ---
 
-## Core Multi-GPU Parallelization
+## Recommended Stack
 
-### 1. PyTorch DistributedDataParallel (DDP) — **RECOMMENDED**
+### Core Technologies (Native PyTorch)
 
-**Version:** PyTorch >=2.8.0 (already in dependencies)
-**Confidence:** HIGH
+| Technology | Version | Purpose | Why Recommended |
+|------------|---------|---------|-----------------|
+| torch.utils.data.DataLoader | PyTorch >=2.8.0 | Async data loading with CPU workers | Native PyTorch API with num_workers, pin_memory, prefetch_factor for overlapping I/O with GPU compute. Well-tested, zero external dependencies, integrates seamlessly with existing ESM/transformers code. Best practices: num_workers=4-8 (2x CPU cores per GPU), prefetch_factor=2, persistent_workers=True. |
+| torch.amp.autocast | PyTorch >=2.8.0 | Automatic mixed precision (FP16) | Replaces deprecated torch.cuda.amp.autocast. ESM-2 was trained in FP16 making it ideal for FP16 inference. Provides 2x memory reduction and 20-30% speedup with minimal accuracy loss (norm difference <1e-3 for embeddings). Use torch.float16 (not bfloat16) for closest match to training. |
+| torch.cuda.Stream | PyTorch >=2.8.0 | CUDA stream management for I/O-compute overlap | Native PyTorch API for creating async execution pipelines (H2D transfer, compute, D2H transfer). Enables 20-40% latency reduction by overlapping data movement with inference. Existing stream_manager.py already implements this pattern. |
+| torch.compile | PyTorch >=2.8.0 | JIT compilation for kernel optimization | Provides up to 2x inference speedup (1.35x-2x geomean on benchmarks) with single-line code addition. Particularly effective with FlashAttention and reduces Python overhead in async loops. Use mode="default" or "reduce-overhead" for inference. |
 
-**What It Does:**
-- Multi-process, multi-GPU data parallelism
-- Each GPU runs a separate process with its own model replica
-- Gradients synchronized across GPUs (for training) or inference batches distributed independently
-- Native NCCL backend for GPU-to-GPU communication
+### Sequence Packing Approach
 
-**Why Use This:**
-- **Already have PyTorch >=2.8.0** in current stack — zero new dependencies for basic DDP
-- Official PyTorch recommendation over DataParallel for all multi-GPU scenarios
-- Achieves 96%+ linear scaling efficiency on transformers (ESM-2 achieved 96.85% on 256 A100s)
-- Proven with ESM-2 3B models (BioNeMo2 benchmarks show strong multi-GPU performance)
-- Minimal code changes from existing single-GPU implementation
-- Works seamlessly with spawn context already used in `parallel.py`
+| Approach | Implementation | Purpose | Why This Strategy |
+|----------|---------------|---------|-------------------|
+| **Manual Greedy Packing** | Custom algorithm in Python | Pack variable-length sequences (100-3000nt, 30-1000aa) into fixed-size batches to minimize padding waste | No suitable off-the-shelf library exists for inference-only ESM-2/DNABERT workloads. torchtune's PackedDataset is training-focused (requires labels, RoPE encoding). Manual packing gives full control over batching strategy for inference. Implementation: sort sequences by length, greedily pack into max_tokens budget per batch. |
+| torch.nn.attention.flex_attention | PyTorch >=2.5.0 | Document masking for packed sequences | Optional advanced optimization. FlexAttention with document masking prevents cross-sequence attention in packed batches. Requires Ampere+ GPUs (Turing fallback to SDPA). torchtune achieved 71% throughput boost and 2.4x training speedup. Inference gains depend on packing density. Start without, add if profiling shows attention overhead. |
+| PyTorch NestedTensor (NJT) | PyTorch >=2.10.0 | Alternative to padding for variable-length batches | NOT RECOMMENDED for this use case. NestedTensor avoids padding but has eager mode overhead (more visible on smaller inputs), limited operator support, and requires model modifications. Manual packing + padding is simpler and better tested with ESM-2/DNABERT. Consider only if FlexAttention insufficient. |
 
-**Why NOT DataParallel:**
-- DataParallel is single-process, multi-threaded (GIL contention)
-- Significantly slower than DDP even on single node
-- PyTorch officially recommends DDP over DP
-- Poor GPU utilization compared to DDP
+### Supporting Libraries (Existing Stack)
 
-**Implementation Pattern:**
-```python
-# In worker process (similar to existing parallel.py pattern)
-import torch.distributed as dist
+| Library | Version | Purpose | Integration Notes |
+|---------|---------|---------|-------------------|
+| transformers | 4.30.0 (existing) | DNABERT-S model loading | Already validated. Compatible with torch.amp.autocast for FP16 inference. No changes needed. |
+| fair-esm | 2.0.0 (existing) | ESM-2 3B model loading | Already validated. ESM-2 trained in FP16, excellent compatibility with torch.amp. Use with torch.no_grad() for inference-only workloads. No changes needed. |
+| biopython | Latest (existing) | FASTA file parsing | Already used. Compatible with async DataLoader pattern (parse in CPU workers, transfer to GPU in main process). No changes needed. |
 
-def worker_fn(rank, world_size, device_id, file_subset):
-    # Initialize process group
-    dist.init_process_group(backend='nccl', rank=rank, world_size=world_size)
+### Development Tools
 
-    # Load model on specific GPU
-    device = torch.device(f'cuda:{device_id}')
-    model = load_model().to(device)
-    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[device_id])
-
-    # Process file subset
-    for file in file_subset:
-        # Extract features with local model
-        features = extract_features(file, model, device)
-```
-
-**Rationale:**
-- ESM-2 and DNABERT-S are inference-only in this pipeline (no backprop needed)
-- DDP's overhead for gradient synchronization is avoided during inference
-- Can use DDP pattern without actual gradient syncing for clean multi-GPU orchestration
-- Alternatively, simpler manual process spawning (already working for DNABERT-S) is sufficient
-
-**Sources:**
-- [PyTorch DDP Tutorial](https://docs.pytorch.org/tutorials/intermediate/ddp_tutorial.html)
-- [ESM-2 PMC Article - 96.85% scaling efficiency](https://pmc.ncbi.nlm.nih.gov/articles/PMC12481099/)
+| Tool | Purpose | Notes |
+|------|---------|-------|
+| torch.profiler | Performance profiling for async pipeline | Use to measure DataLoader worker efficiency, stream overlap, and identify bottlenecks. Critical for tuning num_workers and prefetch_factor. Records CUDA kernel launches, memory transfers, CPU operations. |
+| nvidia-smi / torch.cuda.memory_summary() | GPU memory monitoring | Track memory savings from FP16 (expect ~11GB -> ~6GB per model with FP16 weights). Validate no OOM with larger batch sizes. Monitor utilization during async operations. |
 
 ---
 
-### 2. DeepSpeed ZeRO-Inference — **NOT RECOMMENDED** (For This Use Case)
+## Installation
 
-**Version:** DeepSpeed 0.18.5 (latest as of 2025)
-**Confidence:** MEDIUM (well-tested, but overkill for this scenario)
+No new dependencies required. All features are native to PyTorch >=2.8.0.
 
-**What It Does:**
-- Offloads model weights to CPU/NVMe memory
-- Enables inference of massive models on limited GPU resources
-- Parallelizes layer fetches across multiple GPUs
-- Layer prefetching to overlap compute and memory transfer
-
-**Why NOT Use This:**
-- **ESM-2 3B fits on single GPU** (3B params ≈ 12GB with fp16, well within 24-40GB GPU memory)
-- Adds complexity of CPU/GPU memory transfers
-- Designed for models that *don't fit* on GPU (>100B params)
-- Overhead from memory transfers would slow down rather than speed up inference
-- Current bottleneck is compute time, not memory capacity
-
-**When To Reconsider:**
-- If upgrading to ESM-2 15B model (requires >60GB GPU memory)
-- If targeting inference on lower-memory GPUs (<16GB)
-
-**Sources:**
-- [DeepSpeed ZeRO-Inference](https://www.deepspeed.ai/2022/09/09/zero-inference.html)
-- [DeepSpeed Releases](https://github.com/deepspeedai/DeepSpeed/releases)
-
----
-
-### 3. PyTorch FSDP (Fully Sharded Data Parallel) — **NOT RECOMMENDED** (For Inference)
-
-**Version:** PyTorch >=2.8.0 (FSDP2 available)
-**Confidence:** MEDIUM
-
-**What It Does:**
-- Shards model parameters across GPUs (each GPU holds 1/N of model)
-- Designed for training models that don't fit on single GPU
-- FSDP2 improves memory management and DTensor sharding
-
-**Why NOT Use This:**
-- **Primarily designed for training**, not inference
-- ESM-2 3B fits entirely on single GPU — no need for parameter sharding
-- Adds communication overhead to gather parameters for each forward pass
-- More complex than DDP for inference workloads
-- Limited documentation for FSDP inference patterns
-
-**Sources:**
-- [PyTorch FSDP Tutorial](https://docs.pytorch.org/tutorials/intermediate/FSDP_tutorial.html)
-
----
-
-## Batch Processing & Queue Management
-
-### 4. Ray (ray[default]) — **RECOMMENDED** for Advanced Queueing
-
-**Version:** Ray 2.53.0
-**Confidence:** HIGH
-
-**What It Does:**
-- Distributed task queue for Python with GPU-aware scheduling
-- Dynamic resource allocation (e.g., 1 task per GPU)
-- Fault tolerance and automatic retries
-- Object store for sharing data across workers without duplication
-
-**Why Use This:**
-- **Best-in-class GPU batch processing** (500 GB/hour vs Dask's 300 in 2025 benchmarks)
-- Automatically detects available GPUs and assigns tasks
-- Superior fault tolerance (95% automatic recovery vs Dask's 80%)
-- Native Python integration (unlike Spark)
-- Minimal code changes from multiprocessing approach
-
-**Implementation Pattern:**
-```python
-import ray
-
-@ray.remote(num_gpus=1)
-def process_file_batch(file_subset, device_id):
-    # Load model on assigned GPU
-    device = torch.device(f'cuda:{device_id}')
-    model = load_model().to(device)
-
-    # Process files
-    return [extract_features(f, model, device) for f in file_subset]
-
-# Launch tasks
-ray.init()
-gpu_count = torch.cuda.device_count()
-futures = [process_file_batch.remote(files[i::gpu_count], i) for i in range(gpu_count)]
-results = ray.get(futures)
-```
-
-**When To Use:**
-- **Phase 1:** Start with native multiprocessing.Pool (already working for DNABERT-S)
-- **Phase 2:** Upgrade to Ray if need dynamic GPU allocation or fault tolerance
-
-**Alternative:** Native `multiprocessing.Pool` (already in use)
-- Simpler, no new dependencies
-- Works well for static GPU assignments
-- Current `parallel.py` already implements this pattern
-- **Recommendation:** Start here, migrate to Ray if limitations arise
-
-**Sources:**
-- [Ray Batch Processing Optimization](https://johal.in/batch-processing-optimization-with-ray-parallel-python-jobs-for-large-scale-data-engineering/)
-- [Ray vs Dask Comparison](https://www.kdnuggets.com/ray-or-dask-a-practical-guide-for-data-scientists)
-
----
-
-### 5. Dask — **NOT RECOMMENDED**
-
-**Version:** Dask 2025.x
-**Confidence:** MEDIUM
-
-**What It Does:**
-- Distributed computing framework for NumPy/Pandas/Scikit-learn
-- Lazy execution with DAG-based scheduling
-- GPU support via RAPIDS integration
-
-**Why NOT Use This:**
-- **Lower throughput** than Ray (300 vs 500 GB/hour in benchmarks)
-- Better suited for Pandas/NumPy workflows, not PyTorch
-- More complex setup for GPU-specific tasks
-- Ray outperforms for ML workloads
-
-**Sources:**
-- [Dask GPU Tutorial](https://developer.nvidia.com/blog/dask-tutorial-beginners-guide-to-distributed-computing-with-gpus-in-python/)
-
----
-
-## Inference Optimization Libraries
-
-### 6. HuggingFace Accelerate — **RECOMMENDED**
-
-**Version:** accelerate>=1.10.1 (already in dependencies)
-**Confidence:** HIGH
-
-**What It Does:**
-- Unified API for multi-GPU training/inference across DDP, FSDP, DeepSpeed
-- Automatic mixed precision (fp16, bf16, fp8)
-- Device placement and distributed setup abstraction
-- Works with transformers library (DNABERT-S)
-
-**Why Use This:**
-- **Already in dependencies** (accelerate>=1.10.1)
-- Native integration with HuggingFace transformers (DNABERT-S uses this)
-- Simplifies DDP initialization and device management
-- Supports mixed precision for free speedup (2x with fp16)
-- Regional compilation support for DeepSpeed
-
-**Implementation Pattern:**
-```python
-from accelerate import Accelerator
-
-accelerator = Accelerator(mixed_precision='fp16')
-model = AutoModel.from_pretrained("zhihan1996/DNABERT-S")
-model = accelerator.prepare(model)
-
-# Automatic device placement and precision
-outputs = model(inputs)  # Runs in fp16 if supported
-```
-
-**Key Features:**
-- **Mixed Precision:** Use fp16 or bf16 for 2x speedup with minimal accuracy loss
-- **Multi-GPU Inference:** Automatic model replication across GPUs
-- **FSDP2 Support:** Full state dict saving (if needed later)
-
-**Sources:**
-- [HuggingFace Accelerate Docs](https://huggingface.co/docs/transformers/en/accelerate)
-- [Accelerate GitHub](https://github.com/huggingface/accelerate)
-
----
-
-### 7. FlashAttention-2 / FlashAttention-3 — **RECOMMENDED** (If Applicable)
-
-**Version:** flash-attn>=2.6.x (FlashAttention-2), flash-attn-3 for H100
-**Confidence:** HIGH
-
-**What It Does:**
-- IO-aware exact attention algorithm
-- Reduces memory reads/writes for attention computation
-- 2-4x faster attention with same accuracy
-- Memory usage scales linearly (not quadratically) with sequence length
-
-**Why Use This:**
-- **9.4x speedup** for ESM-2 models with sequence packing (PMC research)
-- 70% of theoretical max FLOPS on A100
-- 10-20x memory savings for long sequences (2K-4K tokens)
-- Native PyTorch 2.2+ integration via SDPA (Scaled Dot Product Attention)
-
-**Applicability:**
-- ESM-2: Likely benefits (check if fair-esm 2.0.0 uses standard attention)
-- DNABERT-S: Definitely benefits (transformers 4.30.0 supports SDPA with FlashAttention-2)
-
-**Implementation:**
-```python
-# For HuggingFace transformers (DNABERT-S)
-model = AutoModel.from_pretrained(
-    "zhihan1996/DNABERT-S",
-    attn_implementation="flash_attention_2"  # Enable FlashAttention-2
-)
-
-# PyTorch 2.2+ automatically uses FlashAttention-2 via SDPA
-```
-
-**Requirements:**
-- FlashAttention-2: NVIDIA A100/A6000/RTX 3090+, CUDA >= 11.8
-- FlashAttention-3: H100/H800, CUDA >= 12.3 (recommended: CUDA 12.8)
-
-**When To Skip:**
-- If using older GPUs (pre-Ampere architecture)
-- If fair-esm doesn't support attention backend customization
-
-**Sources:**
-- [FlashAttention GitHub](https://github.com/Dao-AILab/flash-attention)
-- [FlashAttention-3 PyTorch Blog](https://pytorch.org/blog/flashattention-3/)
-- [ESM-2 9.4x Speedup PMC](https://pmc.ncbi.nlm.nih.gov/articles/PMC12481099/)
-
----
-
-### 8. torch.compile — **CONDITIONAL RECOMMENDATION**
-
-**Version:** PyTorch >=2.8.0 (already available)
-**Confidence:** MEDIUM
-
-**What It Does:**
-- JIT compiles PyTorch models to optimized kernels
-- Graph-level optimizations via TorchInductor
-- Dynamic shape support for variable batch sizes
-
-**Why Use This:**
-- **Zero dependencies** (built into PyTorch 2.x)
-- 1.5-2x speedup for transformers in many cases
-- `dynamic=True` handles variable batch sizes without recompilation
-
-**Why Be Cautious:**
-- Compilation overhead on first run (can be slow)
-- May have compatibility issues with fair-esm (older library)
-- Stability varies across models (better in PyTorch 2.8 than earlier versions)
-
-**Implementation:**
-```python
-# Compile model for faster inference
-model = torch.compile(model, mode='reduce-overhead', dynamic=True)
-
-# First batch: slow (compilation)
-# Subsequent batches: faster (1.5-2x speedup)
-```
-
-**Recommendation:**
-- **Try it after basic multi-GPU works**
-- Benchmark with/without compilation
-- Use `mode='reduce-overhead'` for small batches, `mode='max-autotune'` for large batches
-
-**Sources:**
-- [torch.compile Tutorial](https://docs.pytorch.org/tutorials/intermediate/torch_compile_tutorial.html)
-- [State of torch.compile August 2025](https://blog.ezyang.com/2025/08/state-of-torch-compile-august-2025/)
-
----
-
-### 9. xFormers (Memory-Efficient Attention) — **ALTERNATIVE** to FlashAttention
-
-**Version:** xformers>=0.0.34
-**Confidence:** MEDIUM
-
-**What It Does:**
-- Memory-efficient attention operators (from Meta Research)
-- Similar benefits to FlashAttention-2
-- Broader GPU compatibility
-
-**Why Consider:**
-- If FlashAttention-2 incompatible with GPUs
-- Easier installation on some systems
-
-**Why Prefer FlashAttention-2:**
-- FlashAttention-2 is faster (70% FLOPS vs 60% for xFormers)
-- Better maintained for latest GPUs
-- Native PyTorch 2.2+ integration
-
-**Sources:**
-- [xFormers Docs](https://facebookresearch.github.io/xformers/components/ops.html)
-
----
-
-## GPU Utilization Monitoring
-
-### 10. nvitop — **RECOMMENDED**
-
-**Version:** nvitop>=1.3.x
-**Confidence:** HIGH
-
-**What It Does:**
-- Interactive GPU process viewer (combines nvidia-smi + gpustat + nvtop)
-- Real-time monitoring with colorful TUI
-- Process filtering, metrics tracking, tree view
-- Python API for programmatic monitoring
-
-**Why Use This:**
-- **Best-in-class GPU monitoring** (expert consensus 2025)
-- Pure Python (easy pip install)
-- Portable (Linux + Windows)
-- Useful for verifying >80% GPU utilization target
-- Integrates with Python scripts for logging
-
-**Installation:**
 ```bash
-pixi add nvitop
-# or
-pip install nvitop
+# Verify PyTorch version (should be >=2.8.0)
+python -c "import torch; print(f'PyTorch {torch.__version__}')"
+
+# Existing dependencies remain unchanged
+# transformers==4.30.0
+# fair-esm==2.0.0
+# biopython
 ```
 
-**Usage:**
-```bash
-# Interactive monitoring
-nvitop
+---
 
-# Python API for logging
-from nvitop import Device
-devices = Device.all()
-for device in devices:
-    print(f"GPU {device.index}: {device.gpu_utilization()}% util, {device.memory_used()}/{device.memory_total()} MB")
+## Alternatives Considered
+
+| Recommended | Alternative | When to Use Alternative |
+|-------------|-------------|-------------------------|
+| **Manual greedy packing** | torchtune.datasets.PackedDataset | Only if training (not inference). torchtune's packing handles RoPE position IDs, document masking, and label packing for fine-tuning workloads. Not suitable for inference-only ESM-2 embedding extraction. Custom packing simpler and more flexible for inference. |
+| **torch.amp.autocast (FP16)** | BF16 (bfloat16) | If Ampere+ GPUs (A100, H100) and willing to sacrifice some precision. BF16 has wider dynamic range than FP16 but was disabled in current code due to divergence issues (esm2_flash.py:79). FP16 is safer: ESM-2 trained in FP16, closer outputs to FP32 (norm diff <1e-3), works on older GPUs. |
+| **Native DataLoader** | Ray Data / Dask | Only if processing exceeds single-node capacity (>8 GPUs) or distributed training needed. For 4-8 GPU single-node inference, native PyTorch DataLoader is simpler, lower overhead, better tested. Avoid premature distributed complexity. Ray adds 300KB per worker overhead. |
+| **torch.cuda.Stream** | CUDA graphs (torch.cuda.CUDAGraph) | Only if batch sizes are 100% static. CUDA graphs require fixed input shapes and control flow. VirNucPro has variable sequence lengths (100-3000nt), making streams more flexible. Use "reduce-overhead" mode in torch.compile instead for Python overhead reduction with dynamic shapes. |
+| **torch.compile** | TorchScript | Never for new projects. torch.compile supersedes TorchScript with better performance (2x vs 1.3x typical speedups), easier debugging, active development. TorchScript is in maintenance-only mode as of PyTorch 2.0+. |
+
+---
+
+## What NOT to Use
+
+| Avoid | Why | Use Instead |
+|-------|-----|-------------|
+| torch.cuda.amp.autocast | Deprecated in PyTorch 2.5+ | torch.amp.autocast("cuda", ...) - New API uses device_type="cuda" argument instead of torch.cuda namespace. Old API still works but will be removed in future versions. |
+| torch.cuda.amp.GradScaler | Deprecated and not needed for inference | Omit GradScaler entirely for inference (only needed for training with gradient scaling). Just use torch.amp.autocast wrapper around forward pass. |
+| Third-party packing libraries (e.g., HuggingFace DataCollatorForSeq2SeqWithPacking) | Does not exist in official HuggingFace transformers library (verified 2026-02-02) | Implement custom greedy packing algorithm. Simple to implement (sort by length, bin-pack into token budget), full control over batching strategy, no unnecessary dependencies. |
+| model.half() for FP16 conversion | Less flexible than autocast, requires manual dtype management | torch.amp.autocast context manager - handles FP32/FP16 ops automatically, better numerical stability, works with existing FP32 checkpoints without conversion, easier debugging. |
+| Aggressive prefetch_factor (>4) | Increases memory pressure with minimal benefit | prefetch_factor=2 (PyTorch default for num_workers>0). Values >4 can cause OOM on CPU RAM, especially with large FASTA files. Start at 2, increase only if profiling shows worker starvation. Diminishing returns beyond 2-4. |
+| num_workers > 8 | Memory explosion from too many worker processes | Cap at 8 workers per GPU process. Each worker duplicates dataset in memory. For typical systems, num_workers=4-8 is optimal (min(cpu_count // num_gpus, 8)). More workers rarely improve throughput. |
+
+---
+
+## Stack Patterns by Variant
+
+**If GPU Memory Limited (<40GB per GPU):**
+- Use torch.amp.autocast for FP16 to reduce model footprint from ~11GB to ~6GB
+- Enables larger batch sizes (64-128 instead of 32-64)
+- Accept small embedding differences (norm <1e-3) for 2x memory gain
+- Critical for running ESM-2 3B on 24GB GPUs (RTX 3090, RTX 4090)
+
+**If Variable Sequence Lengths (100-3000nt for DNA, 30-1000aa for protein):**
+- Implement greedy sequence packing to reduce padding waste
+- Sort sequences by length before packing to maximize packing efficiency
+- Use FlexAttention document masking (optional) if Ampere+ GPU and profiling shows attention overhead
+- Expected padding reduction: 30-50% depending on length distribution
+
+**If Targeting Maximum Throughput (50K-200K seqs/hour):**
+- Use torch.compile with mode="default" or "reduce-overhead"
+- Configure DataLoader: num_workers=4-8, pin_memory=True, prefetch_factor=2
+- Use torch.cuda.Stream for H2D/compute/D2H overlap (reuse existing stream_manager.py)
+- Enable persistent_workers=True to avoid worker restart overhead
+- Combine all optimizations for 5-8x speedup over v1.0
+
+**If Debugging or Development:**
+- Start with num_workers=0 (synchronous, easier debugging)
+- Disable torch.compile (first run compilation overhead confuses profiling)
+- Use FP32 initially, add FP16 after validating correctness
+- Add optimizations incrementally, benchmark each change
+
+---
+
+## Version Compatibility
+
+| Package | Compatible With | Notes |
+|---------|-----------------|-------|
+| PyTorch >=2.8.0 | transformers 4.30.0 | Verified compatible. transformers uses torch.nn.functional APIs that are stable across PyTorch 2.x. No breaking changes. |
+| PyTorch >=2.8.0 | fair-esm 2.0.0 | Verified compatible. ESM models use standard nn.Module patterns. torch.amp.autocast works with ESM-2 (trained in FP16). No modifications needed. |
+| torch.amp.autocast | ESM-2 3B model | HIGH compatibility. ESM-2 trained in FP16, making FP16 inference ideal. Expect norm differences <1e-3 vs FP32. Use torch.float16 (not bfloat16) for closest match to training dtype. |
+| torch.compile | FlashAttention (SDPA) | Full compatibility. torch.compile optimizes SDPA kernels further via TorchInductor. Use together for maximum performance (2x-4x speedup over eager mode). No conflicts. |
+| FlexAttention | Ampere+ GPUs (A100, H100) | Requires Turing+ (compute capability 7.5+) for FlashAttention backend. Falls back to memory-efficient SDPA on older GPUs, but performance gains reduced (2.4x -> 1.2x). Check GPU before enabling. |
+| DataLoader persistent_workers | num_workers > 0 | persistent_workers=True requires num_workers > 0. Keeps workers alive between epochs/batches. Saves worker initialization overhead (~1-2s per restart). Critical for multi-batch workloads. |
+
+---
+
+## Implementation Strategy
+
+### Phase 1: Async DataLoader (Highest Impact, MUST DO)
+
+**What to implement:**
+1. Replace multiprocessing.Pool with single process per GPU
+2. Add DataLoader with num_workers=4, pin_memory=True, prefetch_factor=2, persistent_workers=True
+3. Load model once per GPU process (not per DataLoader worker)
+
+**Why first:**
+- Eliminates N×11GB memory overhead (biggest current bottleneck per test.txt)
+- Removes pickle serialization tax (50-100ms per file batch)
+- Enables larger batch sizes (GPU no longer starved from small batches)
+- Estimated impact: 2-3x throughput improvement
+
+**Implementation notes:**
+- Reuse existing dataloader_utils.py (create_optimized_dataloader already implements best practices)
+- Workers parse FASTA files, return (id, sequence) tuples
+- Main process tokenizes and moves to GPU with pin_memory for fast transfer
+- Use spawn context (already used in v1.0) for CUDA compatibility
+
+**Code pattern:**
+```python
+# Single process per GPU (not multiprocessing.Pool)
+for gpu_id in range(num_gpus):
+    # One model per GPU, kept loaded
+    model = load_esm2_model(device=f'cuda:{gpu_id}')
+
+    # Async DataLoader with CPU workers for I/O
+    dataloader = DataLoader(
+        dataset,
+        batch_size=512,  # Much larger than v1.0
+        num_workers=4,
+        pin_memory=True,
+        prefetch_factor=2,
+        persistent_workers=True
+    )
+
+    # Stream processing
+    for batch in dataloader:
+        embeddings = model(batch)
 ```
 
-**Alternatives:**
-- **gpustat** (simpler, less features, uses pynvml >= 12.535.108)
-- **nvidia-smi** (built-in, basic, scriptable)
+### Phase 2: FP16 Mixed Precision (Medium Impact, HIGH ROI)
 
-**Sources:**
-- [nvitop GitHub](https://github.com/XuehaiPan/nvitop)
-- [GPU Monitoring Tools Comparison](https://lambda.ai/blog/keeping-an-eye-on-your-gpus-2)
+**What to implement:**
+1. Wrap model inference with torch.amp.autocast("cuda", dtype=torch.float16)
+2. Keep embeddings in FP32 for storage (convert after mean pooling)
+3. Validate embedding divergence <1e-3 norm difference vs FP32
 
----
+**Why second:**
+- Requires Phase 1 async architecture for memory headroom
+- Provides 2x memory reduction -> enables larger batches
+- Estimated impact: 1.5-2x throughput improvement (combined with larger batches)
 
-### 11. gpustat — **ALTERNATIVE**
+**Implementation notes:**
+- Update esm2_flash.py to remove "EXPERIMENTAL: Forcing FP32" (line 79-80)
+- Use torch.float16 (not bfloat16) - ESM-2 trained in FP16, better compatibility
+- Add validation tests comparing FP16 vs FP32 embeddings (reuse test_vanilla_equivalence.py pattern)
 
-**Version:** gpustat>=1.2
-**Confidence:** HIGH
+**Code pattern:**
+```python
+model.eval()
+with torch.no_grad(), torch.amp.autocast("cuda", dtype=torch.float16):
+    outputs = model(tokens)
+    representations = outputs["representations"][36]
 
-**What It Does:**
-- Simple command-line GPU monitor
-- Python-based (pynvml wrapper)
-- Real-time status updates
-
-**Why Consider:**
-- Simpler than nvitop if only need basic monitoring
-- Lightweight
-
-**Why Prefer nvitop:**
-- More features (process management, filtering, tree view)
-- Better UI/UX
-
-**Sources:**
-- [gpustat PyPI](https://pypi.org/project/gpustat/)
-
----
-
-## Model Optimization Techniques
-
-### 12. Quantization (8-bit / 4-bit) — **NOT RECOMMENDED** (For Now)
-
-**Confidence:** LOW (for this use case)
-
-**What It Does:**
-- Reduces model precision from fp32/fp16 to int8 or int4
-- 2-3x memory reduction
-- Marginal speedup on billion-parameter models
-
-**Why NOT Use This:**
-- **Memory is not the bottleneck** (ESM-2 3B fits on single GPU)
-- Accuracy loss risk (not validated for viral prediction task)
-- Current bottleneck is compute time, not memory
-- Quantization primarily helps memory-constrained scenarios
-
-**When To Reconsider:**
-- If targeting smaller GPUs (<16GB)
-- If upgrading to ESM-2 15B
-
-**Sources:**
-- [ESM-2 PMC Article - Quantization Benefits](https://pmc.ncbi.nlm.nih.gov/articles/PMC12481099/)
-
----
-
-## Recommended Stack Summary
-
-| Component | Library/Version | Priority | Reason |
-|-----------|----------------|----------|--------|
-| **Multi-GPU Parallelization** | PyTorch DDP (>=2.8.0) | **HIGH** | Already in stack, proven with ESM-2, minimal code changes |
-| **Batch Queue Management** | Native multiprocessing.Pool | **HIGH** | Already working (parallel.py), simple |
-| **Advanced Queueing** | Ray >=2.53.0 | **MEDIUM** | Upgrade path if need fault tolerance / dynamic allocation |
-| **Inference Optimization** | HuggingFace Accelerate >=1.10.1 | **HIGH** | Already in stack, mixed precision, DDP abstraction |
-| **Attention Speedup** | FlashAttention-2 (flash-attn>=2.6) | **HIGH** | 9.4x speedup for ESM-2, 10-20x memory savings |
-| **Model Compilation** | torch.compile (PyTorch >=2.8.0) | **MEDIUM** | Try after basic multi-GPU works, 1.5-2x speedup |
-| **GPU Monitoring** | nvitop >=1.3 | **HIGH** | Verify 80%+ utilization, process tracking |
-
----
-
-## What NOT to Use (And Why)
-
-| Library | Why Avoid |
-|---------|-----------|
-| **DataParallel** | Deprecated, slow (GIL contention), use DDP instead |
-| **DeepSpeed ZeRO-Inference** | Overkill (ESM-2 3B fits on single GPU), adds CPU/GPU transfer overhead |
-| **FSDP** | Designed for training + models that don't fit on single GPU (not applicable here) |
-| **Dask** | Lower throughput than Ray (300 vs 500 GB/hr), better for Pandas/NumPy not PyTorch |
-| **Quantization (8-bit/4-bit)** | Memory not the bottleneck, accuracy risk, minimal speedup for compute-bound tasks |
-| **xFormers** | FlashAttention-2 is faster and better integrated with PyTorch 2.2+ |
-
----
-
-## Dependency Changes Required
-
-### New Dependencies (Add to pixi.toml)
-
-```toml
-[pypi-dependencies]
-# GPU monitoring
-nvitop = ">=1.3.0, <2"
-
-# Optional: FlashAttention-2 (if compatible with GPUs)
-# flash-attn = ">=2.6.0, <3"
-
-# Optional: Ray for advanced queueing (Phase 2)
-# ray = { version = ">=2.53.0, <3", extras = ["default"] }
+# Convert to FP32 for storage (after mean pooling)
+embeddings = representations.mean(dim=1).float().cpu()
 ```
 
-### Existing Dependencies (No Changes Needed)
+### Phase 3: Sequence Packing (Low-Medium Impact, OPTIONAL)
 
-- `torch>=2.8.0` — Provides DDP, torch.compile, mixed precision
-- `accelerate>=1.10.1` — Provides multi-GPU abstraction, mixed precision
-- `transformers==4.30.0` — DNABERT-S support, FlashAttention-2 compatible
+**What to implement:**
+1. Custom greedy packing algorithm: sort sequences by length, bin-pack into token budget
+2. Dynamic batching: variable batch_size based on sequence lengths to maintain constant token count
+3. Optional: FlexAttention document masking if Ampere+ GPU
+
+**Why third:**
+- Lower priority than async + FP16
+- Benefit depends on sequence length distribution (high variance = more benefit)
+- Estimated impact: 1.2-1.5x throughput improvement (depends on dataset)
+
+**Implementation notes:**
+- Start simple: sort + greedy pack without FlexAttention
+- Measure padding waste with current approach (log batch statistics)
+- Add FlexAttention only if profiling shows attention is bottleneck (unlikely for ESM-2 inference)
+
+**Code pattern:**
+```python
+# Simple greedy packing
+def pack_sequences(sequences, max_tokens=4096):
+    sequences = sorted(sequences, key=lambda x: len(x[1]))
+    batches = []
+    current_batch = []
+    current_tokens = 0
+
+    for seq_id, seq_str in sequences:
+        seq_len = len(seq_str)
+        if current_tokens + seq_len > max_tokens and current_batch:
+            batches.append(current_batch)
+            current_batch = []
+            current_tokens = 0
+        current_batch.append((seq_id, seq_str))
+        current_tokens += seq_len
+
+    if current_batch:
+        batches.append(current_batch)
+
+    return batches
+```
+
+### Phase 4: CUDA Streams + torch.compile (Optional, LOW Priority)
+
+**What to implement:**
+1. torch.cuda.Stream for H2D/compute/D2H overlap (reuse existing stream_manager.py)
+2. torch.compile wrapper on model with mode="default"
+
+**Why last:**
+- Smallest incremental gains (10-20% each)
+- Phase 1-3 provide 4-6x combined speedup
+- Adds complexity (compilation cache, stream synchronization)
+
+**Implementation notes:**
+- stream_manager.py already exists, just needs integration with DataLoader loop
+- torch.compile: wrap model after loading, before first inference (first batch will be slow)
+- Use mode="reduce-overhead" for reduced Python overhead (good for small batches)
+
+**Code pattern:**
+```python
+# torch.compile
+model = torch.compile(model, mode="reduce-overhead")
+
+# CUDA streams (existing stream_manager.py)
+stream_processor = StreamProcessor(device=device)
+for batch in dataloader:
+    embeddings = stream_processor.process_batch_async(
+        batch,
+        transfer_fn=lambda b: b.to(device, non_blocking=True),
+        compute_fn=lambda b: model(b)
+    )
+```
 
 ---
 
-## Implementation Phasing Recommendations
+## Performance Expectations
 
-### Phase 1: Minimal Changes (Highest ROI)
-1. **Enable mixed precision** (fp16/bf16) with Accelerate — 2x speedup, zero code change
-2. **Parallelize ESM-2** across GPUs using existing multiprocessing.Pool pattern from `parallel.py`
-3. **Increase DNABERT-S batch size** per GPU (current batch_size=256 may be conservative)
-4. **Add nvitop monitoring** to measure GPU utilization
+Based on research and current v1.0 baseline from test.txt:
 
-**Expected Outcome:** 3-4x speedup (45 hours → 11-15 hours)
+| Optimization | Expected Speedup | Memory Impact | Implementation Effort |
+|--------------|------------------|---------------|----------------------|
+| Async DataLoader (Phase 1) | 2-3x | -75% GPU memory (N×11GB -> 1×11GB per GPU) | High (architectural change) |
+| FP16 Mixed Precision (Phase 2) | 1.5-2x | -45% model memory (11GB -> 6GB) | Medium |
+| Sequence Packing (Phase 3) | 1.2-1.5x | Neutral (reduces padding waste) | Medium |
+| CUDA Streams (Phase 4) | 1.1-1.2x | Neutral | Low (reuse existing code) |
+| torch.compile (Phase 4) | 1.1-1.2x | +10% (compilation cache) | Low (one-line change) |
+| **Combined (Phases 1-3)** | **4-6x** | **-80% total** | **High** |
+| **Combined (All phases)** | **5-8x** | **-75% total** | **High** |
 
-### Phase 2: Attention Optimization
-1. **Integrate FlashAttention-2** for DNABERT-S (transformers library supports this)
-2. **Test FlashAttention** with ESM-2 (may require fair-esm modifications or upgrade)
-3. **Benchmark torch.compile** on both models
+**Target validation:**
+- v1.0 baseline: ~10K-30K seqs/hour (1-6M seqs in 1-9 hours per test.txt)
+- v2.0 target: 50K-200K seqs/hour
+- Expected: Phases 1-2 sufficient to hit 50K/hour, Phases 3-4 to reach 100K-200K/hour
 
-**Expected Outcome:** Additional 1.5-2x speedup (11-15 hours → 6-10 hours)
-
-### Phase 3: Advanced (If Needed)
-1. **Migrate to Ray** for dynamic GPU allocation and fault tolerance
-2. **Profile and optimize I/O** (address CONCERNS.md: "File I/O in tight loops")
-3. **Batch across multiple samples** simultaneously if applicable
-
-**Expected Outcome:** Fine-tuning to <10 hours consistently
-
----
-
-## Validation Checklist
-
-- [ ] All versions verified against official documentation (not training data)
-- [x] PyTorch DDP: [pytorch.org/tutorials](https://docs.pytorch.org/tutorials/intermediate/ddp_tutorial.html)
-- [x] ESM-2 scaling: [PMC Article](https://pmc.ncbi.nlm.nih.gov/articles/PMC12481099/)
-- [x] FlashAttention-2: [pytorch.org/blog](https://pytorch.org/blog/flashattention-3/)
-- [x] Accelerate: [huggingface.co/docs](https://huggingface.co/docs/transformers/en/accelerate)
-- [x] Ray benchmarks: [KDnuggets comparison](https://www.kdnuggets.com/ray-or-dask-a-practical-guide-for-data-scientists)
-- [x] nvitop: [GitHub repo](https://github.com/XuehaiPan/nvitop)
-- [x] DeepSpeed version: [GitHub releases](https://github.com/deepspeedai/DeepSpeed/releases)
-- [x] torch.compile: [PyTorch docs](https://docs.pytorch.org/tutorials/intermediate/torch_compile_tutorial.html)
-
----
-
-## Confidence Levels
-
-| Recommendation | Confidence | Reason |
-|----------------|-----------|--------|
-| PyTorch DDP | **HIGH** | Industry standard, proven with ESM-2, already have PyTorch >=2.8.0 |
-| HuggingFace Accelerate | **HIGH** | Already in dependencies, widely adopted, stable |
-| FlashAttention-2 | **HIGH** | Massive speedup (9.4x) validated for ESM-2 in recent research |
-| nvitop | **HIGH** | Expert consensus for best monitoring tool 2025 |
-| Ray | **MEDIUM** | Excellent for batch processing, but multiprocessing.Pool may suffice |
-| torch.compile | **MEDIUM** | Can be unstable, benchmark required, but potential 1.5-2x speedup |
-| Skip DeepSpeed | **HIGH** | Not needed for models that fit on single GPU |
-| Skip FSDP | **HIGH** | Designed for training, not inference |
-| Skip Quantization | **MEDIUM** | Memory not bottleneck, but may help if targeting low-end GPUs |
+**Confidence levels:**
+- Phase 1 (Async DataLoader): HIGH confidence (2-3x) - addresses documented bottlenecks
+- Phase 2 (FP16): HIGH confidence (1.5-2x) - ESM-2 trained in FP16, proven compatible
+- Phase 3 (Packing): MEDIUM confidence (1.2-1.5x) - depends on sequence length variance
+- Phase 4 (Streams/compile): MEDIUM confidence (1.1-1.2x each) - smaller incremental gains
 
 ---
 
 ## Sources
 
-- [PyTorch DDP Tutorial](https://docs.pytorch.org/tutorials/intermediate/ddp_tutorial.html)
-- [ESM-2 Multi-GPU Performance PMC](https://pmc.ncbi.nlm.nih.gov/articles/PMC12481099/)
-- [NVIDIA BioNeMo ESM-2 Docs](https://docs.nvidia.com/bionemo-framework/2.1/models/esm2/)
-- [DeepSpeed ZeRO-Inference](https://www.deepspeed.ai/2022/09/09/zero-inference.html)
-- [DeepSpeed Releases](https://github.com/deepspeedai/DeepSpeed/releases)
-- [PyTorch FSDP Tutorial](https://docs.pytorch.org/tutorials/intermediate/FSDP_tutorial.html)
-- [Ray vs Dask Comparison](https://www.kdnuggets.com/ray-or-dask-a-practical-guide-for-data-scientists)
-- [Ray Batch Processing](https://johal.in/batch-processing-optimization-with-ray-parallel-python-jobs-for-large-scale-data-engineering/)
-- [HuggingFace Accelerate Docs](https://huggingface.co/docs/transformers/en/accelerate)
-- [Accelerate GitHub](https://github.com/huggingface/accelerate)
-- [FlashAttention GitHub](https://github.com/Dao-AILab/flash-attention)
-- [FlashAttention-3 PyTorch Blog](https://pytorch.org/blog/flashattention-3/)
-- [DNABERT-2 GitHub](https://github.com/MAGICS-LAB/DNABERT_2)
-- [DNABERT-2 ArXiv](https://arxiv.org/html/2306.15006v2)
-- [torch.compile Tutorial](https://docs.pytorch.org/tutorials/intermediate/torch_compile_tutorial.html)
-- [State of torch.compile August 2025](https://blog.ezyang.com/2025/08/state-of-torch-compile-august-2025/)
-- [xFormers Docs](https://facebookresearch.github.io/xformers/components/ops.html)
-- [nvitop GitHub](https://github.com/XuehaiPan/nvitop)
-- [nvitop PyPI](https://pypi.org/project/nvitop/)
-- [gpustat PyPI](https://pypi.org/project/gpustat/)
-- [GPU Monitoring Tools Comparison](https://lambda.ai/blog/keeping-an-eye-on-your-gpus-2)
-- [Transformers v5 Release](https://howaiworks.ai/blog/transformers-v5-release-announcement-2025)
-- [HuggingFace Multi-GPU Inference](https://huggingface.co/docs/transformers/v4.48.0/perf_infer_gpu_multi)
+### Official Documentation (HIGH confidence)
+- [PyTorch DataLoader Documentation](https://pytorch.org/docs/stable/data.html) - num_workers, pin_memory, prefetch_factor parameters
+- [PyTorch AMP Documentation](https://pytorch.org/docs/stable/amp.html) - torch.amp.autocast API, deprecated torch.cuda.amp namespace
+- [PyTorch CUDA Streams Documentation](https://pytorch.org/docs/stable/notes/cuda.html) - torch.cuda.Stream for async execution
+- [PyTorch FlexAttention Documentation](https://pytorch.org/docs/stable/nn.attention.flex_attention.html) - document masking for packed sequences
+- [PyTorch NestedTensor Documentation](https://pytorch.org/docs/stable/nested.html) - variable-length sequence handling
+- [PyTorch pinmem_nonblock Tutorial](https://pytorch.org/tutorials/intermediate/pinmem_nonblock.html) - pin_memory best practices
+
+### Performance Benchmarks (MEDIUM-HIGH confidence)
+- [torch.compile Tutorial (PyTorch official, updated 2026-01-26)](https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html) - 1.35x-2x inference speedup claims
+- [torchtune Sample Packing (PyTorch official)](https://pytorch.org/torchtune/stable/basics/packing.html) - FlexAttention 71% throughput boost, 2.4x training speedup
+- [PyTorch FlexAttention Blog](https://pytorch.org/blog/flexattention/) - 2.04x inference speedup on LLaMa3
+- [DRAMA NJT Performance](https://pytorch.org/blog/drama-model-inference-efficiency-boosted/) - 1.7x-2.3x inference speedup with NestedTensor
+
+### Community Best Practices (MEDIUM confidence)
+- [8 PyTorch DataLoader Tactics (Medium, 2025+)](https://medium.com/@Modexa/8-pytorch-dataloader-tactics-to-max-out-your-gpu-22270f6f3fa8) - num_workers best practices (2x CPU cores per GPU)
+- [PyTorch DataLoader Deep Dive (oongjoon.github.io)](https://oongjoon.github.io/pytorch/Data-loading/) - pin_memory and prefetch_factor interaction
+- [Optimizing Data Transfer in Batched Inference (Medium, Jan 2026)](https://chaimrand.medium.com/optimizing-data-transfer-in-batched-ai-ml-inference-workloads-a9f4165208b8) - DataPrefetcher pattern with CUDA streams
+- [Variable Length Sequences Tutorial (PyTorch official)](https://pytorch.org/tutorials/intermediate/variable_length_attention_tutorial.html) - varlen_attn API for packed sequences
+- [Efficient LLM Pretraining with Packed Sequences (HuggingFace)](https://huggingface.co/blog/sirluk/llm-sequence-packing) - sequence packing patterns
+
+### ESM-2 Specific (MEDIUM-HIGH confidence)
+- [ESM-2 FP16 Discussion (GitHub facebookresearch/esm #684)](https://github.com/facebookresearch/esm/discussions/684) - ESM-2 trained in FP16, norm difference <1e-3 for embeddings
+- [FastESM2_650 (HuggingFace)](https://huggingface.co/Synthyra/FastESM2_650) - "FP16 has closer outputs to FP32 than BF16, loading in FP16 recommended"
+- [Efficient ESM-2 Inference PMC](https://pmc.ncbi.nlm.nih.gov/articles/PMC12481099/) - FlashAttention + sequence packing achieves 4-9x faster inference
+
+### Negative Findings (LOW confidence, flagged for validation)
+- HuggingFace DataCollatorForSeq2SeqWithPacking: NOT FOUND in official transformers library (searched 2026-02-02). Custom implementation required.
+
+---
+
+*Stack research for: VirNucPro v2.0 async DataLoader and sequence packing*
+*Researched: 2026-02-02*
+*Confidence: HIGH*

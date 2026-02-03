@@ -1,481 +1,595 @@
-# Multi-GPU Inference Optimization Features
-
-## Research Context
-
-**Question**: What optimization techniques exist for multi-GPU inference of large language models like ESM-2 and DNABERT-S?
-
-**Background**: VirNucPro processes thousands of sequences through ESM-2 (3B params, protein) and DNABERT-S (DNA) embeddings. Current issues: ESM-2 single GPU sequential batches take 45 hours; DNABERT-S multi-GPU but one file per GPU (underutilized). Target: multi-GPU parallelization, batch queuing, better memory utilization, linear scaling.
-
-**Date**: 2026-01-22
-
----
-
-## Table Stakes (Must-Have Optimizations)
-
-Features essential for production multi-GPU inference. If we don't have these, we're not competitive.
-
-### TS-01: Data Parallelism for Multi-GPU Distribution
-
-**What it is**: Replicate the model across multiple GPUs and distribute different input batches to each GPU. PyTorch provides `DataParallel` (simpler, single-process) and `DistributedDataParallel` (faster, multi-process).
-
-**Why table stakes**: The foundation for utilizing multiple GPUs. Without this, additional GPUs sit idle.
-
-**Complexity**: LOW
-- `DataParallel`: Wrap model in `nn.DataParallel(model)` (3-5 lines)
-- `DistributedDataParallel`: Requires process group initialization and rank management (20-30 lines)
-
-**VirNucPro application**:
-- DNABERT-S: Already implemented via multiprocessing (file-per-GPU)
-- ESM-2: Not implemented (currently single GPU)
-- **Recommendation**: Use DDP for both models (better performance than current file-per-GPU approach)
-
-**Trade-offs**:
-- DataParallel: Single-process threading bottleneck limits scaling beyond 2-3 GPUs
-- DDP: Requires multi-process coordination but scales linearly
-
-**Dependencies**: None
-
-**References**:
-- [PyTorch DDP Tutorial](https://docs.pytorch.org/tutorials/intermediate/ddp_tutorial.html)
-- [DataParallel vs DistributedDataParallel](https://medium.com/@kuipasta1121/dataparallel-vs-distributeddataparallel-in-pytorch-whats-the-difference-0af10bb43bc7)
-
----
-
-### TS-02: Optimized Batch Size for Memory Utilization
-
-**What it is**: Maximize batch size to fully utilize GPU memory without OOM errors. Larger batches = bigger kernels = better GPU utilization.
-
-**Why table stakes**: GPUs are most efficient when executing large batches. Small batches waste compute capacity.
-
-**Complexity**: LOW-MEDIUM
-- Binary search for max batch size (manual testing: LOW)
-- Automated profiling with `torch.cuda.memory_stats()` (programmatic: MEDIUM)
-
-**VirNucPro application**:
-- Current: DNABERT-S batch_size=256, ESM-2 toks_per_batch=2048
-- **Recommendation**: Profile each GPU type to find max batch size (likely 2-4x current values for A100/H100)
-
-**Trade-offs**:
-- Larger batches increase throughput but reduce scheduling flexibility
-- Batch size limited by GPU memory (ESM-2 3B model is memory-intensive)
-
-**Dependencies**: GPU profiling tools (nvidia-smi, PyTorch profiler)
-
-**References**:
-- [Finding Optimal Batch Size](https://www.digitalocean.com/community/tutorials/find-optimal-batch-size)
-- [PyTorch Performance Optimization](https://medium.com/@ishita.verma178/pytorch-gpu-optimization-step-by-step-guide-9dead5164ca2)
-
----
-
-### TS-03: DataLoader Prefetching with Multiple Workers
-
-**What it is**: Use PyTorch `DataLoader` with `num_workers > 0` and `prefetch_factor` to load next batch while GPU processes current batch. Set `pin_memory=True` for faster CPU→GPU transfer.
-
-**Why table stakes**: CPU data loading shouldn't block GPU computation. Without prefetching, GPU idles waiting for data.
-
-**Complexity**: LOW
-- Add `num_workers=4-8`, `prefetch_factor=2`, `pin_memory=True` to DataLoader (1 line change)
-
-**VirNucPro application**:
-- Current: Loads FASTA files, tokenizes, processes batch-by-batch (sequential I/O)
-- **Recommendation**: Wrap sequence loading in DataLoader with 4-8 workers
-
-**Trade-offs**:
-- More workers = more CPU memory (each worker holds `prefetch_factor` batches)
-- Too many workers can cause overhead; sweet spot is typically 4-8
-
-**Dependencies**: None
-
-**References**:
-- [8 PyTorch DataLoader Tactics](https://medium.com/@Modexa/8-pytorch-dataloader-tactics-to-max-out-your-gpu-22270f6f3fa8)
-- [Data Prefetching in Deep Learning](https://www.jpatrickpark.com/post/prefetcher/)
-
----
-
-### TS-04: Mixed Precision Inference (FP16/BF16)
-
-**What it is**: Run inference in 16-bit floating point instead of 32-bit. FP16 (5-bit exponent, 10-bit mantissa) for high precision; BF16 (8-bit exponent, 7-bit mantissa) for wider dynamic range.
-
-**Why table stakes**: 2x memory reduction, 2x speedup on modern GPUs with tensor cores. No accuracy loss for most inference tasks.
-
-**Complexity**: LOW
-- PyTorch: `with torch.autocast(device_type='cuda', dtype=torch.bfloat16):`
-- Hugging Face: `model.half()` or `torch_dtype=torch.float16` in `from_pretrained()`
-
-**VirNucPro application**:
-- ESM-2: Currently FP32 (implicit)
-- DNABERT-S: Currently FP32 (implicit via transformers)
-- **Recommendation**: Use BF16 for both (better range, less overflow risk)
-
-**Trade-offs**:
-- FP16: Risk of overflow/underflow; needs loss scaling for training (not inference)
-- BF16: Slightly lower precision but safer; requires A100/H100 GPUs
-
-**Dependencies**: GPU with tensor cores (V100+), PyTorch 1.10+
-
-**References**:
-- [Mixed Precision Training Guide](https://markaicode.com/transformers-mixed-precision-training-fp16-bf16/)
-- [Defeating Training-Inference Mismatch via FP16](https://arxiv.org/html/2510.26788v1)
-
----
-
-### TS-05: CUDA Streams for Overlapping Computation
-
-**What it is**: Use multiple CUDA streams to overlap memory transfers (H2D, D2H) with kernel execution. Default stream is synchronous; multiple streams enable async operations.
-
-**Why table stakes**: Hide memory transfer latency behind computation. Can improve throughput 20-40% for I/O-heavy workloads.
-
-**Complexity**: MEDIUM
-- Create stream: `stream = torch.cuda.Stream()`
-- Execute in stream: `with torch.cuda.stream(stream):`
-- Synchronize: `stream.synchronize()`
-- Requires careful orchestration (30-50 lines)
-
-**VirNucPro application**:
-- Current: Sequential load→tokenize→forward→save
-- **Recommendation**: Stream 1 for next batch load/tokenize, Stream 2 for current batch forward pass
-
-**Trade-offs**:
-- Complexity increases (need to manage dependencies)
-- Diminishing returns beyond 2-3 streams (GPU has 32 hardware queues max)
-
-**Dependencies**: CUDA 11.0+
-
-**References**:
-- [CUDA Streams Introduction](https://wentao.site/cuda_streams/)
-- [Optimizing GPU Performance with CUDA Streams](https://medium.com/@kailashcvm/optimizing-gpu-performance-with-cuda-streams-and-batch-sizes-a1725debf86c)
-
----
-
-## Differentiators (Advanced Optimizations)
-
-Features that provide extra speedup beyond baseline multi-GPU. These are "nice to have" but not critical for initial version.
-
-### DF-01: Continuous Batching (vLLM-style)
-
-**What it is**: Dynamically schedule new sequences into GPU whenever a running sequence completes, rather than waiting for entire batch to finish. Iteration-level scheduling that fills gaps.
-
-**Why differentiator**: Maximizes GPU utilization for variable-length sequences. vLLM achieves 23x throughput vs naive batching.
-
-**Complexity**: HIGH
-- Requires custom scheduler to track sequence completion
-- Dynamic memory allocation for varying batch sizes
-- Integration with existing pipeline (100-200 lines)
-
-**VirNucPro application**:
-- Current: Fixed batch sizes, wait for entire batch
-- **Potential benefit**: DNABERT-S/ESM-2 have variable sequence lengths (chunked to 500bp but translated ORFs vary)
-- **Recommendation**: Phase 2 optimization (after basic multi-GPU works)
-
-**Trade-offs**:
-- Significant engineering complexity
-- Requires rethinking batch processing logic
-- Best for high-throughput serving, less critical for offline batch inference
-
-**Dependencies**: Custom scheduler or vLLM integration
-
-**References**:
-- [vLLM Continuous Batching](https://www.anyscale.com/blog/continuous-batching-llm-inference)
-- [Inside vLLM](https://www.aleksagordic.com/blog/vllm)
-
----
-
-### DF-02: FlashAttention-2 for Memory-Efficient Attention
-
-**What it is**: IO-aware attention algorithm that uses tiling to reduce memory reads/writes between HBM and SRAM. 2x speedup over standard attention, enables 2x longer sequences.
-
-**Why differentiator**: Reduces memory bottleneck for long sequences. Attention is O(n²) in sequence length.
-
-**Complexity**: MEDIUM
-- Install: `pip install flash-attn`
-- Replace attention: Model-dependent (DNABERT-S/ESM-2 may require modifications)
-- For BERT-style models: Monkey-patch attention layers (20-40 lines)
-
-**VirNucPro application**:
-- DNABERT-S: 500bp chunks = ~500 tokens (moderate length)
-- ESM-2: Truncated to 1024 residues (memory savings possible)
-- **Potential benefit**: Could enable larger batch sizes or longer sequences
-- **Recommendation**: Test on ESM-2 first (longer sequences)
-
-**Trade-offs**:
-- Requires CUDA 11.8+, A100/H100 GPUs for full benefit
-- Model architecture compatibility (not all transformers support)
-- FlashAttention-3 optimized for H100 (cutting edge)
-
-**Dependencies**: flash-attn library, CUDA 11.8+, Ampere/Hopper GPUs
-
-**References**:
-- [FlashAttention Paper](https://arxiv.org/abs/2205.14135)
-- [FlashAttention-2 Improvements](https://openreview.net/forum?id=mZn2Xyh9Ec)
-
----
-
-### DF-03: Model Quantization (INT8/4-bit)
-
-**What it is**: Reduce model weights from FP32/FP16 to INT8 (8-bit integers) or 4-bit. Techniques: GPTQ, AWQ, bitsandbytes.
-
-**Why differentiator**: 4x (INT8) or 8x (4-bit) memory reduction, 2-4x inference speedup. Enables larger batch sizes.
-
-**Complexity**: MEDIUM
-- bitsandbytes: `load_in_8bit=True` in `from_pretrained()` (1 line)
-- GPTQ/AWQ: Requires calibration dataset and quantization script (50-100 lines)
-
-**VirNucPro application**:
-- ESM-2 3B: FP32 = 12GB, INT8 = 3GB, 4-bit = 1.5GB
-- **Potential benefit**: Fit more batches in memory, use smaller GPUs
-- **Concern**: Accuracy impact on protein/DNA embeddings (needs validation)
-- **Recommendation**: Benchmark INT8 first, measure embedding quality
-
-**Trade-offs**:
-- Accuracy loss: 1-5% for INT8 (minimal), 5-10% for 4-bit (acceptable for most tasks)
-- Calibration overhead: GPTQ/AWQ require representative dataset
-- Not all operations are quantized (e.g., layer norms stay FP16)
-
-**Dependencies**: bitsandbytes, transformers 4.30+, or GPTQ/AWQ libraries
-
-**References**:
-- [LLM Quantization Guide](https://bentoml.com/llm/getting-started/llm-quantization)
-- [8-bit Matrix Multiplication](https://huggingface.co/blog/hf-bitsandbytes-integration)
-
----
-
-### DF-04: Tensor Parallelism for Model Sharding
-
-**What it is**: Split individual model layers across GPUs (shard attention/MLP within a layer). Each GPU computes partial results, then all-reduce.
-
-**Why differentiator**: Reduces per-GPU memory for very large models. Enables models that don't fit on single GPU.
-
-**Complexity**: HIGH
-- Requires model surgery to shard layers (DeepSpeed/Megatron-LM libraries)
-- All-reduce communication overhead on every forward pass
-- Integration complexity (100-300 lines)
-
-**VirNucPro application**:
-- ESM-2 3B: Fits on single A100 (40GB) in FP16
-- **Current relevance**: LOW (model fits on single GPU)
-- **Future relevance**: If upgrading to ESM-2 15B or larger models
-- **Recommendation**: Skip for now; data parallelism is sufficient
-
-**Trade-offs**:
-- High communication overhead (reduces efficiency vs data parallelism)
-- Best for models that don't fit on single GPU
-- Requires fast interconnect (NVLink/Infiniband)
-
-**Dependencies**: DeepSpeed, Megatron-LM, or manual implementation
-
-**References**:
-- [Tensor Parallelism Overview](https://www.infracloud.io/blogs/inference-parallelism/)
-- [Scaling LLM Inference](https://engineering.fb.com/2025/10/17/ai-research/scaling-llm-inference-innovations-tensor-parallelism-context-parallelism-expert-parallelism/)
-
----
-
-### DF-05: DeepSpeed ZeRO-Inference for Large Batch Sizes
-
-**What it is**: Offload model parameters to CPU/NVMe, stream layers to GPU on-demand. Enables batch sizes 10-100x larger by freeing GPU memory.
-
-**Why differentiator**: Maximize throughput for long sequences or large batches. Best when computation time dominates weight loading time.
-
-**Complexity**: MEDIUM-HIGH
-- Install DeepSpeed: `pip install deepspeed`
-- Configure ZeRO stage 3 + inference: JSON config file
-- Modify training script: `deepspeed.initialize()` (20-50 lines)
-
-**VirNucPro application**:
-- ESM-2: Currently memory-bound (3B params = 6GB in FP16)
-- **Potential benefit**: Increase batch size from 2048 toks to 20,000+ toks
-- **Trade-off**: Slower per-batch (offload overhead), but higher overall throughput
-- **Recommendation**: Test if batch size is primary bottleneck
-
-**Trade-offs**:
-- Offload overhead: 10-30% slower per iteration
-- Net win if throughput gain (10x batch size) exceeds overhead
-- Requires NVMe for best performance (PCIe 4.0+ SSD)
-
-**Dependencies**: DeepSpeed, NVMe storage (optional but recommended)
-
-**References**:
-- [ZeRO-Inference](https://www.deepspeed.ai/2022/09/09/zero-inference.html)
-- [DeepSpeed Inference Tutorial](https://www.deepspeed.ai/tutorials/inference-tutorial/)
-
----
-
-### DF-06: Pipeline Parallelism for Layer Distribution
-
-**What it is**: Split model layers across GPUs (e.g., GPU0: layers 1-12, GPU1: layers 13-24). Micro-batches pipelined through stages.
-
-**Why differentiator**: Enables very large models. Lower communication than tensor parallelism.
-
-**Complexity**: HIGH
-- Manual: Assign layer ranges to GPUs, manage activations (50-100 lines)
-- GPipe/PipeDream: Automated pipelining libraries (integration complexity)
-
-**VirNucPro application**:
-- ESM-2 3B: 36 layers, fits on single GPU
-- **Current relevance**: LOW (model fits on single GPU)
-- **Potential use**: If scaling to ESM-2 15B (54 layers)
-- **Recommendation**: Skip; data parallelism preferred for inference
-
-**Trade-offs**:
-- Bubble overhead: GPUs idle during pipeline fill/drain (5-15% efficiency loss)
-- Best for training (gradient accumulation); less efficient for inference
-- Requires micro-batching to keep pipeline full
-
-**Dependencies**: PyTorch Pipeline, GPipe, or manual implementation
-
-**References**:
-- [Parallelism Techniques](https://www.genesiscloud.com/blog/top-parallelism-techniques-llm-training)
-- [NVIDIA LLM Inference Guide](https://developer.nvidia.com/blog/mastering-llm-techniques-inference-optimization/)
-
----
-
-## Anti-Features (Avoid These)
-
-Optimizations that are either too complex for the benefit or inappropriate for this use case.
-
-### AF-01: Gradient Accumulation for Inference
-
-**What it is**: Accumulate gradients over multiple batches to simulate larger batch size (training technique).
-
-**Why anti-feature**: Gradient accumulation is for TRAINING, not inference. Inference doesn't compute gradients.
-
-**Recommendation**: Do not implement. Use actual larger batch sizes or DeepSpeed ZeRO-Inference instead.
-
----
-
-### AF-02: Multi-Node Distributed Inference
-
-**What it is**: Distribute inference across multiple machines connected by network (e.g., 4 nodes × 8 GPUs = 32 GPUs).
-
-**Why anti-feature**:
-- Out of scope (PROJECT.md specifies "single-machine multi-GPU only")
-- High complexity (network communication, job scheduling)
-- Diminishing returns: Single node with 8x A100/H100 sufficient for VirNucPro throughput
-
-**Recommendation**: Explicitly avoid. Focus on optimizing single-node 4-8 GPU setup.
-
----
-
-### AF-03: Custom CUDA Kernels for Embedding Extraction
-
-**What it is**: Write custom CUDA C++ kernels to replace PyTorch/Transformers operations.
-
-**Why anti-feature**:
-- Extremely high complexity (100-1000+ lines of CUDA C++)
-- Maintenance burden (breaks on model updates)
-- Marginal benefit: Transformers library already well-optimized
-- FlashAttention and DeepSpeed provide most gains without custom kernels
-
-**Recommendation**: Avoid unless profiling shows specific kernel is bottleneck (unlikely).
-
----
-
-### AF-04: FP8 or FP4 Precision
-
-**What it is**: 8-bit or 4-bit floating point (newer than INT8, requires H100+ GPUs).
-
-**Why anti-feature**:
-- Requires cutting-edge hardware (H100, Ada/Blackwell GPUs)
-- Limited library support (TransformerEngine FP8 is new)
-- FP4 (NVFP4) still experimental
-- BF16 provides sufficient memory savings (2x) with broad compatibility
-
-**Recommendation**: Monitor for future (2027+), but prioritize BF16 for 2026.
-
----
+# Feature Research
+
+**Domain:** Async DataLoader and Sequence Packing for Transformer Inference
+**Researched:** 2026-02-02
+**Confidence:** HIGH
+
+## Feature Landscape
+
+### Table Stakes (Users Expect These)
+
+Features that are essential for async DataLoader and sequence packing to work correctly. Missing these means the feature is broken.
+
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| Async data loading with CPU workers | Overlap I/O (FASTA parsing, tokenization) with GPU inference | MEDIUM | PyTorch DataLoader with num_workers>0 provides this. Requires pinned memory and non_blocking transfers. Dependencies: existing batch processing infrastructure. |
+| Prefetch buffer management | Keep GPU fed with ready batches to eliminate idle time | LOW | DataLoader prefetch_factor controls queue depth. Rule of thumb: prefetch_factor=2-4 per worker. Dependencies: async loading. |
+| Sequence concatenation for packing | Pack multiple variable-length sequences into single tensor | MEDIUM | Concatenate sequences and track boundaries with cu_seqlens (cumulative sequence lengths). Dependencies: tokenization pipeline. |
+| Attention masking for packed sequences | Prevent cross-contamination between packed sequences | HIGH | Document masking via flash_attn_varlen_func ensures sequences don't attend to each other. Critical for correctness. Dependencies: FlashAttention-2 (already integrated). |
+| GPU memory pinning | Enable asynchronous CPU→GPU transfers | LOW | DataLoader pin_memory=True. Required for non_blocking transfers to overlap with compute. Dependencies: none. |
+| Non-blocking GPU transfers | Overlap data transfer with kernel execution | LOW | tensor.to(device, non_blocking=True). Works only with pinned memory. Dependencies: pin_memory. |
+| Token budget enforcement | Respect GPU memory limits when packing sequences | MEDIUM | Track total tokens in batch (sum of sequence lengths). Reject sequences that exceed toks_per_batch budget. Dependencies: token counting logic. |
+| FP16 precision support | 2x memory reduction and 2x speedup on tensor cores | MEDIUM | torch.autocast('cuda', dtype=torch.float16). Requires accuracy validation for embeddings. Currently forced FP32 due to dtype mismatch issues. Dependencies: model compatibility testing. |
+
+### Differentiators (Competitive Advantage)
+
+Features that set VirNucPro v2.0 apart from standard inference pipelines. Not required for correctness, but provide significant performance gains.
+
+| Feature | Value Proposition | Complexity | Notes |
+|---------|-------------------|------------|-------|
+| Intelligent packing algorithm | Maximize GPU utilization by minimizing padding waste | HIGH | Implement First-Fit Decreasing (FFD) or Longest-Pack-First-Highest-Priority (LPFHP). Research shows 1.5-2x throughput gains by eliminating 50-70% padding. Dependencies: sorted sequence length tracking. |
+| Dynamic batch sizing | Adapt batch size based on sequence lengths to maintain constant token budget | MEDIUM | Small sequences → larger batches. Long sequences → smaller batches. Keeps GPU memory utilization constant. Dependencies: token budget tracking. |
+| Multi-stream GPU execution | Overlap data transfer and kernel execution using CUDA streams | HIGH | Separate streams for H2D transfer and inference. Requires careful synchronization. Provides 20-30% speedup. Dependencies: CUDA stream management, pinned memory. |
+| Continuous batching | Group sequences at iteration level, not batch level | HIGH | Don't wait for all sequences in batch to finish. Start new sequences as old ones complete. Achieves 10-20x better throughput than static batching. Dependencies: dynamic scheduling, inflight batch management. |
+| Adaptive prefetching | Dynamically adjust num_workers and prefetch_factor based on GPU utilization | HIGH | Monitor GPU idle time and adjust CPU worker count accordingly. Prevents over/under-provisioning. Dependencies: GPU monitoring, dynamic worker spawn. |
+| Zero-copy data path | Minimize memory copies between components | MEDIUM | Direct tensor passing from DataLoader → GPU → inference. Avoid intermediate CPU copies. Dependencies: careful memory lifecycle management. |
+
+### Anti-Features (Commonly Requested, Often Problematic)
+
+Features that seem beneficial but create more problems than they solve for this use case.
+
+| Feature | Why Requested | Why Problematic | Alternative |
+|---------|---------------|-----------------|-------------|
+| Multi-GPU sequence distribution | Desire to use all available GPUs | Adds communication overhead between GPUs. Model (3B params) fits on single GPU. Adds complexity without benefit for inference. | Use single GPU per process, multiple processes for multiple GPUs (current v1.0 architecture). |
+| Distributed coordination layer | Want centralized batch scheduling across GPUs | Requires network/IPC coordination. Latency kills throughput gains. Inference is embarrassingly parallel. | File-based work distribution (current approach) or simple queue-based task assignment. |
+| KV cache optimization | Training literature emphasizes KV cache for generation | VirNucPro does embedding extraction, not autoregressive generation. No repeated decoding steps. KV cache provides zero benefit. | Focus on batch throughput, not per-token latency. |
+| Complex packing schedulers | Research papers show sophisticated scheduling algorithms | Adds significant implementation complexity. Diminishing returns beyond simple FFD or LPFHP algorithms. Debugging becomes nightmare. | Start with First-Fit Decreasing (FFD). Profile before adding complexity. |
+| Model sharding | Desire to handle larger models | Model fits on single GPU. Sharding adds memory transfer overhead. Only useful when model > GPU memory. | Stick to single-GPU inference. Use larger GPU if needed. |
+| Asynchronous tokenization | Want to tokenize on-the-fly | Tokenization is CPU-bound and irregular (sequence length dependent). Creates backpressure. Better to batch tokenize. | Pre-tokenize in DataLoader workers before packing. Token IDs transfer faster than text. |
 
 ## Feature Dependencies
 
 ```
-TS-02 (Batch Size) ──> TS-04 (Mixed Precision)  # Larger batches need memory savings
-                   └──> DF-03 (Quantization)     # Alternative for memory savings
+Async DataLoader Architecture:
+    GPU Memory Pinning (pin_memory=True)
+        └──enables──> Non-blocking GPU Transfers (non_blocking=True)
+            └──enables──> Multi-stream GPU Execution (overlap transfer & compute)
 
-TS-03 (DataLoader) ──> TS-05 (CUDA Streams)     # Prefetching complements async streams
+Sequence Packing Pipeline:
+    Sequence Concatenation
+        └──requires──> Token Budget Enforcement
+        └──requires──> Attention Masking (flash_attn_varlen_func)
+            └──enhances──> Intelligent Packing Algorithm (minimize padding)
+                └──enables──> Dynamic Batch Sizing (constant token budget)
 
-TS-01 (Data Parallel) ──> DF-04 (Tensor Parallel)  # Can combine both
-                      └──> DF-06 (Pipeline Parallel) # Mutual exclusive
+FP16 Precision:
+    Model Compatibility (no dtype mismatch)
+        └──enables──> FP16 Autocast
+            └──requires──> Accuracy Validation (embedding quality check)
 
-DF-05 (ZeRO-Inference) ──> TS-02 (Batch Size)   # Enables larger batches
+Conflicts:
+    Multi-GPU Sequence Distribution ──conflicts──> Single-process-per-GPU Architecture
+    Continuous Batching ──conflicts──> Static File-based Work Distribution
+    Asynchronous Tokenization ──conflicts──> Pre-tokenize in DataLoader Workers
 ```
 
-**Critical path for VirNucPro**:
-1. TS-01 (Data Parallelism) + TS-02 (Batch Size) = 80% of speedup
-2. TS-04 (Mixed Precision) = Additional 2x memory/speed
-3. TS-03 (DataLoader) + TS-05 (CUDA Streams) = Remove CPU bottlenecks
+### Dependency Notes
 
-**Phase 2 differentiators** (if critical path doesn't hit 10-hour target):
-- DF-02 (FlashAttention) for ESM-2
-- DF-03 (INT8 Quantization) if memory-bound
+- **GPU Memory Pinning enables Non-blocking Transfers:** Pinned memory allows DMA access, which is required for asynchronous CPU→GPU transfers. Without pinning, non_blocking=True has no effect.
+- **Attention Masking requires FlashAttention-2:** Standard PyTorch attention doesn't support efficient packed sequences. flash_attn_varlen_func with cu_seqlens is the canonical approach (FlashAttention-2 already integrated in v1.0).
+- **Intelligent Packing enhances Dynamic Batch Sizing:** Sorting sequences by length before packing reduces padding within batches. Dynamic sizing ensures batches stay within token budget.
+- **FP16 requires Accuracy Validation:** ESM-2 embeddings may degrade in FP16 (LayerNorm has limited dynamic range). Must validate cosine similarity between FP32 and FP16 embeddings >0.99 before enabling.
+- **Multi-stream GPU Execution conflicts with simple architecture:** Requires separate CUDA streams, careful synchronization, and pinned memory. Only beneficial if CPU→GPU transfer is bottleneck (profile first).
 
----
+## MVP Definition (VirNucPro v2.0)
 
-## Implementation Priorities
+### Launch With (v2.0 Milestone)
 
-### Phase 1: Critical Path (Target: <10 hours)
+Minimum viable async DataLoader + sequence packing. What's needed to validate 2-3x throughput gain hypothesis.
 
-1. **TS-01**: Implement DDP for ESM-2 (currently single GPU)
-2. **TS-04**: Enable BF16 for both models (2x speedup)
-3. **TS-02**: Profile and increase batch sizes (expect 2-4x)
-4. **TS-03**: Add DataLoader with prefetching (remove I/O bottleneck)
+- [ ] **Async data loading with CPU workers** — Essential for I/O/compute overlap. Start with num_workers=4, prefetch_factor=2.
+- [ ] **GPU memory pinning** — Required for non-blocking transfers. DataLoader pin_memory=True.
+- [ ] **Non-blocking GPU transfers** — Overlap data movement with compute. tensor.to(device, non_blocking=True).
+- [ ] **Sequence concatenation for packing** — Pack variable-length sequences into single tensor. Track boundaries.
+- [ ] **Attention masking for packed sequences** — Use flash_attn_varlen_func with cu_seqlens. Critical for correctness.
+- [ ] **Token budget enforcement** — Respect toks_per_batch=2048 limit when packing. Reject sequences that overflow.
+- [ ] **First-Fit Decreasing (FFD) packing** — Simple greedy algorithm. Sort sequences by length descending, pack into batches. Good enough for 1.5-2x gains.
+- [ ] **FP16 precision (validated)** — Enable torch.autocast after validating embedding accuracy. Blocks 2x memory/speed gains until validated.
 
-**Expected outcome**: 4-8x total speedup (45 hours → 6-11 hours)
+### Add After Validation (v2.1+)
 
-### Phase 2: Differentiators (if needed)
+Features to add once core async + packing is working and benchmarked.
 
-5. **DF-02**: Integrate FlashAttention-2 for ESM-2
-6. **TS-05**: Implement CUDA streams for async I/O
+- [ ] **Dynamic batch sizing** — Trigger: If batches have high padding waste (>30% padding tokens). Adapt batch size to maintain constant token budget.
+- [ ] **Multi-stream GPU execution** — Trigger: Profile shows GPU idle time >20% waiting for data. Separate streams for transfer and compute.
+- [ ] **Adaptive prefetching** — Trigger: Workload has highly variable sequence lengths. Dynamically tune num_workers based on GPU starvation metrics.
+- [ ] **Advanced packing algorithm (LPFHP)** — Trigger: FFD leaves >20% padding waste. Longest-Pack-First-Highest-Priority can squeeze out extra 10-15% throughput.
+- [ ] **Zero-copy data path** — Trigger: Profiling shows significant time in tensor copying. Optimize memory lifecycle to avoid intermediate copies.
 
-**Expected outcome**: Additional 1.5-2x speedup (6 hours → 3-4 hours)
+### Future Consideration (v3.0+)
 
-### Phase 3: Advanced (if aggressive targets)
+Features to defer until v2.0 performance is proven and bottlenecks are understood.
 
-7. **DF-03**: Test INT8 quantization (validate embedding quality)
-8. **DF-05**: Evaluate DeepSpeed ZeRO-Inference for massive batches
+- [ ] **Continuous batching** — Defer: Requires major architecture change from file-based work distribution. Not compatible with current checkpoint/resume model. Only valuable if batch completion time variance is high.
+- [ ] **BF16 precision** — Defer: BF16 has better dynamic range than FP16 (safer for embeddings). But requires Ampere+ GPUs (A100, H100). Check deployment hardware first.
+- [ ] **Custom CUDA kernels for packing** — Defer: PyTorch native operations are fast enough initially. Only optimize if packing overhead >10% of total time.
+- [ ] **Distributed inference coordination** — Defer: File-based distribution works fine for embarrassingly parallel workload. Only needed if central scheduling becomes bottleneck.
 
----
+## Feature Prioritization Matrix
 
-## Quality Gate Checklist
+| Feature | User Value | Implementation Cost | Priority |
+|---------|------------|---------------------|----------|
+| Async data loading with CPU workers | HIGH (eliminates I/O gaps) | LOW (DataLoader built-in) | P1 |
+| Sequence concatenation for packing | HIGH (enables packing) | MEDIUM (requires cu_seqlens) | P1 |
+| Attention masking for packed sequences | HIGH (correctness critical) | MEDIUM (flash_attn_varlen_func) | P1 |
+| Token budget enforcement | HIGH (prevents OOM) | LOW (simple token counting) | P1 |
+| GPU memory pinning | HIGH (enables async transfer) | LOW (DataLoader flag) | P1 |
+| Non-blocking GPU transfers | HIGH (overlap transfer/compute) | LOW (single flag) | P1 |
+| First-Fit Decreasing packing | HIGH (1.5-2x throughput gain) | MEDIUM (sort + greedy pack) | P1 |
+| FP16 precision | HIGH (2x memory/speed) | MEDIUM (validation required) | P1 |
+| Dynamic batch sizing | MEDIUM (extra 10-20% gain) | MEDIUM (adaptive logic) | P2 |
+| Multi-stream GPU execution | MEDIUM (20-30% speedup) | HIGH (CUDA stream mgmt) | P2 |
+| Adaptive prefetching | MEDIUM (robustness) | HIGH (monitoring + tuning) | P2 |
+| Advanced packing (LPFHP) | LOW (marginal gains) | HIGH (complex algorithm) | P3 |
+| Continuous batching | LOW (incompatible architecture) | HIGH (major refactor) | P3 |
+| Zero-copy data path | LOW (micro-optimization) | HIGH (careful memory mgmt) | P3 |
 
-- [x] Categories are clear (table stakes vs differentiators vs anti-features)
-- [x] Complexity noted for each feature (LOW/MEDIUM/HIGH)
-- [x] Dependencies between features identified (dependency graph included)
-- [x] VirNucPro-specific applications documented
-- [x] Trade-offs analyzed for each technique
-- [x] Implementation priorities defined (Phase 1/2/3)
+**Priority key:**
+- P1: Must have for v2.0 launch — core async + packing functionality
+- P2: Should have in v2.1+ — optimization after validation
+- P3: Nice to have in v3.0+ — diminishing returns or architectural mismatch
 
----
+## Implementation Complexity Breakdown
+
+### Async DataLoader (MEDIUM complexity)
+
+**What it involves:**
+- Configure PyTorch DataLoader with num_workers, prefetch_factor, pin_memory
+- Implement custom Dataset that loads FASTA files and tokenizes sequences
+- Handle worker process lifecycle and cleanup
+- Ensure thread-safety for model loading (spawn context already used in v1.0)
+
+**Existing foundation:**
+- v1.0 already uses multiprocessing.Pool for multi-GPU
+- Token-based batching logic exists (toks_per_batch=2048)
+- FASTA loading in sequence_utils.py
+
+**New code required:**
+- Custom torch.utils.data.Dataset wrapper
+- Collate function for variable-length sequences
+- Worker initialization function
+
+**Estimated effort:** 2-3 days
+
+### Sequence Packing with FlashAttention (HIGH complexity)
+
+**What it involves:**
+- Pack multiple sequences into single tensor (concatenate)
+- Compute cu_seqlens (cumulative sequence length array) for each batch
+- Replace standard attention with flash_attn_varlen_func
+- Validate packed sequences produce identical embeddings to unpacked
+
+**Existing foundation:**
+- FlashAttention-2 already integrated (v1.0 Phase 4)
+- Models already support FlashAttention
+- Token counting logic exists
+
+**New code required:**
+- Sequence packing algorithm (FFD or LPFHP)
+- cu_seqlens computation
+- Attention call replacement in forward pass
+- Unpacking logic to restore original sequence boundaries
+- Validation tests (packed vs unpacked equivalence)
+
+**Critical gotcha:**
+- Must update positional embeddings and attention masks correctly
+- Cross-contamination between sequences is silent correctness bug
+
+**Estimated effort:** 5-7 days
+
+### FP16 Precision Validation (MEDIUM complexity)
+
+**What it involves:**
+- Enable torch.autocast('cuda', dtype=torch.float16) for inference
+- Extract embeddings in both FP32 and FP16
+- Compute cosine similarity between FP32/FP16 embeddings
+- Validate similarity >0.99 for random sample of sequences
+- Debug dtype mismatches if they occur
+
+**Existing foundation:**
+- v1.0 currently forces FP32 due to previous dtype issues
+- Model loading infrastructure exists
+- Embedding extraction logic exists
+
+**Known issues:**
+- Previous attempt had dtype mismatch between BF16 model and FP32 input
+- LayerNorm in transformers can have limited dynamic range in FP16
+- ESM-2 3B model may be sensitive to precision
+
+**Blockers resolved:**
+- BF16/FP32 mismatch fixed in Phase 2 (commit 27a4ee9)
+- Models now load in FP32 consistently
+
+**New code required:**
+- Autocast context manager integration
+- Embedding comparison logic
+- Validation test suite
+
+**Estimated effort:** 3-4 days (including debugging)
+
+### Intelligent Packing Algorithm (MEDIUM-HIGH complexity)
+
+**What it involves:**
+- Sort sequences by length (descending for FFD)
+- Greedily pack sequences into batches respecting token budget
+- Handle edge cases (sequence longer than budget, last batch padding)
+- Optimize for minimal padding waste
+
+**Algorithm choices:**
+
+1. **First-Fit Decreasing (FFD)** — LOW complexity
+   - Sort sequences by length descending
+   - For each sequence, add to first batch with enough space
+   - Create new batch if no fit
+   - Expected padding waste: 20-30%
+
+2. **Longest-Pack-First-Highest-Priority (LPFHP)** — HIGH complexity
+   - Priority queue of batches by remaining capacity
+   - Pack longest sequences first into highest-priority batch
+   - Recompute priorities after each pack
+   - Expected padding waste: 10-20%
+
+**Recommendation:** Start with FFD. Profile padding waste. Only implement LPFHP if waste >30%.
+
+**Estimated effort:**
+- FFD: 2-3 days
+- LPFHP: 5-7 days
+
+### Multi-stream GPU Execution (HIGH complexity)
+
+**What it involves:**
+- Create separate CUDA streams for data transfer and compute
+- Synchronize streams at batch boundaries
+- Manage pinned memory buffers for async transfers
+- Profile to verify overlap (nvprof or PyTorch Profiler)
+
+**Requirements:**
+- GPU must support concurrent copy and execution (all modern GPUs do)
+- Transfers on non-default stream
+- Source memory must be pinned
+
+**Existing foundation:**
+- Pinned memory already enabled (DataLoader)
+- Non-blocking transfers implemented
+
+**New code required:**
+- CUDA stream creation and management
+- Stream synchronization logic
+- Stream-aware tensor lifecycle
+
+**Risk:**
+- Easy to introduce race conditions
+- Debugging requires CUDA profiling tools
+- Benefit depends on whether transfer is bottleneck
+
+**Estimated effort:** 4-6 days (including profiling and debugging)
+
+## Expected Behavior: Async DataLoader for Inference
+
+### Workflow
+
+1. **Main process spawns N CPU workers** (num_workers=4 recommended)
+2. **Each worker independently:**
+   - Loads FASTA file chunk
+   - Parses sequences
+   - Tokenizes sequences
+   - Packs sequences into batch (respecting token budget)
+   - Pins memory and queues batch
+3. **Main process (GPU):**
+   - Pops batch from prefetch queue (non-blocking)
+   - Transfers batch to GPU (async, non-blocking)
+   - Runs inference on current batch while next batch transfers
+   - Writes results to output
+   - Repeats
+
+### Expected Performance Characteristics
+
+**Without async DataLoader (v1.0 baseline):**
+```
+[Load FASTA] → [Tokenize] → [GPU Inference] → [Load FASTA] → [Tokenize] → [GPU Inference]
+     ↑ CPU idle         ↑ GPU idle      ↑ CPU idle         ↑ GPU idle
+```
+
+**With async DataLoader (v2.0 target):**
+```
+Worker 1: [Load] → [Tokenize] → [Pack] → [Load] → [Tokenize] → [Pack] → ...
+Worker 2:    [Load] → [Tokenize] → [Pack] → [Load] → [Tokenize] → ...
+Worker 3:       [Load] → [Tokenize] → [Pack] → [Load] → [Tokenize] → ...
+Worker 4:          [Load] → [Tokenize] → [Pack] → [Load] → [Tokenize] → ...
+                              ↓ prefetch queue (depth = workers × prefetch_factor)
+Main:                    [GPU] → [GPU] → [GPU] → [GPU] → [GPU] → [GPU] → ...
+                              ↑ continuous inference, no gaps
+```
+
+### Tuning Parameters
+
+| Parameter | Range | Impact | Recommendation |
+|-----------|-------|--------|----------------|
+| num_workers | 0-8 | CPU parallelism for I/O | Start with 4. Increase if GPU is starved (idle). Decrease if CPU memory is constrained. |
+| prefetch_factor | 2-8 | Queue depth per worker | Start with 2. Increase if GPU has intermittent gaps. Each unit adds workers × batch_size × sequence_length memory. |
+| pin_memory | True/False | Enable async transfer | Always True for GPU inference. |
+| toks_per_batch | 1024-4096 | GPU memory usage | Current: 2048. Increase if GPU memory <80% utilized. Decrease if OOM. |
+
+### Memory Footprint
+
+**CPU memory:**
+- Base: Main process memory
+- Workers: num_workers × (model memory + batch memory)
+- Queue: num_workers × prefetch_factor × batch_size × sequence_length × sizeof(token_id)
+
+**Example:**
+- num_workers=4, prefetch_factor=2, batch_size=16, sequence_length=512, token_id=int32
+- Queue memory: 4 × 2 × 16 × 512 × 4 bytes = 256 KB (negligible)
+- Worker memory: 4 × (0 if no model in worker) = 0 (if using GPU-side models)
+
+**GPU memory:**
+- Model: 3B params × 4 bytes (FP32) = 12 GB or 6 GB (FP16)
+- Batch: batch_size × sequence_length × hidden_size × 4 bytes
+- Activations: ~2-3x batch memory during forward pass
+
+### Bottleneck Identification
+
+**Symptoms of CPU bottleneck:**
+- GPU utilization <80% (use nvidia-smi dmon)
+- Increasing num_workers improves throughput
+- Profiler shows GPU idle time
+
+**Solution:** Increase num_workers or prefetch_factor
+
+**Symptoms of GPU bottleneck:**
+- GPU utilization >95%
+- Increasing num_workers doesn't improve throughput
+- CPU workers are idle (queue is full)
+
+**Solution:** This is optimal. GPU is saturated.
+
+**Symptoms of memory bottleneck:**
+- OOM errors
+- High CPU memory usage
+- System swapping
+
+**Solution:** Decrease num_workers, prefetch_factor, or batch size
+
+## Expected Behavior: Sequence Packing for Inference
+
+### What Sequence Packing Does
+
+**Without packing (v1.0 baseline):**
+```
+Batch 1: [seq1: 200 tokens] [seq2: 180 tokens] [seq3: 220 tokens] → pad to max(220) = 220
+         Total: 660 tokens + 120 padding = 780 tokens (15% waste)
+
+Batch 2: [seq4: 400 tokens] [seq5: 100 tokens] → pad to max(400) = 400
+         Total: 500 tokens + 300 padding = 800 tokens (37% waste)
+```
+
+**With packing (v2.0 target):**
+```
+Pack 1: [seq1: 200][seq2: 180][seq3: 220][seq5: 100] → concatenate to 700 tokens
+        cu_seqlens = [0, 200, 380, 600, 700]
+        Attention mask ensures seq1 doesn't attend to seq2, seq2 doesn't attend to seq3, etc.
+        Total: 700 tokens, 0 padding, 0% waste
+
+Pack 2: [seq4: 400][pad: 48] → single sequence, pad to budget
+        Total: 400 tokens + 48 padding = 448 tokens (10% waste)
+```
+
+**Typical gains:**
+- Datasets with 50-70% padding waste → 1.5-2x throughput with packing
+- Datasets with uniform lengths → minimal benefit (already low waste)
+
+### flash_attn_varlen_func Integration
+
+**Standard FlashAttention call (v1.0):**
+```python
+# Input: [batch_size, seq_len, num_heads, head_dim]
+output = flash_attn_func(
+    q=query,
+    k=key,
+    v=value,
+    causal=False  # bidirectional attention for BERT-like models
+)
+```
+
+**Variable-length FlashAttention call (v2.0):**
+```python
+# Input: [total_tokens, num_heads, head_dim] — concatenated sequences
+# cu_seqlens: [batch_size + 1] — cumulative sequence lengths
+output = flash_attn_varlen_func(
+    q=query_packed,
+    k=key_packed,
+    v=value_packed,
+    cu_seqlens_q=cu_seqlens,
+    cu_seqlens_k=cu_seqlens,
+    max_seqlen_q=max_seq_len_in_pack,
+    max_seqlen_k=max_seq_len_in_pack,
+    causal=False
+)
+```
+
+**cu_seqlens computation:**
+```python
+# Example: 3 sequences of lengths [200, 180, 220]
+sequence_lengths = [200, 180, 220]
+cu_seqlens = torch.tensor([0] + list(np.cumsum(sequence_lengths)), dtype=torch.int32)
+# Result: [0, 200, 380, 600]
+```
+
+**Critical:** cu_seqlens must be int32, on CPU, and include leading 0.
+
+### Correctness Validation
+
+**Test:** Packed sequences must produce identical embeddings to unpacked sequences.
+
+```python
+# Unpacked (baseline)
+emb1 = model(seq1)  # [1, 200, 768]
+emb2 = model(seq2)  # [1, 180, 768]
+
+# Packed
+packed_input = torch.cat([seq1, seq2], dim=1)  # [1, 380, 768]
+cu_seqlens = torch.tensor([0, 200, 380], dtype=torch.int32)
+packed_emb = model_with_varlen(packed_input, cu_seqlens)  # [380, 768]
+
+# Unpack
+emb1_from_pack = packed_emb[0:200]    # [200, 768]
+emb2_from_pack = packed_emb[200:380]  # [180, 768]
+
+# Validate
+assert torch.allclose(emb1.squeeze(0), emb1_from_pack, atol=1e-5)
+assert torch.allclose(emb2.squeeze(0), emb2_from_pack, atol=1e-5)
+```
+
+### Edge Cases
+
+| Case | Handling |
+|------|----------|
+| Single sequence in pack | Works fine. cu_seqlens = [0, seq_len]. No cross-attention to prevent. |
+| Sequence longer than token budget | Reject or split into chunks (depends on use case). VirNucPro already chunks to 500bp. |
+| Empty sequence | Skip. Don't pack zero-length sequences. |
+| Token budget not fully utilized | Accept. Last batch may have padding. Optimize packing algorithm to minimize this. |
+| Variable sequence lengths (50-500 tokens) | Ideal for packing. Sort by length, use FFD to minimize waste. |
+
+## Performance Expectations
+
+### Throughput Gain Estimates
+
+Based on research literature and typical genomic sequence datasets:
+
+| Optimization | Expected Gain | Confidence | Dependency |
+|--------------|---------------|------------|------------|
+| Async DataLoader (I/O overlap) | 1.2-1.5x | HIGH | CPU I/O is currently bottleneck (verify with profiling) |
+| Sequence Packing (padding elimination) | 1.5-2x | HIGH | Dataset has 50-70% padding waste (typical for genomic data) |
+| FP16 Precision | 2x memory, 1.5-2x speed | MEDIUM | Accuracy validation passes (LayerNorm may limit FP16 gains) |
+| Combined (async + packing + FP16) | 3-5x | MEDIUM | All three optimizations stack multiplicatively |
+
+**Target for v2.0:** 2-3x throughput over v1.0 baseline.
+
+**Stretch goal:** 4-5x if FP16 works without accuracy degradation.
+
+### Latency Impact
+
+**Per-sequence latency may increase:**
+- Packing adds sequences to same batch → each sequence waits for entire batch to complete
+- Acceptable tradeoff for throughput-oriented inference (processing millions of sequences)
+
+**Batch latency remains similar:**
+- Batch size may decrease (more tokens per sequence due to packing)
+- GPU compute time per batch stays constant (same total tokens)
+
+**Use case fit:**
+- VirNucPro is throughput-oriented (process large FASTA files, not real-time)
+- Latency increase is acceptable tradeoff for 2-3x throughput gain
+
+## Integration with Existing v1.0 Features
+
+### Multi-GPU Parallelization (multiprocessing.Pool)
+
+**Current:** Multiple worker processes, each with own GPU, process separate file chunks.
+
+**Change:** Replace per-GPU multiprocessing.Pool with single process per GPU + async DataLoader.
+
+**Compatibility:** Maintains process-per-GPU isolation. DataLoader workers handle I/O parallelism within process.
+
+**Migration path:**
+1. Keep file-based work distribution (input_dir with chunks)
+2. Replace Pool.map with sequential file processing
+3. Add DataLoader for async I/O within each file
+4. Packing happens in DataLoader collate function
+
+### Batch Processing (token-based batching)
+
+**Current:** Batches formed by toks_per_batch=2048 budget.
+
+**Change:** Packing still respects token budget, but sequences are concatenated instead of padded.
+
+**Compatibility:** Token counting logic is same. Packing is additional optimization layer.
+
+### FlashAttention-2
+
+**Current:** flash_attn_func for standard batched attention.
+
+**Change:** flash_attn_varlen_func for packed sequences with cu_seqlens.
+
+**Compatibility:** Both functions from same flash-attn library. API is similar. Replace call sites.
+
+**Validation:** Verify packed and unpacked produce same embeddings.
+
+### Checkpoint Resume
+
+**Current:** Checkpoints after each pipeline stage.
+
+**Change:** Checkpoints remain at same granularity. DataLoader state is ephemeral (restarted from scratch on resume).
+
+**Compatibility:** No change to checkpoint logic. DataLoader doesn't persist state.
+
+### BF16 Mixed Precision (currently disabled)
+
+**Current:** Models forced to FP32 due to dtype mismatch.
+
+**Change:** Enable FP16 (not BF16) after validation. torch.autocast handles dtype conversion.
+
+**Compatibility:** FP16 is more widely supported than BF16. Better precision for embeddings (more mantissa bits).
+
+**Blocker:** Must validate embedding accuracy in FP16 vs FP32.
 
 ## Sources
 
-### Table Stakes References
-- [Mastering LLM Techniques: Inference Optimization | NVIDIA](https://developer.nvidia.com/blog/mastering-llm-techniques-inference-optimization/)
-- [PyTorch DDP Tutorial](https://docs.pytorch.org/tutorials/intermediate/ddp_tutorial.html)
-- [DataParallel vs DistributedDataParallel](https://medium.com/@kuipasta1121/dataparallel-vs-distributeddataparallel-in-pytorch-whats-the-difference-0af10bb43bc7)
-- [Finding Optimal Batch Size | DigitalOcean](https://www.digitalocean.com/community/tutorials/find-optimal-batch-size)
-- [8 PyTorch DataLoader Tactics](https://medium.com/@Modexa/8-pytorch-dataloader-tactics-to-max-out-your-gpu-22270f6f3fa8)
+### Async DataLoader and Prefetching
+- [PyTorch DataLoader Official Documentation](https://docs.pytorch.org/docs/stable/data.html)
+- [8 PyTorch DataLoader Tactics to Max Out Your GPU](https://medium.com/@Modexa/8-pytorch-dataloader-tactics-to-max-out-your-gpu-22270f6f3fa8)
+- [Unveiling the Magic of PyTorch prefetch_factor](https://www.codegenes.net/blog/pytorch-prefetch_factor/)
+- [PyTorch Data API: Worker, Pinned Memory, Prefetch, Non-blocking](https://oongjoon.github.io/pytorch/Data-loading/)
 - [Data Prefetching in Deep Learning](https://www.jpatrickpark.com/post/prefetcher/)
-- [Mixed Precision Training Guide](https://markaicode.com/transformers-mixed-precision-training-fp16-bf16/)
-- [CUDA Streams Introduction](https://wentao.site/cuda_streams/)
-- [Optimizing GPU Performance with CUDA Streams](https://medium.com/@kailashcvm/optimizing-gpu-performance-with-cuda-streams-and-batch-sizes-a1725debf86c)
 
-### Differentiators References
-- [vLLM Continuous Batching](https://www.anyscale.com/blog/continuous-batching-llm-inference)
-- [Inside vLLM: Anatomy of a High-Throughput LLM Inference System](https://www.aleksagordic.com/blog/vllm)
-- [FlashAttention Paper](https://arxiv.org/abs/2205.14135)
-- [FlashAttention-2 Improvements](https://openreview.net/forum?id=mZn2Xyh9Ec)
-- [LLM Quantization Guide | BentoML](https://bentoml.com/llm/getting-started/llm-quantization)
-- [8-bit Matrix Multiplication | Hugging Face](https://huggingface.co/blog/hf-bitsandbytes-integration)
-- [What is Inference Parallelism](https://www.infracloud.io/blogs/inference-parallelism/)
-- [Scaling LLM Inference | Meta Engineering](https://engineering.fb.com/2025/10/17/ai-research/scaling-llm-inference-innovations-tensor-parallelism-context-parallelism-expert-parallelism/)
-- [ZeRO-Inference | DeepSpeed](https://www.deepspeed.ai/2022/09/09/zero-inference.html)
-- [DeepSpeed Inference Tutorial](https://www.deepspeed.ai/tutorials/inference-tutorial/)
+### Sequence Packing for Transformers
+- [PackedBERT: How to Accelerate NLP Tasks for Transformers with Packing](https://www.graphcore.ai/posts/packedbert-how-to-accelerate-nlp-tasks-for-transformers-with-packing)
+- [Enhancing Training Efficiency Using Packing with Flash Attention](https://arxiv.org/html/2407.09105v4)
+- [Packing Data for Efficient Training and Inference](https://lweitkamp.github.io/posts/packing/index.html)
+- [Dynamic Batching vs. Sequence Packing](https://medium.com/better-ml/dynamic-batching-vs-sequence-packing-0ef4a3894dad)
+- [Efficient LLM Pretraining: Packed Sequences and Masked Attention](https://huggingface.co/blog/sirluk/llm-sequence-packing)
+- [Efficient Sequence Packing Without Cross-contamination](https://ar5iv.labs.arxiv.org/html/2107.02027)
 
-### ESM-2 Specific
-- [ESM-2 Model Overview | BioNeMo](https://docs.nvidia.com/bionemo-framework/latest/models/ESM-2/)
-- [Efficiently Fine-tune ESM-2 | AWS](https://aws.amazon.com/blogs/machine-learning/efficiently-fine-tune-the-esm-2-protein-language-model-with-amazon-sagemaker/)
-- [Efficient Inference, Training, and Fine-tuning of Protein Language Models](https://www.biorxiv.org/content/10.1101/2024.10.22.619563v1.full.pdf)
+### FlashAttention Variable-Length Sequences
+- [GitHub - Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention)
+- [Hacking Vanilla FlashAttention for Variable-Length Inputs](https://gdewael.github.io/blog/flashattnvarlen/)
+- [Improving Hugging Face Training Efficiency Through Packing with Flash Attention 2](https://huggingface.co/blog/packing-with-FA2)
+- [FlashMask: Efficient and Rich Mask Extension of FlashAttention](https://arxiv.org/html/2410.01359v1)
+- [FlexAttention: The Flexibility of PyTorch with the Performance of FlashAttention](https://pytorch.org/blog/flexattention/)
 
-### Additional Resources
-- [Defeating Training-Inference Mismatch via FP16](https://arxiv.org/html/2510.26788v1)
-- [AI Model Quantization | RunPod](https://www.runpod.io/articles/guides/ai-model-quantization-reducing-memory-usage-without-sacrificing-performance)
-- [LLM Quantization: BF16 vs FP8 vs INT4 in 2026](https://research.aimultiple.com/llm-quantization/)
-- [Parallelism Techniques for LLM Training | Genesis Cloud](https://www.genesiscloud.com/blog/top-parallelism-techniques-llm-training)
+### GPU Memory and Transfer Optimization
+- [PyTorch Guide on pin_memory() and non_blocking](https://docs.pytorch.org/tutorials/intermediate/pinmem_nonblock.html)
+- [When to Set pin_memory to True in PyTorch](https://medium.com/data-scientists-diary/when-to-set-pin-memory-to-true-in-pytorch-75141c0f598d)
+- [Memory Pinning to Accelerate Model Training](https://blog.dailydoseofds.com/p/memory-pinning-to-accelerate-model)
+
+### CUDA Streams and Async Execution
+- [How to Overlap Data Transfers in CUDA C/C++](https://developer.nvidia.com/blog/how-overlap-data-transfers-cuda-cc/)
+- [CUDA Series: Streams and Synchronization](https://medium.com/@dmitrijtichonov/cuda-series-streams-and-synchronization-873a3d6c22f4)
+- [CUDA Stream - Lei Mao's Log Book](https://leimao.github.io/blog/CUDA-Stream/)
+- [PyTorch CUDA Streams Introduction](https://wentao.site/cuda_streams/)
+
+### Dynamic Batching and Packing Algorithms
+- [LLM Inference Optimization Techniques](https://www.clarifai.com/blog/llm-inference-optimization/)
+- [LLM Inference Performance Engineering: Best Practices](https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices)
+- [FairBatching: Fairness-Aware Batch Formation for LLM Inference](https://arxiv.org/html/2510.14392)
+
+### FP16 Mixed Precision for Inference
+- [Defeating the Training-Inference Mismatch via FP16](https://arxiv.org/html/2510.26788v1)
+- [Mixed-Precision Quantization for Language Models](https://arxiv.org/html/2510.16805v1)
+- [What is Half-Precision (FP16) in AI?](https://www.ultralytics.com/glossary/half-precision)
+- [Mixed Precision Training in LLMs: FP16, BF16, FP8, and Beyond](https://medium.com/@dpratishraj7991/mixed-precision-training-in-llms-fp16-bf16-fp8-and-beyond-b4af13ca846f)
+
+---
+*Feature research for: VirNucPro v2.0 Async DataLoader and Sequence Packing*
+*Researched: 2026-02-02*
+*Confidence: HIGH (all major findings verified with official documentation and recent research)*

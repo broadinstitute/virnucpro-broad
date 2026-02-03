@@ -1,803 +1,738 @@
-# GPU Optimization Pitfalls
+# Pitfalls Research: Async DataLoader + Sequence Packing
 
-Research for multi-GPU optimization of VirNucPro's embedding pipeline (ESM-2 3B + DNABERT-S).
+**Domain:** PyTorch async DataLoader for GPU inference + transformer sequence packing
+**Researched:** 2026-02-02
+**Confidence:** HIGH
 
 ## Critical Pitfalls
 
-### 1. CUDA Context Initialization in Multiprocessing
+### Pitfall 1: CUDA Tensors in DataLoader Workers Cause Silent Corruption
 
-**What Goes Wrong:**
-When using `multiprocessing` with CUDA, initialization of CUDA in the parent process before spawning workers causes "Cannot re-initialize CUDA in forked subprocess" errors, even when using `spawn` context.
+**What goes wrong:**
+DataLoader workers create CUDA tensors in worker processes, causing one or more GPUs to receive corrupted/empty embeddings with no exceptions raised. Output files appear valid (correct sequence IDs, correct shape) but contain empty data tensors.
 
-**Why It Happens:**
-- `torch.cuda.is_available()` counts as CUDA initialization
-- `torch.manual_seed()` can trigger CUDA context creation
-- Model loading or device checks in parent process contaminate workers
-- Fork context is completely incompatible with CUDA (but spawn can still fail)
+**Why it happens:**
+CUDA runtime is not fork-safe. When worker processes access CUDA after forking, the CUDA context can become corrupted. Additionally, CUDA tensors cannot be safely shared between processes like CPU tensors - the worker may successfully create the tensor, but when transferred to the main process, the data is lost or corrupted.
 
-**Warning Signs:**
+**How to avoid:**
 ```python
-RuntimeError: Cannot re-initialize CUDA in forked subprocess
-CUDA error: initialization error (multiprocessing)
+# WRONG: Creating CUDA tensors in worker
+def collate_fn(batch):
+    tokens = tokenizer(batch)
+    return tokens.to('cuda')  # BAD - CUDA in worker
+
+# CORRECT: Move to CUDA in main process after DataLoader
+for batch in dataloader:  # batch is CPU tensor
+    batch = batch.to(device)  # Move to CUDA in main process
+    with torch.no_grad():
+        output = model(batch)
 ```
 
-**VirNucPro Specifics:**
-- Current code in `parallel.py` uses `spawn` correctly (line 245)
-- Risk: Device detection in `detect_cuda_devices()` might initialize context
-- Risk: Any `device` parameter validation before multiprocessing starts
+**Additional safeguards:**
+- Use `multiprocessing_context='spawn'` (not fork) for DataLoader workers
+- Set `pin_memory=True` and use `.to(device, non_blocking=True)` for async transfer
+- Never instantiate CUDA models in worker `__init__` or `collate_fn`
+- Keep all Dataset/collate operations on CPU, defer CUDA to main loop
 
-**Prevention Strategy:**
-1. Move ALL CUDA operations inside worker functions
-2. Defer device detection until after spawn (or make it CUDA-free)
-3. Pass device IDs as integers, not torch.device objects
-4. Avoid `torch.cuda.is_available()` in parent process
-5. Use `if __name__ == '__main__':` guard
+**Warning signs:**
+- Intermittent failures (succeeds sometimes, fails sometimes with identical command)
+- Empty tensors with correct shape (e.g., `[0, 768]` instead of `[32, 768]`)
+- One GPU consistently produces empty results while others work (round-robin failure)
+- No exceptions or error messages (silent data corruption)
+- Valid metadata (sequence IDs, counts) but zero predictions
 
-**Code Pattern to Avoid:**
-```python
-# BAD - in parent process before spawn
-device = torch.device('cuda:0')  # Initializes CUDA!
-torch.cuda.is_available()  # Initializes CUDA!
-model.to(device)  # Initializes CUDA!
-
-# Start multiprocessing...
-```
-
-**Code Pattern to Use:**
-```python
-# GOOD - parent process stays CUDA-free
-available_gpus = list(range(torch.cuda.device_count()))  # Uses C API, safe
-
-# Worker function initializes CUDA
-def worker(device_id):
-    device = torch.device(f'cuda:{device_id}')  # CUDA init happens here
-    model = load_model().to(device)
-```
-
-**Which Phase Should Address:**
-- Phase 1 (ESM-2 parallelization): Critical to get right from start
-- Refactoring existing DNABERT-S code if issues detected
-
-**References:**
-- [PyTorch Issue #40403: Cannot re-initialize CUDA in forked subprocess](https://github.com/pytorch/pytorch/issues/40403)
-- [PyTorch Forums: spawn start method](https://discuss.pytorch.org/t/unable-to-fix-runtimeerror-cannot-re-initialize-cuda-in-forked-subprocess-to-use-cuda-with-multiprocessing-you-must-use-the-spawn-start-method/208718)
+**Phase to address:** Phase 1 (Foundation) - establish DataLoader patterns before adding complexity
 
 ---
 
-### 2. Batch Size Variability Causing Memory Fragmentation
+### Pitfall 2: Concurrent Model Loading in Workers Causes HuggingFace Cache Race
 
-**What Goes Wrong:**
-When batch sizes vary across iterations (common in inference with variable-length sequences), CUDA memory becomes fragmented even if total memory usage seems fine. This leads to OOM errors despite having "enough" VRAM.
+**What goes wrong:**
+When using `persistent_workers=True` with lazy model loading, multiple workers call `AutoModel.from_pretrained()` simultaneously on first batch, causing HuggingFace cache corruption. One worker loads a broken model that silently produces empty embeddings for all subsequent batches.
 
-**Why It Happens:**
-- PyTorch's caching allocator creates fixed-size blocks
-- Varying allocations create "holes" in memory
-- Allocator can't coalesce fragmented regions efficiently
-- Exception handling keeps references to stack frames, preventing memory release
+**Why it happens:**
+HuggingFace's model cache is not designed for concurrent access from multiple processes. When workers start processing their first task simultaneously, they both attempt to download/read from `~/.cache/huggingface/`, causing file system race conditions. The corrupted worker doesn't crash - it loads malformed weights and produces plausible-looking but empty outputs.
 
-**Warning Signs:**
+**How to avoid:**
 ```python
-RuntimeError: CUDA out of memory (but nvidia-smi shows available memory)
-# Memory usage pattern: 7.2GB → 6.8GB → 7.5GB → 8.1GB → OOM
-# Fragment count increases over time
+# Strategy 1: Staggered loading with delay
+def _load_model_lazy(self, worker_id, device_id):
+    if self.model is None:
+        # Stagger by worker ID to prevent cache contention
+        if worker_id > 0:
+            time.sleep(worker_id * 1.0)  # 1 second per worker
+
+        self.model = AutoModel.from_pretrained(model_name)
+
+# Strategy 2: Pre-load in main process before forking workers
+# (Only works with 'spawn' context - fork copies CUDA context)
+model = AutoModel.from_pretrained(model_name)  # Cache populated
+# Now workers can load from cache safely
+
+# Strategy 3: File locking for concurrent access
+import filelock
+lock_file = Path.home() / ".cache/huggingface/model.lock"
+with filelock.FileLock(lock_file):
+    model = AutoModel.from_pretrained(model_name)
 ```
 
-**VirNucPro Specifics:**
-- ESM-2 uses dynamic batching by token count (`toks_per_batch=2048`)
-- Protein sequences vary widely in length (post-ORF detection)
-- Each batch has different size: 1 long sequence OR 50 short sequences
-- This creates worst-case fragmentation scenario
+**Warning signs:**
+- 50% output on 2-GPU runs, 33% output on 3-GPU runs (failure rate = 1/num_workers)
+- Consistent per-worker failure pattern (GPU 0 always fails, or GPU 1 always fails)
+- Succeeds on second run without code changes (cache already populated)
+- No stack traces or error messages
+- Different behavior between `--persistent-models` and non-persistent modes
 
-**Prevention Strategy:**
-1. **Enable expandable segments** (PyTorch 2.0+):
-   ```python
-   os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
-   ```
-2. **Sort sequences by length** before batching to reduce variability
-3. **Wrap inference in `torch.no_grad()`** (already done, verify)
-4. **Explicit cache clearing** between file batches:
-   ```python
-   torch.cuda.empty_cache()  # After processing each file
-   ```
-5. **Move OOM recovery OUTSIDE except clause** to prevent tensor references
+**Phase to address:** Phase 1 (Foundation) - critical for multi-GPU reliability
 
-**Code Pattern to Avoid:**
+---
+
+### Pitfall 3: FlashAttention Only Supports FP16/BF16, Silent Dtype Mismatch Breaks Packing
+
+**What goes wrong:**
+FlashAttention's `flash_attn_varlen_func` requires FP16 or BF16 inputs. When sequence packing uses FP32 attention masks or position IDs, FlashAttention either crashes with "only supports fp16 and bf16" error, or worse, silently falls back to standard attention without the packing-aware masking, causing cross-contamination between packed sequences.
+
+**Why it happens:**
+Sequence packing requires variable-length attention kernels (`flash_attn_varlen_func`) which enforce dtype restrictions. Regular model loading may default to FP32, and creating attention masks/position IDs often defaults to `torch.long` or `torch.float32`. The dtype mismatch is not always caught at model load time - it only manifests when the first packed batch is processed.
+
+**How to avoid:**
 ```python
-# BAD - variable batching without safeguards
-for batch in dynamic_batches:  # Sizes: 512, 1024, 256, 2048, ...
-    output = model(batch)  # Fragmentation accumulates
-    # No cleanup
+# Explicit dtype alignment for packing inputs
+def create_packed_batch(sequences, model_dtype=torch.bfloat16):
+    # Pack sequences and compute cumulative lengths
+    packed_input_ids, cu_seqlens = pack_sequences(sequences)
+
+    # CRITICAL: Match model dtype exactly
+    packed_input_ids = packed_input_ids.to(dtype=torch.long)  # IDs are long
+    attention_mask = create_packing_mask(cu_seqlens).to(dtype=model_dtype)
+    position_ids = create_position_ids(cu_seqlens).to(dtype=torch.long)
+
+    return {
+        'input_ids': packed_input_ids,
+        'attention_mask': attention_mask,  # Must match model dtype
+        'position_ids': position_ids,
+        'cu_seqlens': cu_seqlens.to(dtype=torch.int32)  # Flash requires int32
+    }
+
+# Load model with explicit dtype
+model = AutoModel.from_pretrained(
+    model_name,
+    use_flash_attention_2=True,
+    torch_dtype=torch.bfloat16,  # Explicit dtype, not auto
+    attn_implementation="flash_attention_2"
+)
+
+# Verify dtype before packing
+assert model.dtype in [torch.float16, torch.bfloat16], \
+    f"FlashAttention requires FP16/BF16, got {model.dtype}"
 ```
 
-**Code Pattern to Use:**
+**Warning signs:**
+- Error: "FlashAttention only supports fp16 and bf16 data type"
+- Error: "expected attention_mask dtype to be bool or match query dtype"
+- Unexpected speedup loss (Flash falls back to standard attention silently)
+- Cross-contamination in outputs (sequence 1 attention leaks into sequence 2)
+- Works with single sequences but fails with packed batches
+
+**Phase to address:** Phase 2 (Packing Integration) - must validate dtype compatibility before enabling packing
+
+---
+
+### Pitfall 4: Sequence Packing Position IDs Off-By-One Bug Corrupts Positional Embeddings
+
+**What goes wrong:**
+When packing multiple sequences into one tensor with `cu_seqlens = [0, 2, 6, 7]`, position IDs for the second and third sequences start from the cumulative offset instead of 0, causing transformers to see position [2, 3, 4, 5] for the second sequence instead of [0, 1, 2, 3]. This corrupts positional embeddings and degrades model accuracy silently.
+
+**Why it happens:**
+Naive packing concatenates sequences and generates position IDs sequentially `[0, 1, 2, 3, 4, 5, 6]` for the packed tensor. However, each sequence needs position IDs relative to its own start, not the packed tensor's start. The `cu_seqlens` array defines sequence boundaries, but position ID generation must reset at each boundary.
+
+**How to avoid:**
 ```python
-# GOOD - sorted batching with cleanup
-sequences.sort(key=lambda x: len(x[1]))  # Sort by length
-for i, batch in enumerate(dynamic_batches):
+def create_position_ids_for_packing(cu_seqlens):
+    """
+    Generate per-sequence position IDs for packed input.
+
+    Example:
+        cu_seqlens = [0, 2, 6, 7]  # 3 sequences: len 2, 4, 1
+        Returns: [0, 1, 0, 1, 2, 3, 0]  # Reset per sequence
+    """
+    position_ids = []
+
+    for i in range(len(cu_seqlens) - 1):
+        seq_start = cu_seqlens[i]
+        seq_end = cu_seqlens[i + 1]
+        seq_len = seq_end - seq_start
+
+        # Position IDs reset to 0 for each sequence
+        position_ids.append(torch.arange(seq_len, dtype=torch.long))
+
+    return torch.cat(position_ids)
+
+# WRONG - sequential position IDs
+total_len = cu_seqlens[-1]
+position_ids = torch.arange(total_len)  # [0,1,2,3,4,5,6] - WRONG
+
+# CORRECT - per-sequence position IDs
+position_ids = create_position_ids_for_packing(cu_seqlens)  # [0,1,0,1,2,3,0]
+```
+
+**Validation test:**
+```python
+def test_position_ids_reset():
+    cu_seqlens = torch.tensor([0, 2, 6, 7])
+    position_ids = create_position_ids_for_packing(cu_seqlens)
+
+    # Each sequence should start at position 0
+    assert position_ids[0] == 0  # Seq 1 starts at 0
+    assert position_ids[2] == 0  # Seq 2 starts at 0
+    assert position_ids[6] == 0  # Seq 3 starts at 0
+
+    # Check max position per sequence
+    assert position_ids[1] == 1  # Seq 1 max (len 2)
+    assert position_ids[5] == 3  # Seq 2 max (len 4)
+```
+
+**Warning signs:**
+- Packing works (no crashes) but model accuracy degrades compared to non-packed
+- Longer sequences in pack show higher accuracy degradation
+- Positional embedding visualization shows discontinuities
+- Attention patterns show unexpected boundary artifacts
+
+**Phase to address:** Phase 2 (Packing Integration) - validation tests before integration
+
+---
+
+### Pitfall 5: Attention Mask Cross-Contamination Between Packed Sequences
+
+**What goes wrong:**
+Standard attention masks allow tokens from sequence 1 to attend to tokens from sequence 2 in the same packed batch, causing the model to mix information between independent sequences. Outputs appear valid but contain contaminated predictions that mix features from multiple unrelated sequences.
+
+**Why it happens:**
+Packing creates `input_ids = [seq1_tokens, seq2_tokens, padding]` with shape `[total_len]`. A standard attention mask `[1,1,1,1,1,0,0]` (1=attend, 0=ignore padding) doesn't prevent seq1 tokens from attending to seq2 tokens. FlashAttention's varlen kernel requires a 1D `cu_seqlens` array to define boundaries, but if not provided, all non-padding tokens attend to each other.
+
+**How to avoid:**
+```python
+# For FlashAttention with packing (varlen API)
+from flash_attn import flash_attn_varlen_func
+
+def forward_packed_batch(model, packed_inputs, cu_seqlens, max_seqlen):
+    """
+    Process packed batch with proper masking.
+
+    Args:
+        packed_inputs: [total_len, hidden_dim] - concatenated sequences
+        cu_seqlens: [num_seqs + 1] - cumulative sequence lengths [0, len1, len1+len2, ...]
+        max_seqlen: int - max sequence length in pack
+    """
+    # FlashAttention varlen automatically masks between sequences
+    # based on cu_seqlens - no cross-contamination
+    output = flash_attn_varlen_func(
+        q=packed_inputs,
+        k=packed_inputs,
+        v=packed_inputs,
+        cu_seqlens_q=cu_seqlens,
+        cu_seqlens_k=cu_seqlens,
+        max_seqlen_q=max_seqlen,
+        max_seqlen_k=max_seqlen,
+        dropout_p=0.0,
+        causal=False  # For BERT-like models
+    )
+    return output
+
+# For standard attention (fallback when Flash unavailable)
+def create_block_diagonal_mask(cu_seqlens, device):
+    """
+    Create 2D block-diagonal mask preventing cross-sequence attention.
+
+    Example for cu_seqlens=[0,2,5]:
+        [[1,1,0,0,0],   # Seq1 token 0 attends only to seq1
+         [1,1,0,0,0],   # Seq1 token 1 attends only to seq1
+         [0,0,1,1,1],   # Seq2 token 0 attends only to seq2
+         [0,0,1,1,1],   # Seq2 token 1 attends only to seq2
+         [0,0,1,1,1]]   # Seq2 token 2 attends only to seq2
+    """
+    total_len = cu_seqlens[-1]
+    mask = torch.zeros(total_len, total_len, device=device)
+
+    for i in range(len(cu_seqlens) - 1):
+        start = cu_seqlens[i]
+        end = cu_seqlens[i + 1]
+        # Allow attention within sequence boundaries only
+        mask[start:end, start:end] = 1
+
+    return mask.bool()
+```
+
+**Validation test:**
+```python
+def test_no_cross_contamination():
+    """Verify sequences don't contaminate each other."""
+    seq1 = "ACGT" * 10  # DNA sequence 1
+    seq2 = "TTTT" * 10  # DNA sequence 2 (different composition)
+
+    # Process separately
+    emb1_solo = model(seq1)
+    emb2_solo = model(seq2)
+
+    # Process packed together
+    packed_input, cu_seqlens = pack_sequences([seq1, seq2])
+    packed_output = model_with_packing(packed_input, cu_seqlens)
+    emb1_packed = packed_output[:len(seq1)]
+    emb2_packed = packed_output[len(seq1):len(seq1)+len(seq2)]
+
+    # Embeddings should be identical (within numerical precision)
+    assert torch.allclose(emb1_solo, emb1_packed, atol=1e-5)
+    assert torch.allclose(emb2_solo, emb2_packed, atol=1e-5)
+```
+
+**Warning signs:**
+- Packed outputs differ from non-packed outputs for same sequences
+- Validation accuracy drops when packing is enabled
+- Sequences with distinct characteristics (e.g., GC-rich vs AT-rich DNA) show similar embeddings when packed together
+- Attention visualization shows off-diagonal blocks (cross-sequence attention)
+
+**Phase to address:** Phase 2 (Packing Integration) - correctness validation before performance testing
+
+---
+
+### Pitfall 6: DataLoader Persistent Workers Memory Leak with Prefetching
+
+**What goes wrong:**
+Using `persistent_workers=True` with `prefetch_factor > 2` causes gradual memory accumulation on CPU RAM. With 8 workers and prefetch_factor=16, each worker can consume 5-10GB of host memory, leading to OOM on systems with less than 128GB RAM. Memory is not released between batches or even between epochs.
+
+**Why it happens:**
+Each worker pre-fetches `prefetch_factor` batches ahead of consumption. With persistent workers, these batches stay in worker memory even after being consumed by the main process. The issue is exacerbated by `pin_memory=True`, which allocates additional pinned (non-pageable) memory via `cudaHostAlloc`. The pinned memory is not released until workers terminate.
+
+**How to avoid:**
+```python
+# Conservative configuration for inference
+def create_inference_dataloader(dataset, batch_size, num_gpus):
+    cpu_count = multiprocessing.cpu_count()
+    num_workers = min(cpu_count // num_gpus, 8)  # Cap at 8
+
+    # Conservative prefetch for inference (not training)
+    dataloader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        pin_memory=True,
+        prefetch_factor=2,  # Default, don't increase for inference
+        persistent_workers=True if num_workers > 0 else False,
+        multiprocessing_context='spawn'
+    )
+    return dataloader
+
+# Monitor memory usage
+def log_worker_memory():
+    import psutil
+    process = psutil.Process()
+    children = process.children(recursive=True)
+    for child in children:
+        mem_mb = child.memory_info().rss / 1024**2
+        if mem_mb > 1000:  # Warn if worker uses >1GB
+            logger.warning(f"Worker {child.pid} using {mem_mb:.0f}MB")
+```
+
+**Detection script:**
+```python
+# Add to DataLoader loop for debugging
+for i, batch in enumerate(dataloader):
+    process_batch(batch)
+
+    if i % 100 == 0:  # Check every 100 batches
+        # Log memory growth
+        allocated = torch.cuda.memory_allocated() / 1024**3
+        import psutil
+        ram_gb = psutil.virtual_memory().used / 1024**3
+        logger.info(f"Batch {i}: GPU={allocated:.2f}GB, RAM={ram_gb:.2f}GB")
+```
+
+**Warning signs:**
+- Host RAM usage steadily increases during inference
+- `htop` shows DataLoader worker processes growing over time
+- System swap usage increases during long runs
+- Workers take >60 seconds to terminate after DataLoader finishes
+- Out-of-memory on CPU (not GPU) after processing many batches
+
+**Phase to address:** Phase 1 (Foundation) - establish safe defaults before scaling
+
+---
+
+### Pitfall 7: Sequence Packing Efficiency Loss from Improper Batch Construction
+
+**What goes wrong:**
+Packing random-length sequences into fixed-size batches results in high padding overhead (40-60% wasted computation) because short and long sequences are mixed in the same pack. The theoretical 2-3x speedup from packing degrades to 1.2x or less in practice.
+
+**Why it happens:**
+Transformers have quadratic attention complexity O(n²). Packing [100nt, 3000nt, 150nt] creates a batch with max_len=3000, so the 100nt and 150nt sequences still compute attention over 3000 positions worth of padding. Without sorting, random packing frequently creates these worst-case scenarios.
+
+**How to avoid:**
+```python
+def create_efficient_packs(sequences, max_pack_len=4096, pack_tolerance=0.9):
+    """
+    Create efficient sequence packs using bin-packing algorithm.
+
+    Args:
+        sequences: List of sequences with varying lengths
+        max_pack_len: Maximum total length per pack
+        pack_tolerance: Minimum packing efficiency (0.9 = 90% utilization)
+    """
+    # Sort by length descending (greedy bin packing works better)
+    sorted_seqs = sorted(sequences, key=len, reverse=True)
+
+    packs = []
+    current_pack = []
+    current_len = 0
+
+    for seq in sorted_seqs:
+        seq_len = len(seq)
+
+        # Check if sequence fits in current pack
+        if current_len + seq_len <= max_pack_len:
+            current_pack.append(seq)
+            current_len += seq_len
+        else:
+            # Current pack is full, start new pack
+            if current_pack:
+                efficiency = current_len / max_pack_len
+                if efficiency < pack_tolerance:
+                    logger.warning(f"Low pack efficiency: {efficiency:.2%}")
+                packs.append(current_pack)
+
+            current_pack = [seq]
+            current_len = seq_len
+
+    # Add final pack
+    if current_pack:
+        packs.append(current_pack)
+
+    # Log efficiency statistics
+    efficiencies = [sum(len(s) for s in pack) / max_pack_len for pack in packs]
+    avg_efficiency = sum(efficiencies) / len(efficiencies)
+    logger.info(f"Created {len(packs)} packs with {avg_efficiency:.2%} avg efficiency")
+
+    return packs
+
+# WRONG: Random packing
+packs = [sequences[i:i+4] for i in range(0, len(sequences), 4)]
+
+# CORRECT: Sorted bin-packing
+packs = create_efficient_packs(sequences, max_pack_len=4096)
+```
+
+**Efficiency calculation:**
+```python
+def measure_packing_efficiency(packed_batch, cu_seqlens):
+    """
+    Measure wasted computation from padding in packed batch.
+
+    Efficiency = actual_tokens / (num_sequences * max_seq_len)
+    """
+    num_sequences = len(cu_seqlens) - 1
+    total_tokens = cu_seqlens[-1].item()  # Actual tokens
+
+    # Compute max sequence length in pack
+    seq_lengths = [cu_seqlens[i+1] - cu_seqlens[i] for i in range(num_sequences)]
+    max_seq_len = max(seq_lengths)
+
+    # Wasted computation (quadratic in max_len)
+    theoretical_ops = num_sequences * max_seq_len * max_seq_len
+    actual_ops = sum(l * l for l in seq_lengths)
+
+    efficiency = actual_ops / theoretical_ops
+    padding_waste = 1 - (total_tokens / (num_sequences * max_seq_len))
+
+    logger.debug(f"Pack efficiency: {efficiency:.2%}, padding waste: {padding_waste:.2%}")
+    return efficiency
+```
+
+**Warning signs:**
+- Packing speedup is 1.1-1.3x instead of expected 2-3x
+- High variance in batch processing time (some batches 10x slower)
+- Memory usage close to non-packed batches
+- Profiling shows high padding percentage (>40%)
+- GPU utilization varies widely between batches
+
+**Phase to address:** Phase 3 (Optimization) - after correctness is validated
+
+---
+
+### Pitfall 8: Unpacking Corruption from Misaligned cu_seqlens
+
+**What goes wrong:**
+After processing a packed batch through the model, unpacking the output using incorrect `cu_seqlens` offsets produces corrupted embeddings. Sequence boundaries are off by 1-2 positions, causing each unpacked sequence to include tokens from its neighbor or miss its own final tokens.
+
+**Why it happens:**
+`cu_seqlens` must be **cumulative** offsets starting at 0. If computed as lengths `[2, 4, 1]` instead of cumulative `[0, 2, 6, 7]`, unpacking slices the wrong regions. Off-by-one errors also occur when adding padding tokens to `cu_seqlens` calculation but not to the actual packed tensor.
+
+**How to avoid:**
+```python
+def unpack_sequences(packed_output, cu_seqlens, sequence_ids):
+    """
+    Unpack model output back to individual sequences.
+
+    Args:
+        packed_output: [total_len, hidden_dim] - packed model output
+        cu_seqlens: [num_seqs + 1] - cumulative sequence lengths
+        sequence_ids: List of original sequence IDs for validation
+
+    Returns:
+        Dict mapping sequence_id -> embedding tensor
+    """
+    unpacked = {}
+
+    # Validate cu_seqlens format
+    assert cu_seqlens[0] == 0, "cu_seqlens must start with 0"
+    assert len(cu_seqlens) == len(sequence_ids) + 1, \
+        f"cu_seqlens length {len(cu_seqlens)} != num_sequences {len(sequence_ids)} + 1"
+
+    for i, seq_id in enumerate(sequence_ids):
+        start = cu_seqlens[i].item()
+        end = cu_seqlens[i + 1].item()
+
+        # Extract sequence embedding
+        seq_embedding = packed_output[start:end]
+
+        # Validation: Check expected length
+        expected_len = end - start
+        assert seq_embedding.shape[0] == expected_len, \
+            f"Sequence {seq_id}: extracted {seq_embedding.shape[0]} tokens, expected {expected_len}"
+
+        unpacked[seq_id] = seq_embedding
+
+    return unpacked
+
+# WRONG: Using lengths instead of cumulative
+seq_lengths = [len(seq) for seq in sequences]
+cu_seqlens = torch.tensor(seq_lengths)  # [2, 4, 1] - WRONG
+
+# CORRECT: Cumulative sum
+seq_lengths = [len(seq) for seq in sequences]
+cu_seqlens = torch.tensor([0] + seq_lengths).cumsum(0)  # [0, 2, 6, 7] - CORRECT
+```
+
+**Validation test:**
+```python
+def test_pack_unpack_roundtrip():
+    """Verify packing and unpacking preserves sequence identity."""
+    sequences = [
+        torch.randn(10, 768),  # Seq 0: 10 tokens
+        torch.randn(25, 768),  # Seq 1: 25 tokens
+        torch.randn(5, 768),   # Seq 2: 5 tokens
+    ]
+
+    # Pack sequences
+    packed, cu_seqlens = pack_sequences(sequences)
+    assert packed.shape[0] == 10 + 25 + 5  # Total length
+    assert cu_seqlens.tolist() == [0, 10, 35, 40]
+
+    # Unpack sequences
+    unpacked = unpack_sequences(packed, cu_seqlens, range(3))
+
+    # Verify identity
+    for i, original_seq in enumerate(sequences):
+        assert torch.allclose(unpacked[i], original_seq), \
+            f"Sequence {i} corrupted in pack/unpack roundtrip"
+```
+
+**Warning signs:**
+- Assertion errors during unpacking: "extracted X tokens, expected Y"
+- Embeddings for short sequences contain data from long sequences
+- Final tokens of sequences are missing (clipped)
+- First tokens of sequences are duplicated from previous sequence
+- Index out of bounds errors during unpacking
+
+**Phase to address:** Phase 2 (Packing Integration) - unit tests before integration
+
+---
+
+## Technical Debt Patterns
+
+Shortcuts that seem reasonable but create long-term problems.
+
+| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
+|----------|-------------------|----------------|-----------------|
+| Skip dtype validation for packing | Faster development iteration | Silent accuracy degradation, hard-to-debug contamination | Never - always validate dtype compatibility |
+| Use high prefetch_factor (>4) for faster loading | Better GPU utilization in training | Memory leaks in inference, OOM on long runs | Only in training with worker restart between epochs |
+| Random sequence packing without sorting | Simple implementation | 40-60% efficiency loss, negates packing benefits | Early prototyping only, must optimize before production |
+| Reuse training DataLoader config for inference | Code reuse | Persistent worker memory leaks, excessive resource usage | Never - inference needs different config |
+| Skip cross-contamination validation | Trust library implementation | Silent correctness bugs that corrupt predictions | Never - always validate with reference implementation |
+| Use fork context for faster worker startup | 2-3x faster initialization | CUDA context corruption, intermittent failures | Never with CUDA - always use spawn |
+
+## Integration Gotchas
+
+Common mistakes when connecting async DataLoader to GPU inference pipeline.
+
+| Integration | Common Mistake | Correct Approach |
+|-------------|----------------|------------------|
+| DataLoader → CUDA model | Creating CUDA tensors in worker collate_fn | Keep workers CPU-only, move to CUDA in main process after DataLoader |
+| Persistent workers + lazy model loading | All workers load models simultaneously (cache race) | Stagger loading with worker_id * delay or pre-populate cache before workers start |
+| FlashAttention + sequence packing | Using standard attention mask format (1D) with packed sequences | Use cu_seqlens with flash_attn_varlen_func or create 2D block-diagonal mask |
+| Variable-length batching | Pack sequences in random order | Sort by length and use bin-packing to minimize padding waste |
+| Multi-GPU + DataLoader workers | num_workers = cpu_count (ignores GPU count) | num_workers = min(cpu_count // num_gpus, 8) to balance resources |
+| Pin memory for GPU transfer | Enable without checking available RAM | Check system RAM, disable if <32GB or provide --pin-memory flag |
+
+## Performance Traps
+
+Patterns that work at small scale but fail as usage grows.
+
+| Trap | Symptoms | Prevention | When It Breaks |
+|------|----------|------------|----------------|
+| Linear scaling of num_workers | Memory explosion, swap usage | Cap at min(cpu_count//num_gpus, 8) regardless of CPU count | >16 workers or <8GB RAM per worker |
+| Persistent workers without cleanup | Gradual memory leak over hours | Use persistent_workers=False for inference or implement periodic worker restart | Long-running jobs (>10K batches) |
+| High prefetch_factor for throughput | 5-10GB RAM per worker, pinned memory exhaustion | Use prefetch_factor=2 for inference, 4 max for training | >4 workers or <64GB RAM |
+| Packing without efficiency monitoring | 40-60% wasted computation, no speedup | Log packing efficiency, warn if <90% utilization | Variable-length sequences (100-3000nt range) |
+| Assuming FlashAttention always faster | Slowdown on small batches or short sequences | Measure and compare, fall back for batch_size<8 or seq_len<128 | Small-scale inference (batch_size=1-4) |
+
+## "Looks Done But Isn't" Checklist
+
+Things that appear complete but are missing critical pieces.
+
+- [ ] **Sequence packing:** Often missing per-sequence position ID reset — verify position_ids[cu_seqlens[i]] == 0 for all sequences
+- [ ] **FlashAttention integration:** Often missing dtype validation — verify model.dtype in [torch.float16, torch.bfloat16] before packing
+- [ ] **DataLoader workers:** Often missing spawn context specification — verify multiprocessing_context='spawn' explicitly set
+- [ ] **Persistent workers:** Often missing memory monitoring — verify worker memory stays constant over 1000+ batches
+- [ ] **Cross-contamination prevention:** Often missing validation test — verify packed output == non-packed output for same sequences
+- [ ] **Unpacking logic:** Often missing cu_seqlens validation — verify cu_seqlens[0]==0 and lengths match sequence count
+- [ ] **Concurrent model loading:** Often missing stagger/lock mechanism — verify only one worker loads from HF cache at a time
+- [ ] **Packing efficiency:** Often missing bin-packing algorithm — verify average pack utilization >85%
+
+## Recovery Strategies
+
+When pitfalls occur despite prevention, how to recover.
+
+| Pitfall | Recovery Cost | Recovery Steps |
+|---------|---------------|----------------|
+| CUDA corruption in workers | MEDIUM | Add multiprocessing_context='spawn', move all .to(device) calls to main process, restart job |
+| HuggingFace cache race | LOW | Add 1-second stagger delay in worker lazy loading or use filelock around from_pretrained() |
+| FlashAttention dtype mismatch | LOW | Add explicit torch_dtype=torch.bfloat16 to model loading, validate before processing |
+| Position ID corruption | MEDIUM | Implement create_position_ids_for_packing() with per-sequence reset, add validation test |
+| Cross-contamination | HIGH | Implement block-diagonal masking or migrate to flash_attn_varlen_func with cu_seqlens |
+| Memory leak from prefetch | LOW | Reduce prefetch_factor to 2, disable persistent_workers for inference |
+| Poor packing efficiency | MEDIUM | Implement bin-packing with length sorting, monitor and log efficiency per batch |
+| Unpacking corruption | LOW | Fix cu_seqlens calculation (must be cumulative starting at 0), add roundtrip test |
+
+## Pitfall-to-Phase Mapping
+
+How roadmap phases should address these pitfalls.
+
+| Pitfall | Prevention Phase | Verification |
+|---------|------------------|--------------|
+| CUDA tensors in workers | Phase 1 (Foundation) | Unit test: worker returns CPU tensor, main process moves to CUDA |
+| HuggingFace cache race | Phase 1 (Foundation) | Integration test: 10 runs with --persistent-models all succeed |
+| FlashAttention dtype mismatch | Phase 2 (Packing Integration) | Startup check: assert model.dtype in [fp16, bf16] before packing |
+| Position ID corruption | Phase 2 (Packing Integration) | Unit test: position_ids reset per sequence in cu_seqlens |
+| Cross-contamination | Phase 2 (Packing Integration) | Validation test: packed output matches non-packed for same sequences |
+| Prefetch memory leak | Phase 1 (Foundation) | Stress test: 1000 batches with stable worker memory |
+| Packing efficiency loss | Phase 3 (Optimization) | Monitoring: log pack efficiency, warn if <85% |
+| Unpacking corruption | Phase 2 (Packing Integration) | Unit test: pack/unpack roundtrip preserves sequence identity |
+
+## Migration-Specific Pitfalls (v1.0 → v2.0)
+
+### Pitfall 9: Spawn Context Already Established Prevents Multi-Worker DataLoader
+
+**What goes wrong:**
+V1.0 uses `multiprocessing.set_start_method('spawn')` globally for GPU workers. When v2.0 adds DataLoader with `multiprocessing_context='spawn'`, Python raises "context has already been set" error, preventing DataLoader creation.
+
+**Why it happens:**
+`set_start_method()` can only be called once per process. V1.0's global call locks the context before DataLoader tries to set it via the `multiprocessing_context` parameter.
+
+**How to avoid:**
+```python
+# V1.0 pattern (global set)
+if __name__ == '__main__':
+    multiprocessing.set_start_method('spawn', force=True)  # Forces override
+    # ... rest of code
+
+# V2.0 pattern (per-DataLoader context)
+# Remove global set_start_method() call
+# Pass context to DataLoader explicitly
+dataloader = DataLoader(
+    dataset,
+    num_workers=4,
+    multiprocessing_context='spawn'  # Works if not set globally
+)
+
+# Migration compatibility pattern
+import multiprocessing as mp
+try:
+    mp.set_start_method('spawn', force=False)
+except RuntimeError:
+    pass  # Already set, DataLoader will use existing context
+```
+
+**Phase to address:** Phase 1 (Foundation) - resolve before adding async DataLoader
+
+---
+
+### Pitfall 10: Persistent Model Loading Incompatible with DataLoader Worker Lifecycle
+
+**What goes wrong:**
+V1.0's persistent model pattern loads models once and reuses them across batches. DataLoader workers are forked/spawned per-epoch, so models must be reloaded every epoch, negating the persistent model optimization and causing 10-20 second overhead per epoch.
+
+**Why it happens:**
+V1.0 uses long-lived worker processes (via Pool) that persist for the entire run. DataLoader workers have a different lifecycle - they're created per DataLoader instantiation and destroyed when the DataLoader is exhausted. Loading 3B parameter models in worker `__init__` happens every epoch.
+
+**How to avoid:**
+```python
+# Strategy 1: Load models in main process (single-GPU only)
+model = load_model().to(device)
+for batch in dataloader:  # Workers provide data only
+    batch = batch.to(device)
     with torch.no_grad():
         output = model(batch)
 
-    if i % 10 == 0:  # Periodic cleanup
-        torch.cuda.empty_cache()
+# Strategy 2: Use persistent_workers=True (keeps workers alive)
+dataloader = DataLoader(
+    dataset,
+    num_workers=4,
+    persistent_workers=True  # Workers persist across epochs
+)
+
+# Workers load model once in __init__
+class InferenceDataset(Dataset):
+    def __init__(self, sequences):
+        self.sequences = sequences
+        self.model = None  # Lazy load in worker
+
+    def __getitem__(self, idx):
+        if self.model is None:
+            self.model = load_model()  # Load once per worker
+        # Process with model...
 ```
 
-**Which Phase Should Address:**
-- Phase 1: ESM-2 sequence sorting before batching
-- Phase 2: Environment variable setting in initialization
-- Phase 3: Monitoring/logging to detect fragmentation
+**Warning signs:**
+- Model loading logs appear every epoch/DataLoader instantiation
+- 10-20 second delay at start of each epoch
+- GPU memory shows model being loaded and unloaded repeatedly
 
-**References:**
-- [Saturn Cloud: CUDA out of memory solutions](https://saturncloud.io/blog/how-to-solve-cuda-out-of-memory-in-pytorch/)
-- [PyTorch Docs: CUDA semantics](https://docs.pytorch.org/docs/stable/notes/cuda.html)
+**Phase to address:** Phase 1 (Foundation) - critical for performance parity with v1.0
 
 ---
 
-### 3. Checkpoint Corruption on Multi-GPU Resume
+## Sources
 
-**What Goes Wrong:**
-When resuming from checkpoints in multi-GPU inference, file existence checks pass but files are empty or partially written. Loading corrupt checkpoints crashes without useful error messages. In distributed scenarios, rank-0 saves checkpoint but other ranks attempt to load before write completes.
+### Primary (HIGH confidence)
+- [PyTorch CUDA semantics documentation](https://docs.pytorch.org/docs/stable/notes/cuda.html) - CUDA multiprocessing safety, tensor sharing restrictions
+- [PyTorch Multiprocessing best practices](https://docs.pytorch.org/docs/stable/notes/multiprocessing.html) - Fork vs spawn, CUDA initialization timing
+- [PyTorch DataLoader documentation](https://docs.pytorch.org/docs/stable/data.html) - Worker configuration, pin_memory, prefetch_factor
+- [FlashAttention only supports fp16 and bf16 - Issue #822](https://github.com/Dao-AILab/flash-attention/issues/822) - Dtype restrictions and error patterns
+- [Packing with Flash Attention 2 - Hugging Face Blog](https://huggingface.co/blog/packing-with-FA2) - cu_seqlens format and usage
+- [Position IDs bug with packed sequences - PR #7754](https://github.com/hiyouga/LLaMA-Factory/pull/7754) - Documented position ID corruption pattern
 
-**Why It Happens:**
-- Process interruption during `torch.save()` leaves 0-byte files
-- No atomic writes by default (partial file exists)
-- No file size or content validation before loading
-- Race conditions: multiple processes checking same file
-- Distributed: ranks don't synchronize on checkpoint writes
+### Secondary (MEDIUM confidence)
+- [Guidelines for assigning num_workers - PyTorch Forums](https://discuss.pytorch.org/t/guidelines-for-assigning-num-workers-to-dataloader/813) - Worker count recommendations
+- [DataLoader memory leak with prefetch_factor - Issue #97432](https://github.com/pytorch/pytorch/issues/97432) - Pinned memory leak pattern
+- [Efficient LLM Pretraining: Packed Sequences - Hugging Face Blog](https://huggingface.co/blog/sirluk/llm-sequence-packing) - Cross-contamination prevention
+- [Dynamic Batching vs Sequence Packing - Medium](https://medium.com/better-ml/dynamic-batching-vs-sequence-packing-0ef4a3894dad) - Packing efficiency tradeoffs
+- [PhoenixOS: GPU Checkpoint with Validated Speculation](https://arxiv.org/abs/2405.12079) - GPU checkpoint race conditions
 
-**Warning Signs:**
-```python
-RuntimeError: [Errno 9] Bad file descriptor  # Empty .pt file
-EOFError: Ran out of input  # Truncated checkpoint
-IndexError: list index out of range  # Expected data missing
-```
-
-**VirNucPro Specifics:**
-- Current `CheckpointManager` checks file existence only (line 83-102)
-- DNABERT-S parallel workers skip files if output exists (prediction.py:231-234)
-- No file size validation → 0-byte files treated as valid
-- ESM-2 not yet parallelized → will inherit this risk
-
-**Prevention Strategy:**
-1. **Validate file size before loading**:
-   ```python
-   if path.exists() and path.stat().st_size > MIN_EXPECTED_SIZE:
-       try:
-           data = torch.load(path)
-       except Exception as e:
-           logger.warning(f"Corrupt checkpoint {path}, regenerating: {e}")
-           path.unlink()  # Delete corrupt file
-           data = None
-   ```
-
-2. **Atomic writes with temp file + rename**:
-   ```python
-   temp_path = output_file.with_suffix('.tmp')
-   torch.save(data, temp_path)
-   temp_path.replace(output_file)  # Atomic on POSIX
-   ```
-
-3. **Checkpoint metadata with hash validation**:
-   ```python
-   checkpoint = {
-       'data': features,
-       'checksum': hashlib.sha256(pickle.dumps(features)).hexdigest(),
-       'size': len(features)
-   }
-   ```
-
-4. **Distributed: Only rank 0 writes, all ranks synchronize**:
-   ```python
-   if rank == 0:
-       torch.save(checkpoint, path)
-   torch.distributed.barrier()  # Wait for write completion
-   ```
-
-**Code Pattern Currently Used:**
-```python
-# RISKY - from prediction.py:268
-if not output_file.exists() or output_file.stat().st_size == 0:
-    files_to_process.append(nuc_file)
-```
-This is already better than most, but still vulnerable to truncated files > 0 bytes.
-
-**Code Pattern to Use:**
-```python
-# ROBUST
-def is_valid_checkpoint(path, expected_keys=None):
-    if not path.exists():
-        return False
-    if path.stat().st_size < 100:  # Too small to be valid
-        return False
-    try:
-        data = torch.load(path)
-        if expected_keys:
-            return all(k in data for k in expected_keys)
-        return True
-    except Exception as e:
-        logger.warning(f"Corrupt checkpoint {path}: {e}")
-        return False
-```
-
-**Which Phase Should Address:**
-- Phase 1: Add validation to ESM-2 parallelization from start
-- Phase 2: Retrofit DNABERT-S worker with atomic writes
-- Phase 3: Add checkpoint metadata and hash validation
-
-**References:**
-- [PyTorch DDP checkpointing best practices](https://discuss.pytorch.org/t/what-is-the-proper-way-to-checkpoint-during-training-when-using-distributed-data-parallel-ddp-in-pytorch/139575)
-- [Distributed checkpoint fault tolerance](https://docs.pytorch.org/tutorials/beginner/ddp_series_fault_tolerance.html)
+### Tertiary (MEDIUM-HIGH confidence - project-specific)
+- VirNucPro v1.0 debugging logs - empty-files-race-condition.md (HuggingFace cache race pattern)
+- VirNucPro v1.0 debugging logs - flashattention-not-integrated.md (wrapper integration gap)
+- VirNucPro Phase 4 research - 04-RESEARCH.md (FlashAttention patterns, DataLoader configuration)
 
 ---
-
-### 4. ESM-2 3B Model Size vs. Data Parallelism Strategy
-
-**What Goes Wrong:**
-Attempting naive data parallelism (DataParallel or DDP) with ESM-2 3B model fails because:
-- Model replication requires 6GB × N_GPUs VRAM (4 GPUs = 24GB just for models)
-- Gradient synchronization overhead (even with `requires_grad=False`, some frameworks sync)
-- Master GPU bottleneck in DataParallel (all results gathered to GPU 0)
-
-**Why It Happens:**
-- ESM-2 3B model is 5.7GB in FP32 (3.2GB in FP16)
-- Each GPU needs full model copy in data parallelism
-- Inference still allocates gradient buffers in some scenarios
-- DataParallel synchronizes even when unnecessary
-
-**Warning Signs:**
-```python
-RuntimeError: CUDA out of memory (during model.to(device))
-# OR
-# GPU 0: 7.8GB, GPU 1: 7.8GB, GPU 2: 7.8GB → OOM on 8GB cards
-# Only 1 GPU showing activity (others idle)
-```
-
-**VirNucPro Specifics:**
-- ESM-2 3B model loaded via `esm.pretrained.esm2_t36_3B_UR50D()`
-- Currently single-GPU only (features.py:113-115)
-- DNABERT-S (1.5GB model) uses data parallelism successfully
-- Users have 4-8 GPUs with varying VRAM (typically 16GB or 32GB)
-
-**Prevention Strategy:**
-
-**Option A: Tensor Parallelism (best for ESM-2 3B)**
-- Split model across GPUs, not data
-- Use Fairscale FSDP (ESM repo provides example: `esm2_infer_fairscale_fsdp_cpu_offloading.py`)
-- Memory: 6GB / N_GPUs + batch memory
-- Tradeoff: Complex implementation, requires NVLink for bandwidth
-
-**Option B: File-Level Data Parallelism (simpler, VirNucPro's current approach)**
-- Each GPU loads full model, processes different files
-- Memory: 6GB per GPU (constant)
-- Tradeoff: Doesn't help with large single files
-
-**Option C: Pipeline Parallelism**
-- Different layers on different GPUs
-- Requires model surgery, not practical for ESM-2
-
-**Recommendation for VirNucPro:**
-1. **Phase 1**: Use file-level parallelism (like DNABERT-S) for ESM-2
-   - Pro: Simple, reuses existing pattern, works with variable GPU counts
-   - Con: Doesn't help if single protein file is huge
-2. **Phase 2+**: Consider FSDP if files are too large for memory
-
-**Code Pattern to Use:**
-```python
-# File-level parallelism (like DNABERT-S)
-def process_esm_files_worker(file_subset, device_id, output_dir):
-    device = torch.device(f'cuda:{device_id}')
-    model, alphabet = esm.pretrained.esm2_t36_3B_UR50D()
-    model = model.to(device)
-    model.eval()
-
-    for protein_file in file_subset:
-        extract_esm_features(protein_file, output_file, device)
-    return output_files
-
-# Distribute files round-robin to GPUs
-worker_args = [(files, device_id, output_dir)
-               for device_id, files in enumerate(gpu_file_assignments)]
-with multiprocessing.Pool() as pool:
-    pool.starmap(process_esm_files_worker, worker_args)
-```
-
-**Which Phase Should Address:**
-- Phase 1: Implement file-level parallelism for ESM-2
-- Phase 3+: Investigate FSDP if users report memory issues
-
-**References:**
-- [ESM GitHub: FSDP CPU offloading example](https://github.com/facebookresearch/esm)
-- [HuggingFace: Parallelism methods](https://huggingface.co/docs/transformers/main/perf_train_gpu_many)
-- [vLLM: Tensor vs Pipeline parallelism](https://docs.vllm.ai/en/stable/serving/parallelism_scaling/)
-
----
-
-### 5. Unbalanced GPU Work Distribution with Variable File Sizes
-
-**What Goes Wrong:**
-Round-robin file assignment to GPUs assumes files have similar processing times. When file sizes vary significantly (common after splitting sequences), some GPUs finish early and sit idle while others process large files, wasting GPU time.
-
-**Why It Happens:**
-- File splitting creates unequal sequence counts (last file often smaller)
-- ORF detection creates variable sequence counts per file
-- Round-robin doesn't account for file size: `[10k seqs, 10k seqs, 10k seqs, 2k seqs]`
-- GPU 0 gets files 0,4 (12k seqs), GPU 1 gets files 1,5 (10k seqs)
-
-**Warning Signs:**
-```bash
-# nvidia-smi output over time:
-GPU 0: 95% | 95% | 95% | 95% | 5%   # Still working
-GPU 1: 95% | 95% | 5%  | 5%  | 5%   # Finished early
-GPU 2: 95% | 95% | 95% | 5%  | 5%
-GPU 3: 95% | 5%  | 5%  | 5%  | 5%
-
-# Total time determined by slowest GPU
-```
-
-**VirNucPro Specifics:**
-- `assign_files_round_robin()` doesn't consider file sizes (parallel.py:29-61)
-- Sequences split into 10k chunks, but last chunk varies
-- After 6-frame translation, sequence counts become unpredictable
-- 100k sequences → ~600k ORFs, but distribution varies per original sequence
-
-**Prevention Strategy:**
-
-1. **Load-balanced assignment** by file size:
-   ```python
-   def assign_files_balanced(files, num_workers):
-       # Get file sizes (sequence counts)
-       file_sizes = [(f, count_sequences(f)) for f in files]
-       file_sizes.sort(key=lambda x: x[1], reverse=True)
-
-       # Greedy assignment: assign largest file to least-loaded GPU
-       worker_loads = [0] * num_workers
-       worker_files = [[] for _ in range(num_workers)]
-
-       for file, size in file_sizes:
-           min_idx = worker_loads.index(min(worker_loads))
-           worker_files[min_idx].append(file)
-           worker_loads[min_idx] += size
-
-       return worker_files
-   ```
-
-2. **Dynamic work stealing** (advanced):
-   - Use multiprocessing.Queue with all files
-   - Workers pull next file when done (no pre-assignment)
-   - Tradeoff: More complex, but perfect load balancing
-
-3. **Padding small batches** to equalize:
-   - Not recommended: wastes compute on dummy sequences
-
-**Code Pattern Currently Used:**
-```python
-# parallel.py:29 - Simple but unbalanced
-def assign_files_round_robin(files, num_workers):
-    worker_files = [[] for _ in range(num_workers)]
-    for idx, file_path in enumerate(files):
-        worker_idx = idx % num_workers
-        worker_files[worker_idx].append(file_path)
-```
-
-**Code Pattern to Use (Phase 2+):**
-```python
-def assign_files_by_size(files, num_workers):
-    """Greedy bin packing for load balancing"""
-    file_sizes = []
-    for f in files:
-        # Count sequences (cached or fast)
-        count = sum(1 for _ in SeqIO.parse(f, 'fasta'))
-        file_sizes.append((f, count))
-
-    # Sort descending
-    file_sizes.sort(key=lambda x: x[1], reverse=True)
-
-    # Greedy assignment
-    bins = [{'files': [], 'size': 0} for _ in range(num_workers)]
-    for file, size in file_sizes:
-        min_bin = min(bins, key=lambda b: b['size'])
-        min_bin['files'].append(file)
-        min_bin['size'] += size
-
-    return [b['files'] for b in bins]
-```
-
-**Which Phase Should Address:**
-- Phase 1: Keep round-robin (simple, good enough for 10k uniform splits)
-- Phase 2: Implement size-based balancing if monitoring shows >20% imbalance
-- Phase 3: Consider work queue if users process highly variable inputs
-
-**References:**
-- Greedy bin packing algorithm (computer science fundamentals)
-- VirNucPro's own monitoring: compare GPU idle time across workers
-
----
-
-### 6. `torch.no_grad()` Omission in Inference
-
-**What Goes Wrong:**
-Forgetting `torch.no_grad()` during inference causes PyTorch to:
-- Allocate memory for gradient computation (doubles memory usage)
-- Build computation graph (slower inference)
-- Not release tensor memory properly (accumulates over batches)
-
-**Why It Happens:**
-- Training code has gradients enabled by default
-- Copy-paste from training code to inference
-- Nested functions where outer has `no_grad()` but inner doesn't
-- Worker functions bypass outer `no_grad()` context
-
-**Warning Signs:**
-```python
-# Memory usage doubles unexpectedly
-# Expected: 4GB model + 2GB batch = 6GB
-# Actual: 4GB model + 2GB batch + 2GB gradients + 1GB graph = 9GB
-
-RuntimeError: CUDA out of memory (but shouldn't based on calculation)
-```
-
-**VirNucPro Specifics:**
-- DNABERT-S extraction uses `torch.no_grad()` correctly (features.py:48)
-- ESM-2 extraction uses `torch.no_grad()` correctly (features.py:149)
-- Risk: Worker functions in parallel.py might nest incorrectly
-
-**Prevention Strategy:**
-
-1. **Explicit `model.eval()` + `torch.no_grad()`** at worker level:
-   ```python
-   def worker(files, device_id):
-       model = load_model().to(device)
-       model.eval()  # Disable dropout, batch norm updates
-
-       with torch.no_grad():  # Disable gradient computation
-           for file in files:
-               process(file, model)
-   ```
-
-2. **Decorator for inference functions**:
-   ```python
-   @torch.no_grad()
-   def extract_features(inputs, model):
-       return model(inputs)
-   ```
-
-3. **Audit all inference paths** - grep for model forward passes without `no_grad()`
-
-**Code Pattern to Avoid:**
-```python
-# BAD
-def worker(files, device_id):
-    model = load_model().to(device)
-    for file in files:
-        output = model(input)  # Gradients enabled!
-```
-
-**Code Pattern to Use:**
-```python
-# GOOD
-def worker(files, device_id):
-    model = load_model().to(device)
-    model.eval()
-
-    with torch.no_grad():
-        for file in files:
-            output = model(input)
-```
-
-**Which Phase Should Address:**
-- Phase 1: Verify in code review (already correct)
-- Ongoing: CI test to detect gradient tracking in inference
-
-**References:**
-- [PyTorch FAQ: Memory management](https://docs.pytorch.org/docs/stable/notes/faq.html)
-- [GeeksforGeeks: Avoid CUDA OOM](https://www.geeksforgeeks.org/deep-learning/how-to-avoid-cuda-out-of-memory-in-pytorch/)
-
----
-
-### 7. Inconsistent Checkpoint Schema Across Versions
-
-**What Goes Wrong:**
-When optimizing code, checkpoint format changes (e.g., adding metadata, changing keys) break resume from old checkpoints. Users lose hours of computation if they can't resume.
-
-**Why It Happens:**
-- Refactoring changes data structure keys
-- Adding validation fields to checkpoints
-- Changing from list to dict format
-- Version upgrades (PyTorch, transformers) change serialization
-
-**Warning Signs:**
-```python
-KeyError: 'nucleotide_features'  # Expected key missing
-ValueError: Invalid checkpoint version
-# User reports: "Can't resume after update"
-```
-
-**VirNucPro Specifics:**
-- Checkpoint format defined in checkpoint.py (line 105-125)
-- Feature files saved with specific keys: `{'nucleotide': ..., 'data': ...}`
-- Risk: Optimized ESM-2 code changes key names
-- Risk: Adding batch processing changes checkpoint structure
-
-**Prevention Strategy:**
-
-1. **Version checkpoint format**:
-   ```python
-   checkpoint = {
-       'version': '2.0',  # Increment when format changes
-       'data': features,
-       'metadata': {...}
-   }
-
-   # On load
-   if checkpoint.get('version', '1.0') == '1.0':
-       data = migrate_v1_to_v2(checkpoint)
-   ```
-
-2. **Backward compatibility loader**:
-   ```python
-   def load_checkpoint(path):
-       data = torch.load(path)
-
-       # Handle old format (no version field)
-       if 'version' not in data:
-           return migrate_legacy(data)
-
-       # Handle versioned formats
-       if data['version'] == '1.0':
-           return data['data']
-       elif data['version'] == '2.0':
-           return data['features']
-   ```
-
-3. **Schema validation**:
-   ```python
-   EXPECTED_KEYS = {'nucleotide', 'data'}
-
-   def validate_checkpoint(data):
-       if not all(k in data for k in EXPECTED_KEYS):
-           raise ValueError(f"Checkpoint missing keys: {EXPECTED_KEYS - data.keys()}")
-   ```
-
-4. **Don't change format unless necessary** - backward compatibility > optimization
-
-**Code Pattern to Avoid:**
-```python
-# BAD - changing keys breaks old checkpoints
-# Old: {'nucleotide': [...], 'data': [...]}
-# New: {'sequences': [...], 'features': [...]}  # BREAKING CHANGE
-torch.save({'sequences': seqs, 'features': feats}, path)
-```
-
-**Code Pattern to Use:**
-```python
-# GOOD - version-aware saving
-checkpoint = {
-    'version': '2.0',
-    'sequences': seqs,  # New key name
-    'features': feats,
-    # Legacy keys for backward compat
-    'nucleotide': seqs,
-    'data': feats
-}
-torch.save(checkpoint, path)
-```
-
-**Which Phase Should Address:**
-- Phase 1: Add version field to new ESM-2 checkpoints
-- Phase 2: Implement migration for old checkpoints
-- Ongoing: Never change keys without version bump
-
-**References:**
-- VirNucPro CONCERNS.md: Checkpoint resume fragility (line 324-338)
-- Software versioning best practices
-
----
-
-## Medium-Risk Pitfalls
-
-### 8. Memory Leaks from Persistent CUDA Tensors in Workers
-
-**What Goes Wrong:**
-Long-lived worker processes accumulate tensor references that aren't garbage collected, causing gradual memory growth and eventual OOM.
-
-**Why It Happens:**
-- Python's garbage collector doesn't immediately free GPU memory
-- Circular references prevent collection
-- Tensors stored in class attributes without cleanup
-- Logger formatters hold tensor references
-
-**Warning Signs:**
-```bash
-# nvidia-smi shows growing memory over time:
-Iteration 1: 4.2GB
-Iteration 10: 4.8GB
-Iteration 50: 6.3GB
-Iteration 100: OOM
-```
-
-**Prevention Strategy:**
-
-1. **Explicit deletion in worker loops**:
-   ```python
-   for file in files:
-       features = extract(file, model)
-       save(features)
-       del features  # Explicit delete
-       torch.cuda.empty_cache()  # Optional: force cleanup
-   ```
-
-2. **Avoid tensor logging**:
-   ```python
-   # BAD
-   logger.info(f"Features: {features}")  # Tensor in log keeps reference
-
-   # GOOD
-   logger.info(f"Features shape: {features.shape}")  # Only metadata
-   ```
-
-3. **Process restart after N files** (nuclear option):
-   ```python
-   # Worker processes 100 files then exits, new worker spawned
-   ```
-
-**Which Phase Should Address:**
-- Phase 2: Add explicit cleanup if memory growth detected
-
----
-
-### 9. Incorrect Assumption of GPU Homogeneity
-
-**What Goes Wrong:**
-Assuming all GPUs have same VRAM/compute capacity causes crashes when users have mixed GPU setups (e.g., 1× 32GB A100 + 3× 16GB V100).
-
-**Why It Happens:**
-- Code sets batch_size globally
-- Round-robin assigns same workload to all GPUs
-- No per-GPU memory detection
-
-**Warning Signs:**
-```python
-# GPU 0: 32GB → no problem
-# GPU 1: 16GB → OOM on same batch size
-RuntimeError: CUDA out of memory (only on some GPUs)
-```
-
-**Prevention Strategy:**
-
-1. **Per-GPU batch size calculation**:
-   ```python
-   def get_batch_size_for_gpu(device_id):
-       props = torch.cuda.get_device_properties(device_id)
-       vram_gb = props.total_memory / 1e9
-
-       if vram_gb >= 32:
-           return 256
-       elif vram_gb >= 16:
-           return 128
-       else:
-           return 64
-   ```
-
-2. **Document homogeneous GPU requirement** (simpler)
-
-**Which Phase Should Address:**
-- Phase 3: Add per-GPU configuration if users report issues
-
----
-
-### 10. DataLoader Worker Inefficiency in Multi-GPU Context
-
-**What Goes Wrong:**
-Using PyTorch DataLoader with `num_workers > 0` inside multiprocessing workers creates excessive processes and CPU contention.
-
-**Why It Happens:**
-- 4 GPU workers × 4 DataLoader workers = 16 processes competing for CPU
-- Context switching overhead
-- Memory duplication
-
-**Warning Signs:**
-```bash
-# htop shows 16+ Python processes
-# CPU usage: 1600% (all cores saturated)
-# GPU utilization: 60% (waiting for data)
-```
-
-**Prevention Strategy:**
-
-1. **Disable DataLoader workers in GPU workers**:
-   ```python
-   # In multiprocessing worker
-   dataloader = DataLoader(dataset, num_workers=0)  # Single-threaded
-   ```
-
-2. **OR use single DataLoader with pin_memory** before multiprocessing
-
-**Which Phase Should Address:**
-- Phase 1: Set `num_workers=0` in worker processes
-
----
-
-## Edge Cases
-
-### 11. Empty File Handling in Parallel Processing
-
-**What Goes Wrong:**
-Empty FASTA files after translation (no valid ORFs) cause workers to crash or produce 0-byte checkpoints that break resume.
-
-**Prevention Strategy:**
-```python
-if len(sequences) == 0:
-    logger.warning(f"Empty file {input_file}, skipping")
-    # Save empty checkpoint with metadata
-    torch.save({'sequences': [], 'features': [], 'empty': True}, output)
-    return
-```
-
-**Which Phase Should Address:**
-- Phase 1: Add to ESM-2 worker
-
----
-
-### 12. CUDA Visible Devices Environment Variable Conflicts
-
-**What Goes Wrong:**
-User sets `CUDA_VISIBLE_DEVICES=0,2` but code assumes devices 0,1,2,3 are available.
-
-**Prevention Strategy:**
-```python
-# Don't use: range(torch.cuda.device_count())  # Returns 0,1 (remapped!)
-# Use: Parse actual device IDs or respect CUDA_VISIBLE_DEVICES mapping
-```
-
-**Which Phase Should Address:**
-- Phase 2: Document that CUDA_VISIBLE_DEVICES is respected
-
----
-
-## Summary: Prioritized Pitfall Mitigation
-
-### Phase 1 (ESM-2 Parallelization)
-- ✓ CUDA context initialization (Pitfall #1) - Critical
-- ✓ Checkpoint validation (Pitfall #3) - Critical
-- ✓ File-level parallelism for ESM-2 (Pitfall #4) - Critical
-- ✓ `torch.no_grad()` verification (Pitfall #6) - Quick win
-- ✓ Empty file handling (Pitfall #11) - Edge case
-- ✓ DataLoader workers (Pitfall #10) - Quick fix
-
-### Phase 2 (Optimization)
-- ✓ Memory fragmentation mitigation (Pitfall #2) - High impact
-- ✓ Load balancing (Pitfall #5) - If monitoring shows need
-- ✓ Checkpoint versioning (Pitfall #7) - Good practice
-- ✓ Memory leak monitoring (Pitfall #8) - If detected
-
-### Phase 3+ (Polish)
-- ✓ Heterogeneous GPU support (Pitfall #9) - If users request
-- ✓ CUDA_VISIBLE_DEVICES handling (Pitfall #12) - Documentation
-
----
-
-## Research Sources
-
-### Multi-GPU Inference
-- [Running Inference on multiple GPUs - PyTorch Forums](https://discuss.pytorch.org/t/running-inference-on-multiple-gpus/163095)
-- [Multi-GPU Inference Discussion - Lightning-AI](https://github.com/Lightning-AI/pytorch-lightning/discussions/9259)
-- [Distributed inference - HuggingFace](https://huggingface.co/docs/diffusers/training/distributed_inference)
-
-### CUDA Memory Management
-- [How to Solve CUDA out of memory - Saturn Cloud](https://saturncloud.io/blog/how-to-solve-cuda-out-of-memory-in-pytorch/)
-- [CUDA semantics - PyTorch Docs](https://docs.pytorch.org/docs/stable/notes/cuda.html)
-- [PyTorch Memory Management - DigitalOcean](https://blog.paperspace.com/pytorch-memory-multi-gpu-debugging/)
-- [Avoiding CUDA OOM - GeeksforGeeks](https://www.geeksforgeeks.org/deep-learning/how-to-avoid-cuda-out-of-memory-in-pytorch/)
-
-### Multiprocessing & CUDA
-- [Cannot re-initialize CUDA in forked subprocess - Issue #40403](https://github.com/pytorch/pytorch/issues/40403)
-- [RuntimeError: Cannot re-initialize CUDA - PyTorch Forums](https://discuss.pytorch.org/t/runtimeerror-cannot-re-initialize-cuda-in-forked-subprocess-to-use-cuda-with-multiprocessing-you-must-use-the-spawn-start-method/14083)
-
-### Large Model Parallelism
-- [Parallelism methods - HuggingFace](https://huggingface.co/docs/transformers/main/perf_train_gpu_many)
-- [ESM GitHub Repository](https://github.com/facebookresearch/esm)
-- [Parallelism and Scaling - vLLM](https://docs.vllm.ai/en/stable/serving/parallelism_scaling/)
-
-### Checkpointing
-- [Distributed Checkpoint - PyTorch Forums](https://discuss.pytorch.org/t/what-is-the-proper-way-to-checkpoint-during-training-when-using-distributed-data-parallel-ddp-in-pytorch/139575)
-- [Reducing Checkpointing Times - PyTorch Blog](https://pytorch.org/blog/reducing-checkpointing-times/)
-- [Fault-tolerant Training - PyTorch Tutorials](https://docs.pytorch.org/tutorials/beginner/ddp_series_fault_tolerance.html)
+*Pitfalls research for: VirNucPro v2.0 async DataLoader + sequence packing migration*
+*Researched: 2026-02-02*
+*Focus: Migration risks from v1.0 multi-worker to v2.0 async DataLoader + sequence packing*
