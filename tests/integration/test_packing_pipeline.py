@@ -35,7 +35,7 @@ def pipeline_components():
     from virnucpro.data import SequenceDataset, VarlenCollator, create_async_dataloader
 
     model, batch_converter = load_esm2_model(
-        model_name="esm2_t33_650M_UR50D",
+        model_name="esm2_t36_3B_UR50D",  # Production 3B model (validates actual deployment)
         device="cuda:0"
     )
     return model, batch_converter

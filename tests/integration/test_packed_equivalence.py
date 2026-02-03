@@ -22,7 +22,7 @@ def esm_model():
     """Load ESM-2 model once for all tests."""
     from virnucpro.models.esm2_flash import load_esm2_model
     model, batch_converter = load_esm2_model(
-        model_name="esm2_t33_650M_UR50D",  # Smaller model for faster tests
+        model_name="esm2_t36_3B_UR50D",  # Production 3B model (validates actual deployment)
         device="cuda:0"
     )
     return model, batch_converter
