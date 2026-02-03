@@ -71,10 +71,14 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Output embeddings match v1.0 baseline (cosine similarity >0.999)
   4. Single-GPU throughput improves 1.2-1.5x over v1.0 sequential loading
 
-**Plans**: TBD
+**Plans**: 5 plans in 4 waves
 
 Plans:
-- [ ] TBD during phase planning
+- [ ] 05-01-PLAN.md — CUDA-safe SequenceDataset and VarlenCollator
+- [ ] 05-02-PLAN.md — GPU monitor DataLoader metrics extension
+- [ ] 05-03-PLAN.md — Async DataLoader factory with CUDA safety
+- [ ] 05-04-PLAN.md — AsyncInferenceRunner with stream overlap
+- [ ] 05-05-PLAN.md — Integration tests and verification
 
 ### Phase 6: Sequence Packing Integration
 
@@ -185,7 +189,7 @@ Phases execute in numeric order: 5 → 6 → 7 → 8 → 9 → 10
 | 3. DNABERT-S Optimization | v1.0 | 7/7 | Complete | 2025-12-01 |
 | 4. Performance Optimization | v1.0 | 12/12 | Complete | 2026-01-15 |
 | 4.1. BFloat16 Precision Integration | v1.0 | 3/3 | Complete | 2026-02-02 |
-| 5. Async DataLoader Foundation | v2.0 | 0/TBD | Not started | - |
+| 5. Async DataLoader Foundation | v2.0 | 0/5 | Planned | - |
 | 6. Sequence Packing Integration | v2.0 | 0/TBD | Not started | - |
 | 7. Multi-GPU Coordination | v2.0 | 0/TBD | Not started | - |
 | 8. FP16 Precision Validation | v2.0 | 0/TBD | Not started | - |
@@ -193,4 +197,4 @@ Phases execute in numeric order: 5 → 6 → 7 → 8 → 9 → 10
 | 10. Performance Validation & Tuning | v2.0 | 0/TBD | Not started | - |
 
 ---
-*Last updated: 2026-02-03 for v2.0 milestone start*
+*Last updated: 2026-02-03 for Phase 5 planning complete*
