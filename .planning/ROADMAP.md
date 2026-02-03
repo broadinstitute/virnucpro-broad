@@ -95,16 +95,17 @@ Plans:
   4. Throughput improves 2-3x over Phase 5 unpacked baseline
   5. Sequences >max_length processed in isolated batch_size=1 with truncation warnings
 
-**Plans**: 7 plans in 5 waves
+**Plans**: 8 plans in 5 waves
 
 Plans:
-- [ ] 06-01-PLAN.md — GreedyPacker with FFD algorithm
+- [ ] 06-01-PLAN.md — GreedyPacker with FFD algorithm and dynamic token budget (PACK-03, ARCH-11)
 - [ ] 06-02-PLAN.md — Position ID generator and FlashAttention varlen wrapper
 - [ ] 06-03-PLAN.md — ESM2 forward_packed method
 - [ ] 06-04-PLAN.md — Wire packed inference in AsyncInferenceRunner
 - [ ] 06-05-PLAN.md — Packed vs unpacked equivalence validation
 - [ ] 06-06-PLAN.md — Packing efficiency metrics and monitoring
 - [ ] 06-07-PLAN.md — End-to-end integration tests and verification
+- [ ] 06-08-PLAN.md — Integrate GreedyPacker into VarlenCollator (PACK-02)
 
 ### Phase 7: Multi-GPU Coordination
 
@@ -196,11 +197,11 @@ Phases execute in numeric order: 5 → 6 → 7 → 8 → 9 → 10
 | 4. Performance Optimization | v1.0 | 12/12 | Complete | 2026-01-15 |
 | 4.1. BFloat16 Precision Integration | v1.0 | 3/3 | Complete | 2026-02-02 |
 | 5. Async DataLoader Foundation | v2.0 | 5/5 | Complete | 2026-02-03 |
-| 6. Sequence Packing Integration | v2.0 | 0/7 | Planning complete | - |
+| 6. Sequence Packing Integration | v2.0 | 0/8 | Planning revised | - |
 | 7. Multi-GPU Coordination | v2.0 | 0/TBD | Not started | - |
 | 8. FP16 Precision Validation | v2.0 | 0/TBD | Not started | - |
 | 9. Checkpointing Integration | v2.0 | 0/TBD | Not started | - |
 | 10. Performance Validation & Tuning | v2.0 | 0/TBD | Not started | - |
 
 ---
-*Last updated: 2026-02-03 for Phase 6 planning complete*
+*Last updated: 2026-02-03 for Phase 6 plan revision (added 06-08 for PACK-02, PACK-03, ARCH-11 coverage)*
