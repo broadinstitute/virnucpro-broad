@@ -400,7 +400,12 @@ def validate_packed_equivalence(
             'num_sequences': 0,
         }
 
-    # Step 1: Process each sequence individually (unpacked baseline)
+    # Step 1: Detect model's actual layer count
+    # ESM-2 models: 650M has 33 layers, 3B has 36 layers, etc.
+    num_layers = len(model.model.layers)  # Actual layer count
+    final_layer_idx = num_layers  # Final representation is at this index
+
+    # Step 2: Process each sequence individually (unpacked baseline)
     unpacked_embeddings = {}
     model.eval()
 
@@ -410,11 +415,11 @@ def validate_packed_equivalence(
             labels, strs, tokens = batch_converter([(seq_id, seq_str)])
             tokens = tokens.to(device)
 
-            # Forward pass - standard unpacked
-            output = model(tokens, repr_layers=[36])
+            # Forward pass - standard unpacked (request final layer)
+            output = model(tokens, repr_layers=[num_layers])
             # Extract mean-pooled embedding (skip BOS token at position 0)
             seq_len = min(len(seq_str), 1022)  # ESM-2 max
-            embedding = output['representations'][36][0, 1:seq_len + 1].mean(dim=0)
+            embedding = output['representations'][final_layer_idx][0, 1:seq_len + 1].mean(dim=0)
 
             # Store in FP32 for comparison
             unpacked_embeddings[seq_id] = embedding.float().cpu()
@@ -435,13 +440,13 @@ def validate_packed_equivalence(
             input_ids=packed_batch['input_ids'].to(device),
             cu_seqlens=packed_batch['cu_seqlens'].to(device),
             max_seqlen=packed_batch['max_seqlen'],
-            repr_layers=[36],
+            repr_layers=[num_layers],  # Use detected layer count
         )
 
     # Step 4: Extract embeddings using cu_seqlens
     packed_embeddings = {}
     cu_seqlens = packed_batch['cu_seqlens']
-    packed_repr = packed_output['representations'][36]  # Shape: [total_tokens, hidden_dim]
+    packed_repr = packed_output['representations'][final_layer_idx]  # Shape: [total_tokens, hidden_dim]
 
     for i, seq_id in enumerate(packed_batch['sequence_ids']):
         start = cu_seqlens[i].item()
