@@ -23,9 +23,10 @@ Integration:
 """
 
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 import torch
+import torch.nn.functional as F
 
 logger = logging.getLogger('virnucpro.data.packing')
 
@@ -168,10 +169,25 @@ class GreedyPacker:
         if current_batch:
             batches.append(current_batch)
 
-        logger.debug(
-            f"Packed {len(sequences)} sequences into {len(batches)} batches "
-            f"(efficiency: {self.compute_efficiency(batches):.1%})"
-        )
+        # Compute efficiency and apply two-tier threshold logging (Gap 6)
+        efficiency = self.compute_efficiency(batches)
+
+        # Two-tier threshold system (Gap 6)
+        CRITICAL_THRESHOLD = 0.80  # Something is broken
+        WARN_THRESHOLD = 0.85      # Buffer may be too small
+
+        if efficiency < CRITICAL_THRESHOLD:
+            logger.error(
+                f"CRITICAL: Packing efficiency {efficiency:.1%} < 80%. "
+                "Packing may be broken or buffer_size too small."
+            )
+        elif efficiency < WARN_THRESHOLD:
+            logger.warning(
+                f"Low packing efficiency: {efficiency:.1%} < 85%. "
+                "Consider increasing buffer_size."
+            )
+        else:
+            logger.debug(f"Packing efficiency: {efficiency:.1%}")
 
         return batches
 
@@ -215,6 +231,56 @@ class GreedyPacker:
             Length including BOS and EOS tokens (+2)
         """
         return len(sequence) + 2
+
+
+def compute_batch_efficiency(
+    num_tokens: int,
+    num_sequences: int,
+    max_seqlen: int,
+    max_tokens_per_batch: int,
+) -> Dict[str, float]:
+    """
+    Compute packing efficiency metrics for a batch.
+
+    Args:
+        num_tokens: Total tokens in packed batch
+        num_sequences: Number of sequences in batch
+        max_seqlen: Maximum sequence length in batch
+        max_tokens_per_batch: Token budget used for packing
+
+    Returns:
+        Dict with:
+            - token_utilization: num_tokens / max_tokens_per_batch
+            - padding_waste: 1 - (num_tokens / (num_sequences * max_seqlen))
+            - avg_sequence_length: num_tokens / num_sequences
+            - theoretical_efficiency: num_tokens / max_tokens_per_batch
+    """
+    # Avoid division by zero
+    if num_sequences == 0 or max_tokens_per_batch == 0:
+        return {
+            'token_utilization': 0.0,
+            'padding_waste': 0.0,
+            'avg_sequence_length': 0.0,
+            'theoretical_efficiency': 0.0,
+        }
+
+    # Token utilization: how much of budget was used
+    token_utilization = num_tokens / max_tokens_per_batch
+
+    # Padding waste: how much would be wasted in padded format
+    # (num_sequences * max_seqlen) would be padded size
+    theoretical_padded_tokens = num_sequences * max_seqlen
+    padding_waste = 1.0 - (num_tokens / theoretical_padded_tokens) if theoretical_padded_tokens > 0 else 0.0
+
+    # Average sequence length
+    avg_sequence_length = num_tokens / num_sequences
+
+    return {
+        'token_utilization': token_utilization,
+        'padding_waste': padding_waste,
+        'avg_sequence_length': avg_sequence_length,
+        'theoretical_efficiency': token_utilization,  # Same as token_utilization
+    }
 
 
 def calculate_token_budget(
