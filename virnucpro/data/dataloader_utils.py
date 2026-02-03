@@ -3,6 +3,11 @@
 This module provides utilities for creating DataLoaders with CPU-aware worker counts
 and optimized settings for high-throughput processing of sequence data.
 
+Features:
+- CPU-aware worker count configuration
+- Async DataLoader for GPU inference with CUDA-safe workers
+- Memory estimation utilities
+
 Based on PyTorch DataLoader best practices and patterns from:
 - parallel_translate.py: Spawn context for multiprocessing
 - base_worker.py: Worker assignment and resource allocation
@@ -219,6 +224,89 @@ def create_sequence_dataloader(
 
     # Create optimized DataLoader
     return create_optimized_dataloader(dataset, batch_size, **kwargs)
+
+
+def create_async_dataloader(
+    dataset: IterableDataset,
+    collate_fn: Callable,
+    batch_size: Optional[int] = None,
+    num_workers: int = 4,
+    prefetch_factor: int = 4,
+    pin_memory: bool = True,
+    timeout: float = 600.0,
+) -> DataLoader:
+    """
+    Create DataLoader with CUDA-safe configuration for async GPU inference.
+
+    This factory configures DataLoader for the async architecture where:
+    - Workers perform CPU-only I/O (FASTA parsing)
+    - Main process handles tokenization (via collate_fn)
+    - GPU inference receives prefetched, pinned batches
+
+    Configuration follows PyTorch best practices for GPU workloads:
+    - spawn context: Prevents CUDA context inheritance (safe multiprocessing)
+    - persistent_workers: Keeps workers alive (faster, no restart overhead)
+    - pin_memory: Enables fast CPU-to-GPU transfer
+    - prefetch_factor: Aggressive prefetching (4 batches per worker = 16 total)
+
+    Args:
+        dataset: IterableDataset (e.g., SequenceDataset) for streaming data
+        collate_fn: Callable to process batches (e.g., VarlenCollator)
+        batch_size: Number of items per batch. Use None for dynamic batching where
+            collate_fn determines batch size (e.g., VarlenCollator with token budget).
+            For VarlenCollator (token-budget packing), MUST be None - otherwise fixed
+            batch_size would override the packing logic and hurt efficiency.
+        num_workers: Number of CPU workers for I/O (default: 4)
+        prefetch_factor: Batches to prefetch per worker (default: 4)
+        pin_memory: Enable pinned memory for fast GPU transfer (default: True)
+        timeout: Timeout in seconds for worker operations (default: 600 = 10 minutes,
+            increased from 5 minutes to handle large FASTA parsing)
+
+    Returns:
+        Configured DataLoader ready for async GPU inference
+
+    Example:
+        >>> from virnucpro.data import SequenceDataset, VarlenCollator
+        >>> dataset = SequenceDataset(fasta_files)
+        >>> collator = VarlenCollator(batch_converter, max_tokens_per_batch=4096)
+        >>> # batch_size=None lets VarlenCollator control batching via token budget
+        >>> loader = create_async_dataloader(dataset, collator, batch_size=None)
+        >>> for batch in loader:
+        ...     # batch has pinned tensors ready for GPU transfer
+        ...     gpu_batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
+
+    Raises:
+        ValueError: If num_workers < 1 (async requires workers)
+
+    Note:
+        - Workers MUST NOT touch CUDA (enforced via cuda_safe_worker_init)
+        - Tokenization happens in main process via collate_fn
+        - batch_size=None is recommended for VarlenCollator (token-budget packing)
+        - For single-threaded loading, use create_optimized_dataloader instead
+    """
+    if num_workers < 1:
+        raise ValueError(
+            f"Async DataLoader requires num_workers >= 1, got {num_workers}. "
+            "Use create_optimized_dataloader for single-threaded loading."
+        )
+
+    logger.info(
+        f"Creating async DataLoader: batch_size={batch_size}, num_workers={num_workers}, "
+        f"prefetch_factor={prefetch_factor}, pin_memory={pin_memory}, timeout={timeout}s"
+    )
+
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor,
+        pin_memory=pin_memory,
+        persistent_workers=True,
+        multiprocessing_context='spawn',
+        collate_fn=collate_fn,
+        worker_init_fn=cuda_safe_worker_init,
+        timeout=timeout,
+    )
 
 
 def estimate_memory_usage(
