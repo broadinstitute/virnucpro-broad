@@ -13,14 +13,14 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 Phase: 6 of 10 (Sequence Packing Integration)
 Plan: 6 of 8 in current phase
 Status: In progress
-Last activity: 2026-02-03 — Completed 06-06-PLAN.md
+Last activity: 2026-02-03 — Completed 06-05-PLAN.md
 
-Progress: [█████░░░░░] 45/TBD plans (v1.0: 34/34 complete, v2.0: 11/TBD)
+Progress: [█████░░░░░] 46/TBD plans (v1.0: 34/34 complete, v2.0: 12/TBD)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 45 (v1.0: 34, v2.0: 11)
+- Total plans completed: 46 (v1.0: 34, v2.0: 12)
 - Average duration: 2.9 min
 - Total execution time: 3.0 hours
 
@@ -34,7 +34,7 @@ Progress: [█████░░░░░] 45/TBD plans (v1.0: 34/34 complete, v
 | 4 | 12 | 41 min | 3.4 min |
 | 4.1 | 3 | 10 min | 3.3 min |
 | 5 | 5 | 13 min | 2.6 min |
-| 6 | 6 | 22 min | 3.7 min |
+| 6 | 7 | 25 min | 3.6 min |
 
 **Recent Trend:**
 - Last 5 plans (Phase 6): ~3.0 min average
@@ -82,6 +82,7 @@ Recent decisions affecting current work:
 - **VIRNUCPRO_DISABLE_PACKING env var (06-04)**: Emergency rollback mechanism to disable packing in production without code changes
 - **1D packed embedding extraction (06-04)**: Packed format is [total_tokens, hidden_dim] not [batch, seq, hidden] - no batch dimension indexing
 - **Buffer flush protocol (06-04)**: After DataLoader exhaustion, flush collator buffer to prevent data loss for remaining sequences
+- **Two-tier similarity thresholds (06-05)**: Strict 0.999 for 99% sequences, lenient 0.995 for 1% - catches bugs while allowing FP16 precision variations
 - **Two-tier efficiency thresholds (06-06)**: <80% critical error (packing broken), <85% warning (buffer too small) - distinguishes broken packing from suboptimal buffer sizing
 - **Token utilization metric (06-06)**: Use num_tokens / max_tokens_per_batch as primary efficiency metric - simpler than padding waste calculation
 - **Periodic logging interval (06-06)**: Log efficiency summary every 100 batches to avoid log spam while providing regular progress updates
@@ -112,7 +113,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed 06-06-PLAN.md - Added packing efficiency metrics and monitoring
+Stopped at: Completed 06-05-PLAN.md - Added packed equivalence validation with cosine similarity tests
 Resume file: None
 
-**Next step:** Continue with remaining Phase 6 plans (06-07 through 06-08) to complete sequence packing integration
+**Next step:** Continue with remaining Phase 6 plans (06-06 through 06-08) to complete sequence packing integration
