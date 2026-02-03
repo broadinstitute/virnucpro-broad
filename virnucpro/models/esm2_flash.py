@@ -218,10 +218,9 @@ class ESM2WithFlashAttention(nn.Module):
             self.model = self.model.to(dtype=torch.bfloat16)
             embeddings = self.model.embed_tokens(input_ids)
 
-        # Add position embeddings
-        # Note: ESM uses learned positional embeddings, not rotary
-        position_embeddings = self.model.embed_positions(position_ids)
-        embeddings = embeddings + position_embeddings
+        # NOTE: ESM-2 uses Rotary Position Embeddings (RoPE), not learned position embeddings
+        # Position information is applied inside attention (to Q/K), not as a separate embedding
+        # The position_ids are passed to each layer and applied during attention computation
 
         # Process through transformer layers
         hidden_states = embeddings
@@ -229,7 +228,7 @@ class ESM2WithFlashAttention(nn.Module):
 
         for layer_idx, layer in enumerate(self.model.layers):
             hidden_states = self._layer_forward_packed(
-                layer, hidden_states, cu_seqlens, max_seqlen
+                layer, hidden_states, cu_seqlens, max_seqlen, position_ids
             )
 
             # Store representation if this layer was requested
@@ -252,6 +251,7 @@ class ESM2WithFlashAttention(nn.Module):
         hidden_states: torch.Tensor,
         cu_seqlens: torch.Tensor,
         max_seqlen: int,
+        position_ids: torch.Tensor,
     ) -> torch.Tensor:
         """
         Single transformer layer forward pass for packed sequences.
@@ -260,11 +260,15 @@ class ESM2WithFlashAttention(nn.Module):
         varlen for the attention computation. It handles the self-attention and
         feed-forward sublayers with residual connections.
 
+        ESM-2 uses Rotary Position Embeddings (RoPE) which are applied to Q and K
+        inside the attention computation.
+
         Args:
             layer: ESM-2 TransformerEncoderLayer
             hidden_states: [total_tokens, hidden_dim]
             cu_seqlens: [batch_size + 1] cumulative sequence lengths
             max_seqlen: Maximum sequence length in batch
+            position_ids: [total_tokens] position indices that reset at sequence boundaries
 
         Returns:
             hidden_states: [total_tokens, hidden_dim] after layer processing
@@ -290,6 +294,13 @@ class ESM2WithFlashAttention(nn.Module):
 
         qkv = qkv.reshape(-1, 3, num_heads, head_dim)
         q, k, v = qkv.unbind(dim=1)
+
+        # Apply Rotary Position Embeddings (RoPE) to Q and K
+        # ESM-2 uses rotary embeddings for position information
+        if hasattr(layer.self_attn, 'rotary_emb') and layer.self_attn.rotary_emb is not None:
+            # Apply rotary embeddings using position_ids
+            # rotary_emb expects positions and returns modified q, k
+            q, k = layer.self_attn.rotary_emb(q, k, positions=position_ids)
 
         # FlashAttention varlen - automatically prevents cross-sequence attention
         attn_output = flash_attn_varlen_wrapper(

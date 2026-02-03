@@ -1,0 +1,137 @@
+ ---
+  Your Concerns: Validated
+
+  1. CUDA Context Multiplication: PARTIALLY VALID ⚠️
+
+  What's Actually Happening:
+  - Each worker DOES load its own model copy (ESM-2 3B = ~11GB × N workers)
+  - On a 4-GPU system with 4 workers: 44GB total GPU memory just for model weights
+  - The code uses spawn context which creates fresh CUDA contexts per process
+
+  Mitigations Already in Place:
+  - PersistentWorkerPool (persistent_pool.py:280) - keeps models loaded across file batches
+  - Deferred CUDA initialization (parallel_esm.py:128) - happens in worker, not parent
+  - Staggered loading (persistent_pool.py:95) - 1s delay per worker to prevent race conditions
+
+  The Problem: Even with persistence, you still have N×11GB memory overhead. For 6M sequences, this memory pressure causes:
+  - Cache thrashing
+  - OOM errors requiring torch.cuda.empty_cache() every 10 files
+  - Batch size reductions
+
+  2. Serialization Tax: VALID ✅
+
+  Evidence in Code:
+  - process_esm_files_worker returns (processed_files, failed_files) - must pickle
+  - Embeddings saved to .pt files, then loaded back by merge stage
+  - Progress queue uses multiprocessing Queue with pickle
+
+  Cost: ~50-100ms per file batch just for IPC + disk I/O.
+
+  3. GPU Starvation: VALID ✅
+
+  Evidence:
+  - Default toks_per_batch=2048 (relatively small)
+  - With 8 workers and small files (10K seqs each), each worker gets tiny batches
+  - GPU tensor cores need batch_size ≥64 to saturate; you're often below this
+
+  ---
+  Your Suggestions: Assessment
+  ┌────────────────────────────────────────────┬──────────────┬────────────────────────────────────┬────────────┐
+  │                 Suggestion                 │    Valid?    │     Implementation Complexity      │   Impact   │
+  ├────────────────────────────────────────────┼──────────────┼────────────────────────────────────┼────────────┤
+  │ Single-process + async DataLoader          │ ✅ Yes       │ High (architectural change)        │ Very High  │
+  ├────────────────────────────────────────────┼──────────────┼────────────────────────────────────┼────────────┤
+  │ CPU multiprocessing only for preprocessing │ ✅ Yes       │ Already done for translation/merge │ Medium     │
+  ├────────────────────────────────────────────┼──────────────┼────────────────────────────────────┼────────────┤
+  │ Remove multiprocessing.Pool from inference │ ✅ Yes       │ High                               │ Very High  │
+  ├────────────────────────────────────────────┼──────────────┼────────────────────────────────────┼────────────┤
+  │ Increase batch_size to 128-512             │ ⚠️ Partially │ Low                                │ Medium     │
+  ├────────────────────────────────────────────┼──────────────┼────────────────────────────────────┼────────────┤
+  │ pin_memory=True                            │ ✅ Yes       │ Low                                │ Low-Medium │
+  ├────────────────────────────────────────────┼──────────────┼────────────────────────────────────┼────────────┤
+  │ Switch BF16→FP16 for divergence            │ ❌ No        │ N/A                                │ N/A        │
+  └────────────────────────────────────────────┴──────────────┴────────────────────────────────────┴────────────┘
+  Important Note on FP16: The code is currently forced to FP32 (not BF16). BF16 is already disabled in esm2_flash.py:79 and dnabert_flash.py:227. The divergence issue was caused by dtype mismatches in mean
+  pooling (fixed), not BF16 itself. Switching to FP16 would likely cause worse divergence than BF16 due to narrower dynamic range.
+
+  ---
+  The Real Architecture Problem
+
+  Your instinct is correct. The current architecture:
+
+  Parent Process → Spawns N Workers → Each loads 11GB model → Processes files → Returns results
+
+  Should be:
+
+  Main Process → Single model on each GPU → Async DataLoader feeds batches → Stream processing
+
+  Why Multi-Process GPU is Problematic Here:
+
+  1. Model size: ESM-2 3B is huge. N copies is expensive.
+  2. File-based processing: Small files (10K seqs) don't amortize the model loading cost.
+  3. Inter-stage synchronization: Each pipeline stage waits for ALL workers to finish.
+
+  ---
+  Recommended Path Forward
+
+  Option A: Your Suggestion (Single-Process + Async) - Best for Throughput
+
+  Replace the multi-process GPU workers with:
+
+  # Single process per GPU, async data loading
+  for gpu_id in range(num_gpus):
+      # One model per GPU, kept loaded
+      model = load_esm2_model(device=f'cuda:{gpu_id}')
+
+      # Async DataLoader with pinned memory
+      dataloader = DataLoader(
+          dataset,
+          batch_size=512,  # Much larger
+          num_workers=4,   # CPU workers for loading
+          pin_memory=True,
+          prefetch_factor=4
+      )
+
+      # Stream processing
+      for batch in dataloader:
+          with torch.cuda.stream(compute_stream):
+              embeddings = model(batch)
+
+  Benefits:
+  - Single CUDA context per GPU
+  - No pickle overhead
+  - Continuous GPU utilization (no gaps between files)
+  - Larger batch sizes possible
+
+  Trade-offs:
+  - Requires refactoring pipeline from file-based to stream-based
+  - Need to handle dynamic sequence lengths efficiently (packing/padding)
+
+  Option B: Quick Wins (Keep Current Architecture)
+
+  If you want immediate improvements without architectural changes:
+
+  1. Increase file size: Change 10K → 50K-100K sequences/file
+    - Reduces number of files to process
+    - Amortizes model loading overhead
+  2. Re-enable BF16: Remove the self.use_bf16 = False lines
+    - 50% memory reduction → larger batch sizes
+    - ~20-30% speedup
+  3. Increase batch size: 2048 → 4096 or 8192 tokens
+    - Better GPU saturation
+  4. Use persistent models: --persistent-models flag
+    - Avoids reloading ESM-2 twice (once for DNABERT stage, once for ESM stage)
+
+  ---
+  My Recommendation
+
+  For 1-6M sequences taking 1-9 hours, the single-process + async approach (your suggestion) is architecturally superior. The current multi-process design is better suited for:
+  - Smaller models
+  - CPU-bound preprocessing
+  - Embarrassingly parallel tasks with no inter-process communication
+
+  Your target metrics (50K-200K seqs/hour) are achievable with the single-process design, but optimistic with the current implementation.
+
+  Would you like me to create a plan for migrating to single-process + async DataLoader architecture? This would be a significant refactor but would address all three of your concerns.
+
+
