@@ -12,7 +12,7 @@ Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs and
 
 ### Validated
 
-Existing capabilities from production codebase:
+**Existing capabilities from production codebase:**
 
 - ✓ **CLI-01**: Users run predictions via Click-based CLI (`virnucpro predict`) — existing
 - ✓ **PIPELINE-01**: 9-stage pipeline (chunking → translation → splitting → DNABERT-S → ESM-2 → merging → prediction → consensus → output) — existing
@@ -23,20 +23,31 @@ Existing capabilities from production codebase:
 - ✓ **IO-01**: Reads FASTA input, writes CSV/TXT predictions — existing
 - ✓ **CONFIG-01**: YAML-based configuration for chunk sizes, model paths — existing
 
+**Delivered in v1.0 (Phases 1-4.1):**
+
+- ✓ **ESM-OPT-01**: ESM-2 parallelizes across multiple GPUs — v1.0
+- ✓ **ESM-OPT-02**: ESM-2 automatically queues and processes multiple batches per GPU — v1.0
+- ✓ **DNABERT-OPT-01**: DNABERT-S optimized batch sizes with BF16 (3072 tokens on Ampere+) — v1.0
+- ✓ **DNABERT-OPT-02**: DNABERT-S automatically queues and processes multiple batches per GPU — v1.0
+- ✓ **SCALE-02**: Works with variable GPU counts (1, 4, 8, or any number) with auto-detection — v1.0
+- ✓ **COMPAT-01**: Maintains backward compatibility with existing CLI interface — v1.0
+- ✓ **COMPAT-02**: Resumes checkpoints from pre-optimization runs with atomic writes — v1.0
+- ✓ **FLASH-01**: FlashAttention-2 integration for ESM-2 and DNABERT-S (2-4x attention speedup) — v1.0
+- ✓ **PERSIST-01**: Persistent model loading eliminates re-loading overhead — v1.0
+- ✓ **MEM-01**: Memory management with expandable segments and periodic cache clearing — v1.0
+
 ### Active
 
-New capabilities for GPU optimization:
+**Deferred from v1.0 (needs validation):**
 
-- [ ] **ESM-OPT-01**: ESM-2 parallelizes across multiple GPUs (currently single-GPU only)
-- [ ] **ESM-OPT-02**: ESM-2 automatically queues and processes multiple batches per GPU
-- [ ] **DNABERT-OPT-01**: DNABERT-S increases batch size per GPU for better utilization
-- [ ] **DNABERT-OPT-02**: DNABERT-S automatically queues and processes multiple batches per GPU
-- [ ] **PERF-01**: Pipeline completes one sample (thousands of sequences) in under 10 hours
-- [ ] **PERF-02**: GPU utilization metrics show >80% GPU usage during embedding steps
-- [ ] **SCALE-01**: Adding GPUs provides linear speedup (2x GPUs = ~2x faster)
-- [ ] **SCALE-02**: Works with variable GPU counts (handles 1, 4, 8, or any number of GPUs)
-- [ ] **COMPAT-01**: Maintains backward compatibility with existing CLI interface
-- [ ] **COMPAT-02**: Can resume checkpoints from pre-optimization runs
+- [ ] **PERF-01**: Pipeline completes one sample in under 10 hours (needs end-to-end benchmarking)
+- [ ] **PERF-02**: GPU utilization >80% during embedding steps (needs validation with nvitop)
+- [ ] **SCALE-01**: Linear GPU scaling verified (2x GPUs = ~2x faster, needs scaling tests)
+
+**Future enhancements:**
+
+- [ ] **LOAD-01**: Work-stealing queue for dynamic load balancing
+- [ ] **SEC-01**: Upgrade transformers to 4.53.0+ (address 12 CVEs including 4 RCE vulnerabilities)
 
 ### Out of Scope
 
@@ -83,10 +94,13 @@ New capabilities for GPU optimization:
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Focus on embeddings only | ESM-2 is 45-hour bottleneck, biggest ROI | — Pending |
-| Target <10 hours for one sample | 4.5x speedup from current 45 hours | — Pending |
-| Maintain CLI interface | Users have existing workflows and scripts | — Pending |
-| Open to new dependencies | Willing to add libraries (DeepSpeed, Ray) if they accelerate significantly | — Pending |
+| Focus on embeddings only | ESM-2 is 45-hour bottleneck, biggest ROI | ✓ Good - delivered parallelization |
+| Target <10 hours for one sample | 4.5x speedup from current 45 hours | ⚠️ Revisit - not validated (benchmarking incomplete) |
+| Maintain CLI interface | Users have existing workflows and scripts | ✓ Good - zero breaking changes |
+| Use file-level data parallelism | Simpler than tensor parallelism, ESM-2 fits on single GPU | ✓ Good - reliable scaling pattern |
+| BF16 on Ampere+ GPUs | 2x speedup with minimal accuracy impact | ✓ Good - significant performance gain |
+| Persistent model loading | Eliminate re-loading overhead | ✓ Good - opt-in feature working |
+| FlashAttention-2 via PyTorch SDPA | Native integration vs separate flash-attn package | ✓ Good - simpler maintenance |
 
 ---
-*Last updated: 2026-01-22 after initialization*
+*Last updated: 2026-02-02 after v1.0 milestone*
