@@ -73,15 +73,15 @@ class VarlenCollator:
                 sequence exceeds this limit, it's still included (partial batch).
 
         Note:
-            The batch_converter is a tuple (alphabet, preprocess, tokenize).
-            We extract padding_idx from the alphabet (index 0).
+            The batch_converter is a BatchConverter instance with an alphabet attribute.
+            We extract padding_idx from batch_converter.alphabet.
         """
         self.batch_converter = batch_converter
         self.max_tokens_per_batch = max_tokens_per_batch
 
-        # Extract padding_idx from alphabet (batch_converter[0])
+        # Extract padding_idx from alphabet
         # ESM uses <pad> token with index 1 by default
-        self.padding_idx = batch_converter[0].padding_idx
+        self.padding_idx = batch_converter.alphabet.padding_idx
 
         logger.debug(
             f"VarlenCollator initialized: max_tokens={max_tokens_per_batch}, "

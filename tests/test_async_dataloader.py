@@ -311,6 +311,10 @@ class TestCUDASafety:
         but doesn't test actual worker isolation in a spawned subprocess (which is
         the real safety mechanism). The actual CUDA isolation test happens in
         test_dataloader_worker_cuda_isolation below via subprocess.
+
+        NOTE: We can't test torch.cuda.is_available() here because torch is already
+        imported in the main process. The env var only affects CUDA when torch is
+        first imported, which happens in spawned workers.
         """
         from virnucpro.data.dataloader_utils import cuda_safe_worker_init
         import os
@@ -320,20 +324,32 @@ class TestCUDASafety:
         old_tokenizers = os.environ.get('TOKENIZERS_PARALLELISM')
 
         try:
-            # This would run in worker process
-            cuda_safe_worker_init(0)
+            # Temporarily allow CUDA check to pass in main process
+            # In real workers (spawned processes), this check catches CUDA leaks
+            import torch
+            original_is_available = torch.cuda.is_available
+            torch.cuda.is_available = lambda: False  # Mock for main process test
 
-            assert os.environ.get('CUDA_VISIBLE_DEVICES') == '', \
-                "CUDA_VISIBLE_DEVICES not set to empty"
-            assert os.environ.get('TOKENIZERS_PARALLELISM') == 'false', \
-                "TOKENIZERS_PARALLELISM not disabled"
+            try:
+                cuda_safe_worker_init(0)
+
+                assert os.environ.get('CUDA_VISIBLE_DEVICES') == '', \
+                    "CUDA_VISIBLE_DEVICES not set to empty"
+                assert os.environ.get('TOKENIZERS_PARALLELISM') == 'false', \
+                    "TOKENIZERS_PARALLELISM not disabled"
+            finally:
+                torch.cuda.is_available = original_is_available
 
         finally:
             # Restore env
             if old_cuda_visible is not None:
                 os.environ['CUDA_VISIBLE_DEVICES'] = old_cuda_visible
+            else:
+                os.environ.pop('CUDA_VISIBLE_DEVICES', None)
             if old_tokenizers is not None:
                 os.environ['TOKENIZERS_PARALLELISM'] = old_tokenizers
+            else:
+                os.environ.pop('TOKENIZERS_PARALLELISM', None)
 
     @pytest.mark.slow
     def test_dataloader_worker_cuda_isolation(self, test_fasta_files, esm_model_and_converter):
