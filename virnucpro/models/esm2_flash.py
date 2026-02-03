@@ -18,6 +18,11 @@ from virnucpro.cuda.attention_utils import (
     get_attention_implementation,
     configure_flash_attention
 )
+from virnucpro.models.packed_attention import (
+    create_position_ids_packed,
+    flash_attn_varlen_wrapper,
+    FLASH_ATTN_AVAILABLE,
+)
 
 logger = logging.getLogger('virnucpro.models.esm2_flash')
 
@@ -147,6 +152,237 @@ class ESM2WithFlashAttention(nn.Module):
                 repr_layers=repr_layers,
                 return_contacts=return_contacts
             )
+
+    def forward_packed(
+        self,
+        input_ids: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        max_seqlen: int,
+        repr_layers: Optional[list] = None,
+    ) -> dict:
+        """
+        Forward pass for packed sequences using FlashAttention varlen.
+
+        This method processes packed batches (1D concatenated tokens + cu_seqlens)
+        through ESM-2 using FlashAttention's varlen API. Packed format enables
+        2-3x throughput improvement over padded batches by eliminating padding tokens.
+
+        Args:
+            input_ids: 1D tensor of concatenated token IDs [total_tokens]
+            cu_seqlens: Cumulative sequence lengths [num_sequences + 1], dtype=int32
+                        Format: [0, len1, len1+len2, ...] where each element is
+                        the starting index of a sequence in input_ids
+            max_seqlen: Maximum sequence length in batch
+            repr_layers: Layer indices to return representations for (default: [36])
+
+        Returns:
+            Dictionary with 'representations' key containing layer outputs
+            Format: {'representations': {layer_idx: tensor}}
+            Tensor shape: [total_tokens, hidden_dim] (packed format)
+
+        Example:
+            >>> # Three sequences: lengths [3, 4, 3]
+            >>> input_ids = torch.tensor([1,2,3, 4,5,6,7, 8,9,10], device='cuda')
+            >>> cu_seqlens = torch.tensor([0, 3, 7, 10], dtype=torch.int32, device='cuda')
+            >>> output = model.forward_packed(input_ids, cu_seqlens, max_seqlen=4)
+            >>> embeddings = output['representations'][36]  # Shape: [10, 2560]
+        """
+        if repr_layers is None:
+            repr_layers = [36]  # Default to final layer for ESM-2 3B
+
+        # Check FlashAttention availability - use fallback if not available
+        if not FLASH_ATTN_AVAILABLE:
+            logger.warning(
+                "FlashAttention not available. Using fallback unpack/repack strategy. "
+                "Install flash-attn for 2-3x speedup: pip install flash-attn --no-build-isolation"
+            )
+            return self._forward_packed_fallback(input_ids, cu_seqlens, max_seqlen, repr_layers)
+
+        # FlashAttention path
+        batch_size = len(cu_seqlens) - 1
+
+        # Create position IDs that reset at each sequence boundary
+        position_ids = create_position_ids_packed(cu_seqlens)
+
+        # Get token embeddings - shape: [total_tokens, hidden_dim]
+        embeddings = self.model.embed_tokens(input_ids)
+
+        # Validate dtype for FlashAttention compatibility
+        # FlashAttention requires FP16/BF16 inputs
+        assert embeddings.dtype in [torch.float16, torch.bfloat16], (
+            f"FlashAttention requires FP16/BF16, but embeddings are {embeddings.dtype}. "
+            f"Load model with: model.half() or model.to(dtype=torch.float16)"
+        )
+
+        # Add position embeddings
+        # Note: ESM uses learned positional embeddings, not rotary
+        position_embeddings = self.model.embed_positions(position_ids)
+        embeddings = embeddings + position_embeddings
+
+        # Process through transformer layers
+        hidden_states = embeddings
+        representations = {}
+
+        for layer_idx, layer in enumerate(self.model.layers):
+            hidden_states = self._layer_forward_packed(
+                layer, hidden_states, cu_seqlens, max_seqlen
+            )
+
+            # Store representation if this layer was requested
+            if layer_idx in repr_layers:
+                representations[layer_idx] = hidden_states.clone()
+
+        # Apply final layer norm
+        hidden_states = self.model.emb_layer_norm_after(hidden_states)
+
+        # Store final layer if requested (common case for ESM-2 3B is layer 36)
+        if 36 in repr_layers or len(self.model.layers) in repr_layers:
+            layer_idx = len(self.model.layers)
+            representations[layer_idx] = hidden_states
+
+        return {'representations': representations}
+
+    def _layer_forward_packed(
+        self,
+        layer: nn.Module,
+        hidden_states: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        max_seqlen: int,
+    ) -> torch.Tensor:
+        """
+        Single transformer layer forward pass for packed sequences.
+
+        This method processes a single ESM-2 transformer layer using FlashAttention
+        varlen for the attention computation. It handles the self-attention and
+        feed-forward sublayers with residual connections.
+
+        Args:
+            layer: ESM-2 TransformerEncoderLayer
+            hidden_states: [total_tokens, hidden_dim]
+            cu_seqlens: [batch_size + 1] cumulative sequence lengths
+            max_seqlen: Maximum sequence length in batch
+
+        Returns:
+            hidden_states: [total_tokens, hidden_dim] after layer processing
+        """
+        # Self-attention sublayer with residual
+        residual = hidden_states
+        hidden_states = layer.self_attn_layer_norm(hidden_states)
+
+        # Compute Q, K, V from self-attention
+        # ESM-2 uses MultiheadAttention with in_proj_weight
+        # Shape after projection: [total_tokens, 3 * hidden_dim]
+        qkv = torch.nn.functional.linear(
+            hidden_states,
+            layer.self_attn.in_proj_weight,
+            layer.self_attn.in_proj_bias
+        )
+
+        # Split into Q, K, V and reshape for multi-head attention
+        # Shape: [total_tokens, num_heads, head_dim] for each
+        hidden_dim = layer.self_attn.embed_dim
+        num_heads = layer.self_attn.num_heads
+        head_dim = hidden_dim // num_heads
+
+        qkv = qkv.reshape(-1, 3, num_heads, head_dim)
+        q, k, v = qkv.unbind(dim=1)
+
+        # FlashAttention varlen - automatically prevents cross-sequence attention
+        attn_output = flash_attn_varlen_wrapper(
+            q=q,
+            k=k,
+            v=v,
+            cu_seqlens=cu_seqlens,
+            max_seqlen=max_seqlen,
+            dropout_p=0.0,  # No dropout for inference
+            causal=False,   # Bidirectional attention for ESM/BERT
+        )
+
+        # Reshape back: [total_tokens, num_heads, head_dim] -> [total_tokens, hidden_dim]
+        attn_output = attn_output.reshape(-1, hidden_dim)
+
+        # Apply output projection
+        hidden_states = layer.self_attn.out_proj(attn_output)
+
+        # Residual connection
+        hidden_states = residual + hidden_states
+
+        # Feed-forward sublayer with residual
+        residual = hidden_states
+        hidden_states = layer.final_layer_norm(hidden_states)
+        hidden_states = layer.fc1(hidden_states)
+        hidden_states = torch.nn.functional.gelu(hidden_states)
+        hidden_states = layer.fc2(hidden_states)
+        hidden_states = residual + hidden_states
+
+        return hidden_states
+
+    def _forward_packed_fallback(
+        self,
+        input_ids: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        max_seqlen: int,
+        repr_layers: Optional[list] = None,
+    ) -> dict:
+        """
+        Fallback forward pass for packed sequences when FlashAttention unavailable.
+
+        This method unpacks the 1D input_ids to 2D padded format, runs the standard
+        forward pass, and repacks the output. Less efficient than FlashAttention varlen
+        but ensures correctness on systems without flash-attn (e.g., older GPUs, CI).
+
+        Args:
+            input_ids: 1D tensor of concatenated token IDs [total_tokens]
+            cu_seqlens: Cumulative sequence lengths [num_sequences + 1]
+            max_seqlen: Maximum sequence length in batch
+            repr_layers: Layer indices to return representations for
+
+        Returns:
+            Dictionary with 'representations' key containing packed layer outputs
+        """
+        batch_size = len(cu_seqlens) - 1
+
+        # Unpack 1D input_ids to 2D padded tensor
+        # Shape: [batch_size, max_seqlen]
+        padded_tokens = torch.zeros(
+            batch_size, max_seqlen,
+            dtype=input_ids.dtype,
+            device=input_ids.device
+        )
+
+        for i in range(batch_size):
+            start = cu_seqlens[i].item()
+            end = cu_seqlens[i + 1].item()
+            seq_len = end - start
+
+            padded_tokens[i, :seq_len] = input_ids[start:end]
+
+        # Run standard forward pass with padded format
+        output = self.forward(padded_tokens, repr_layers=repr_layers)
+
+        # Repack output to 1D using cu_seqlens boundaries
+        representations = {}
+        for layer_idx, padded_repr in output['representations'].items():
+            # Shape: [batch_size, max_seqlen, hidden_dim]
+            total_tokens = cu_seqlens[-1].item()
+            hidden_dim = padded_repr.shape[-1]
+
+            packed_repr = torch.zeros(
+                total_tokens, hidden_dim,
+                dtype=padded_repr.dtype,
+                device=padded_repr.device
+            )
+
+            for i in range(batch_size):
+                start = cu_seqlens[i].item()
+                end = cu_seqlens[i + 1].item()
+                seq_len = end - start
+
+                packed_repr[start:end] = padded_repr[i, :seq_len]
+
+            representations[layer_idx] = packed_repr
+
+        return {'representations': representations}
 
     def __repr__(self) -> str:
         """String representation showing attention implementation."""
