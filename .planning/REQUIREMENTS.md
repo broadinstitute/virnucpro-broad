@@ -9,11 +9,11 @@ Requirements for v2.0 async architecture and sequence packing milestone. Each ma
 
 ### Architecture (Async DataLoader)
 
-- [ ] **ARCH-01**: Single GPU process per GPU (replace multi-worker-per-GPU pattern)
-- [ ] **ARCH-02**: Async DataLoader with CPU workers (num_workers=4-8 for I/O parallelism)
-- [ ] **ARCH-03**: Batch prefetching (prefetch_factor=2 to overlap data loading with compute)
-- [ ] **ARCH-04**: GPU memory pinning in main process only (pin_memory=True in DataLoader)
-- [ ] **ARCH-05**: CUDA stream processing for async I/O overlap
+- [x] **ARCH-01**: Single GPU process per GPU (replace multi-worker-per-GPU pattern)
+- [x] **ARCH-02**: Async DataLoader with CPU workers (num_workers=4-8 for I/O parallelism)
+- [x] **ARCH-03**: Batch prefetching (prefetch_factor=2 to overlap data loading with compute)
+- [x] **ARCH-04**: GPU memory pinning in main process only (pin_memory=True in DataLoader)
+- [x] **ARCH-05**: CUDA stream processing for async I/O overlap
 - [ ] **ARCH-06**: Triple-buffered async pipeline (Buffer 1: load batch N+1, Buffer 2: compute batch N, Buffer 3: write results N-1)
 - [ ] **ARCH-07**: Buffer size matching GPU batch output (e.g., 256 seqs × 2560 dims × 2 bytes = 1.25MB per buffer)
 - [ ] **ARCH-08**: Overflow handling - backpressure if I/O thread falls behind 3 buffers (pause DataLoader)
@@ -23,11 +23,11 @@ Requirements for v2.0 async architecture and sequence packing milestone. Each ma
 
 ### CUDA Safety (Critical Correctness Requirements)
 
-- [ ] **SAFE-01**: CPU workers must NOT initialize CUDA (no torch.cuda calls in worker_init_fn or Dataset.__init__). Implementation: Set CUDA_VISIBLE_DEVICES="" in worker env; validate torch.cuda.is_available() returns False in Dataset.__init__
-- [ ] **SAFE-02**: Use spawn method for multiprocessing (not fork - fork copies CUDA context causing errors)
-- [ ] **SAFE-03**: Deferred CUDA initialization in GPU processes (only after spawn, never in parent)
-- [ ] **SAFE-04**: Worker process validation (assert workers only do CPU work: FASTA parsing, tokenization)
-- [ ] **SAFE-05**: Memory pinning safety (only main process pins memory, workers return unpinned tensors)
+- [x] **SAFE-01**: CPU workers must NOT initialize CUDA (no torch.cuda calls in worker_init_fn or Dataset.__init__). Implementation: Set CUDA_VISIBLE_DEVICES="" in worker env; validate torch.cuda.is_available() returns False in Dataset.__init__
+- [x] **SAFE-02**: Use spawn method for multiprocessing (not fork - fork copies CUDA context causing errors)
+- [x] **SAFE-03**: Deferred CUDA initialization in GPU processes (only after spawn, never in parent)
+- [x] **SAFE-04**: Worker process validation (assert workers only do CPU work: FASTA parsing, tokenization)
+- [x] **SAFE-05**: Memory pinning safety (only main process pins memory, workers return unpinned tensors)
 
 ### Sequence Packing
 

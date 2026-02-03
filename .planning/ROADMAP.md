@@ -48,7 +48,7 @@ See MILESTONES.md for detailed v1.0 retrospective.
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 5: Async DataLoader Foundation** - Single-GPU async pattern with CUDA safety
+- [x] **Phase 5: Async DataLoader Foundation** - Single-GPU async pattern with CUDA safety
 - [ ] **Phase 6: Sequence Packing Integration** - FlashAttention varlen + greedy packing
 - [ ] **Phase 7: Multi-GPU Coordination** - File-level sharding across 4 GPUs
 - [ ] **Phase 8: FP16 Precision Validation** - Memory and speed optimization
@@ -74,11 +74,11 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 5 plans in 4 waves
 
 Plans:
-- [ ] 05-01-PLAN.md — CUDA-safe SequenceDataset and VarlenCollator
-- [ ] 05-02-PLAN.md — GPU monitor DataLoader metrics extension
-- [ ] 05-03-PLAN.md — Async DataLoader factory with CUDA safety
-- [ ] 05-04-PLAN.md — AsyncInferenceRunner with stream overlap
-- [ ] 05-05-PLAN.md — Integration tests and verification
+- [x] 05-01-PLAN.md — CUDA-safe SequenceDataset and VarlenCollator
+- [x] 05-02-PLAN.md — GPU monitor DataLoader metrics extension
+- [x] 05-03-PLAN.md — Async DataLoader factory with CUDA safety
+- [x] 05-04-PLAN.md — AsyncInferenceRunner with stream overlap
+- [x] 05-05-PLAN.md — Integration tests and verification
 
 ### Phase 6: Sequence Packing Integration
 
@@ -189,7 +189,7 @@ Phases execute in numeric order: 5 → 6 → 7 → 8 → 9 → 10
 | 3. DNABERT-S Optimization | v1.0 | 7/7 | Complete | 2025-12-01 |
 | 4. Performance Optimization | v1.0 | 12/12 | Complete | 2026-01-15 |
 | 4.1. BFloat16 Precision Integration | v1.0 | 3/3 | Complete | 2026-02-02 |
-| 5. Async DataLoader Foundation | v2.0 | 0/5 | Planned | - |
+| 5. Async DataLoader Foundation | v2.0 | 5/5 | Complete | 2026-02-03 |
 | 6. Sequence Packing Integration | v2.0 | 0/TBD | Not started | - |
 | 7. Multi-GPU Coordination | v2.0 | 0/TBD | Not started | - |
 | 8. FP16 Precision Validation | v2.0 | 0/TBD | Not started | - |
