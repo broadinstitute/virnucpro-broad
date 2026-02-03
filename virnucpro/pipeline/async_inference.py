@@ -137,17 +137,37 @@ class AsyncInferenceRunner:
             # ESM-2 forward expects tokens tensor
             input_ids = gpu_batch['input_ids']
 
-            # FIX 3: Packed format handling
-            if 'cu_seqlens' in gpu_batch:
-                # VarlenCollator produces packed format (1D concatenated tokens)
-                # TODO PHASE 6: Replace with FlashAttention varlen call
-                # For Phase 5: Raise NotImplementedError to be explicit
-                raise NotImplementedError(
-                    "Packed batches with cu_seqlens require FlashAttention varlen "
-                    "(Phase 6: Sequence Packing Integration). "
-                    "For Phase 5 testing, use unpacked batches or wait for Phase 6."
+            # Kill switch for emergency rollback (Gap 2)
+            import os
+            DISABLE_PACKING = os.getenv('VIRNUCPRO_DISABLE_PACKING', 'false').lower() == 'true'
+
+            if 'cu_seqlens' in gpu_batch and not DISABLE_PACKING:
+                # PHASE 6: Packed format with FlashAttention varlen
+                cu_seqlens = gpu_batch['cu_seqlens']
+                max_seqlen = gpu_batch['max_seqlen']
+
+                # Forward pass with packed sequences
+                outputs = self.model.forward_packed(
+                    input_ids=input_ids,
+                    cu_seqlens=cu_seqlens,
+                    max_seqlen=max_seqlen,
+                    repr_layers=[36]
                 )
+                # Packed output shape: [total_tokens, hidden_dim]
+                representations = outputs['representations'][36]
+
+                logger.debug(
+                    f"Packed inference: {len(gpu_batch['sequence_ids'])} sequences, "
+                    f"{input_ids.numel()} tokens, max_seqlen={max_seqlen}"
+                )
+
+                return representations
             else:
+                # Unpacked path (fallback):
+                # - When VIRNUCPRO_DISABLE_PACKING=true (emergency rollback)
+                # - When enable_packing=False in collator (testing)
+                # - Before buffer fills (first <buffer_size sequences)
+                # - When FlashAttention unavailable
                 # Standard padded format (Phase 5 baseline)
                 if input_ids.dim() == 1:
                     input_ids = input_ids.unsqueeze(0)
@@ -183,14 +203,20 @@ class AsyncInferenceRunner:
         sequence_ids = gpu_batch.get('sequence_ids', [])
 
         if cu_seqlens is not None and len(sequence_ids) > 0:
-            # Packed format: extract embeddings using cu_seqlens boundaries
-            # Mean-pool each sequence's tokens
+            # Packed format: representations shape is [total_tokens, hidden_dim]
+            # NOT [batch, seq, hidden]
             embeddings = []
             for i in range(len(sequence_ids)):
                 start = cu_seqlens[i].item()
                 end = cu_seqlens[i + 1].item()
-                # Skip BOS token (position 0), mean pool the rest
-                seq_repr = representations[0, start+1:end].mean(dim=0)
+                # Skip BOS token (position 0 of each sequence), mean pool the rest
+                # For sequence at [start:end], BOS is at position 'start'
+                if end - start > 1:
+                    # Mean pool positions start+1 to end (exclude BOS)
+                    seq_repr = representations[start + 1:end].mean(dim=0)
+                else:
+                    # Single token sequence - use as-is
+                    seq_repr = representations[start:end].mean(dim=0)
                 embeddings.append(seq_repr)
 
             result = torch.stack(embeddings)
@@ -357,6 +383,14 @@ class AsyncInferenceRunner:
 
                 yield result
                 batch_idx += 1
+
+            # Flush collator buffer (handles last <buffer_size sequences)
+            # VarlenCollator accumulates sequences; flush ensures no data loss
+            if hasattr(dataloader.collate_fn, 'flush'):
+                logger.debug("Flushing collator buffer for remaining sequences")
+                for batch in dataloader.collate_fn.flush():
+                    result = self.process_batch(batch)
+                    yield result
 
         finally:
             # Synchronize streams before stopping
