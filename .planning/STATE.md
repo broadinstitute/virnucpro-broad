@@ -11,20 +11,20 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 5 of 10 (Async DataLoader Foundation)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-02-03 — v2.0 roadmap created
+Plan: 1 of TBD in current phase
+Status: In progress
+Last activity: 2026-02-03 — Completed 05-01-PLAN.md
 
-Progress: [████░░░░░░] 34/TBD plans (v1.0: 34/34 complete, v2.0: 0/TBD)
+Progress: [████░░░░░░] 35/TBD plans (v1.0: 34/34 complete, v2.0: 1/TBD)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 34 (v1.0)
-- Average duration: 3.4 min
-- Total execution time: 2.2 hours
+- Total plans completed: 35 (v1.0: 34, v2.0: 1)
+- Average duration: 3.3 min
+- Total execution time: 2.3 hours
 
-**By Phase (v1.0):**
+**By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
@@ -33,12 +33,11 @@ Progress: [████░░░░░░] 34/TBD plans (v1.0: 34/34 complete, v
 | 3 | 7 | 24 min | 3.4 min |
 | 4 | 12 | 41 min | 3.4 min |
 | 4.1 | 3 | 10 min | 3.3 min |
+| 5 | 1 | 2 min | 2.0 min |
 
 **Recent Trend:**
-- Last 5 plans (v1.0): ~3.4 min average
-- Trend: Stable
-
-**v2.0 Note:** Phase planning will determine plan counts and reset velocity tracking for this milestone.
+- Last 5 plans: ~2.9 min average
+- Trend: Improving (v2.0 plan faster than v1.0 average)
 
 *Updated after each plan completion*
 
@@ -53,6 +52,9 @@ Recent decisions affecting current work:
 - **FP16 over BF16**: Research shows ESM-2 trained in FP16 (norm difference <1e-3 vs FP32) - FP16 is optimal for this model
 - **FlashAttention varlen**: Required for sequence packing to prevent cross-sequence attention contamination
 - **File-level sharding**: Multi-GPU coordination uses deterministic file assignment (rank % world_size) instead of dynamic work-stealing
+- **Queue state heuristic (05-02)**: PyTorch DataLoader doesn't expose queue depth - infer from wait_time_ms (<1ms=full, >50ms=starved)
+- **Tiered bottleneck thresholds (05-02)**: <50% critical, <80% mild, ≥80% none - avoids false positives with short sequences
+- **Dual throughput metrics (05-02)**: Track both sequences/sec and tokens/sec - tokens/sec more stable for packed batches
 
 ### Pending Todos
 
@@ -75,8 +77,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-03 (roadmap creation)
-Stopped at: v2.0 roadmap created with 6 phases (5-10) covering 42 requirements
+Last session: 2026-02-03T15:45:45Z
+Stopped at: Completed 05-02-PLAN.md (GPU Monitor DataLoader Metrics)
 Resume file: None
 
-**Next step:** `/gsd:plan-phase 5` to decompose Async DataLoader Foundation into executable plans
+**Next step:** Continue with next plan in phase 5 or plan remaining phase 5 plans
