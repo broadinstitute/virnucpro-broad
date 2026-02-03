@@ -207,12 +207,16 @@ class ESM2WithFlashAttention(nn.Module):
         # Get token embeddings - shape: [total_tokens, hidden_dim]
         embeddings = self.model.embed_tokens(input_ids)
 
-        # Validate dtype for FlashAttention compatibility
-        # FlashAttention requires FP16/BF16 inputs
-        assert embeddings.dtype in [torch.float16, torch.bfloat16], (
-            f"FlashAttention requires FP16/BF16, but embeddings are {embeddings.dtype}. "
-            f"Load model with: model.half() or model.to(dtype=torch.float16)"
-        )
+        # FlashAttention requires FP16/BF16 - auto-convert if needed
+        if embeddings.dtype not in [torch.float16, torch.bfloat16]:
+            logger.warning(
+                f"Model loaded in {embeddings.dtype}, but FlashAttention requires FP16/BF16. "
+                "Auto-converting to BF16 for packed inference. "
+                "For best performance, load model with: model.to(dtype=torch.bfloat16)"
+            )
+            # Convert model to BF16 (better numerical stability than FP16 for this model)
+            self.model = self.model.to(dtype=torch.bfloat16)
+            embeddings = self.model.embed_tokens(input_ids)
 
         # Add position embeddings
         # Note: ESM uses learned positional embeddings, not rotary
