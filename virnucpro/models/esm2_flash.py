@@ -278,29 +278,24 @@ class ESM2WithFlashAttention(nn.Module):
         hidden_states = layer.self_attn_layer_norm(hidden_states)
 
         # Compute Q, K, V from self-attention
-        # ESM-2 uses MultiheadAttention with in_proj_weight
-        # Shape after projection: [total_tokens, 3 * hidden_dim]
-        qkv = torch.nn.functional.linear(
-            hidden_states,
-            layer.self_attn.in_proj_weight,
-            layer.self_attn.in_proj_bias
-        )
-
-        # Split into Q, K, V and reshape for multi-head attention
-        # Shape: [total_tokens, num_heads, head_dim] for each
+        # ESM-2 uses separate projection layers (q_proj, k_proj, v_proj), not combined in_proj_weight
         hidden_dim = layer.self_attn.embed_dim
         num_heads = layer.self_attn.num_heads
         head_dim = hidden_dim // num_heads
 
-        qkv = qkv.reshape(-1, 3, num_heads, head_dim)
-        q, k, v = qkv.unbind(dim=1)
+        # Project to Q, K, V using separate linear layers
+        # Shape: [total_tokens, hidden_dim] -> [total_tokens, num_heads, head_dim]
+        q = layer.self_attn.q_proj(hidden_states).reshape(-1, num_heads, head_dim)
+        k = layer.self_attn.k_proj(hidden_states).reshape(-1, num_heads, head_dim)
+        v = layer.self_attn.v_proj(hidden_states).reshape(-1, num_heads, head_dim)
 
         # Apply Rotary Position Embeddings (RoPE) to Q and K
-        # ESM-2 uses rotary embeddings for position information
-        if hasattr(layer.self_attn, 'rotary_emb') and layer.self_attn.rotary_emb is not None:
-            # Apply rotary embeddings using position_ids
-            # rotary_emb expects positions and returns modified q, k
-            q, k = layer.self_attn.rotary_emb(q, k, positions=position_ids)
+        # ESM-2's rot_emb applies position information to query and key
+        if hasattr(layer.self_attn, 'rot_emb') and layer.self_attn.rot_emb is not None:
+            # rot_emb takes q, k and applies rotary embeddings based on position_ids
+            # Expected signature: rot_emb(q, k) where positions come from sequence structure
+            # For packed sequences, we need to pass position_ids that reset at boundaries
+            q, k = layer.self_attn.rot_emb(q, k, position_ids)
 
         # FlashAttention varlen - automatically prevents cross-sequence attention
         attn_output = flash_attn_varlen_wrapper(
