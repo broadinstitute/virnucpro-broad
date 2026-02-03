@@ -21,8 +21,8 @@ Progress: [█████░░░░░] 41/TBD plans (v1.0: 34/34 complete, v
 
 **Velocity:**
 - Total plans completed: 41 (v1.0: 34, v2.0: 7)
-- Average duration: 3.0 min
-- Total execution time: 2.6 hours
+- Average duration: 3.1 min
+- Total execution time: 2.7 hours
 
 **By Phase:**
 
@@ -34,7 +34,7 @@ Progress: [█████░░░░░] 41/TBD plans (v1.0: 34/34 complete, v
 | 4 | 12 | 41 min | 3.4 min |
 | 4.1 | 3 | 10 min | 3.3 min |
 | 5 | 5 | 13 min | 2.6 min |
-| 6 | 2 | 5 min | 2.5 min |
+| 6 | 2 | 11 min | 5.5 min |
 
 **Recent Trend:**
 - Last 5 plans (Phase 5-6): ~2.6 min average
@@ -67,6 +67,10 @@ Recent decisions affecting current work:
 - **Pinned memory validation (05-04)**: Check tensors on first batch to detect misconfiguration early
 - **FP16→FP32 embeddings (05-04)**: Model may compute in FP16 but embeddings always stored in FP32 for stability
 - **sequence_ids required (05-04)**: ValueError if batch missing sequence_ids, prevents synthetic ID generation bugs
+- **FFD packing algorithm (06-01)**: First-Fit Decreasing sorts sequences by length descending for ~92-94% efficiency vs ~70% unsorted - critical for greedy bin packing (ARCH-11)
+- **Buffer-based packing (06-01)**: Optimized for 1000-5000 sequence buffers, not DataLoader micro-batches - efficiency scales with buffer size
+- **N-terminal truncation (06-01)**: Oversized sequences truncated preserving N-terminal region where ESM-2 biological signal is strongest
+- **Dynamic token budget (06-01)**: Use torch.cuda.get_device_properties with safety margins for GPU-specific batch sizing (PACK-03)
 - **Position ID reset at boundaries (06-02)**: Position IDs must reset to 0 at each cu_seqlens boundary for correct positional embeddings in packed format
 - **FlashAttention dtype validation (06-02)**: Validate FP16/BF16 before calling flash_attn_varlen_func - provides clear error messages vs cryptic kernel errors
 - **flash-attn version check (06-02)**: Warn if <2.6.0 but don't block - allows testing while encouraging upgrade for bug fixes
