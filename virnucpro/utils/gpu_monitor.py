@@ -144,6 +144,40 @@ class GPUMetrics:
     stage: Optional[str] = None  # Pipeline stage name
 
 
+@dataclass
+class DataLoaderMetrics:
+    """
+    DataLoader performance metrics snapshot.
+
+    NOTE: queue_depth is a heuristic estimate, not actual DataLoader queue state.
+    PyTorch DataLoader doesn't expose internal queue depth. We infer from timing:
+    - wait_time_ms < 1ms → queue likely full (batch ready)
+    - wait_time_ms > 50ms → queue likely empty (starved)
+    """
+    timestamp: float
+    wait_time_ms: float        # Time spent waiting for next batch
+    batch_idx: int             # Current batch index
+    sequences_in_batch: int    # Sequences in this batch
+    tokens_in_batch: int       # Tokens in this batch (for packed batches)
+
+    # Batch composition (for packed batches)
+    avg_sequence_length: float = 0.0  # Average tokens per sequence
+    max_sequence_length: int = 0      # Longest sequence in batch
+
+    # Heuristic queue state (not actual DataLoader queue)
+    queue_state: str = 'unknown'  # 'full' | 'starved' | 'normal' | 'unknown'
+
+
+def infer_queue_state(wait_time_ms: float) -> str:
+    """Infer DataLoader queue state from wait time heuristic."""
+    if wait_time_ms < 1.0:
+        return 'full'      # Batch was ready, queue had data
+    elif wait_time_ms > 50.0:
+        return 'starved'   # Long wait, queue was likely empty
+    else:
+        return 'normal'    # Typical prefetch timing
+
+
 class NvitopMonitor:
     """
     Enhanced GPU monitor with nvitop integration for detailed metrics.
