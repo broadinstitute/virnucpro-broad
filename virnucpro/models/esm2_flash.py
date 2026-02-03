@@ -289,14 +289,12 @@ class ESM2WithFlashAttention(nn.Module):
         k = layer.self_attn.k_proj(hidden_states).reshape(-1, num_heads, head_dim)
         v = layer.self_attn.v_proj(hidden_states).reshape(-1, num_heads, head_dim)
 
-        # Apply Rotary Position Embeddings (RoPE) to Q and K
-        # NOTE: rot_emb.forward(q, k) computes positions as torch.arange(total_tokens)
-        # This doesn't reset at sequence boundaries, which is incorrect for packed sequences
-        # TODO: Implement manual RoPE with position_ids that reset at cu_seqlens boundaries
+        # Apply Rotary Position Embeddings (RoPE) to Q and K with position reset
+        # For packed sequences, positions must reset at cu_seqlens boundaries
         if hasattr(layer.self_attn, 'rot_emb') and layer.self_attn.rot_emb is not None:
-            # Temporarily using standard rot_emb call (positions won't reset)
-            # This will cause test failures but lets us find other issues first
-            q, k = layer.self_attn.rot_emb(q, k)
+            q, k = self._apply_rotary_embeddings(
+                q, k, position_ids, layer.self_attn.rot_emb
+            )
 
         # FlashAttention varlen - automatically prevents cross-sequence attention
         attn_output = flash_attn_varlen_wrapper(
@@ -327,6 +325,57 @@ class ESM2WithFlashAttention(nn.Module):
         hidden_states = residual + hidden_states
 
         return hidden_states
+
+    def _apply_rotary_embeddings(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        position_ids: torch.Tensor,
+        rot_emb: nn.Module,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Apply rotary position embeddings with custom position IDs.
+
+        ESM-2's RotaryEmbedding.forward() computes positions as torch.arange(seq_len),
+        which doesn't work for packed sequences where positions must reset at boundaries.
+        This method manually applies the rotary transformation using position_ids.
+
+        Args:
+            q: Query tensor [total_tokens, num_heads, head_dim]
+            k: Key tensor [total_tokens, num_heads, head_dim]
+            position_ids: Position indices [total_tokens] that reset at sequence boundaries
+            rot_emb: RotaryEmbedding module from layer.self_attn
+
+        Returns:
+            Tuple of (rotated_q, rotated_k) with same shapes as input
+        """
+        # Get sin/cos values from rot_emb cached buffers
+        # rot_emb has sin_cached and cos_cached buffers: [max_positions, dim]
+        cos_cached = rot_emb.cos_cached.to(q.dtype)
+        sin_cached = rot_emb.sin_cached.to(q.dtype)
+
+        # Index sin/cos using position_ids: [total_tokens, dim]
+        cos = cos_cached[position_ids]
+        sin = sin_cached[position_ids]
+
+        # Reshape for broadcasting: [total_tokens, 1, dim]
+        cos = cos.unsqueeze(1)
+        sin = sin.unsqueeze(1)
+
+        # Apply rotary embedding transformation
+        # Split last dim in half for rotation
+        # q/k shape: [total_tokens, num_heads, head_dim]
+        def rotate_half(x):
+            """Rotate half the hidden dims of the input."""
+            x1 = x[..., : x.shape[-1] // 2]
+            x2 = x[..., x.shape[-1] // 2 :]
+            return torch.cat((-x2, x1), dim=-1)
+
+        # Apply rotation: q_rotated = q * cos + rotate_half(q) * sin
+        q_rotated = (q * cos) + (rotate_half(q) * sin)
+        k_rotated = (k * cos) + (rotate_half(k) * sin)
+
+        return q_rotated, k_rotated
 
     def _forward_packed_fallback(
         self,
