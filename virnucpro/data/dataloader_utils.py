@@ -10,13 +10,53 @@ Based on PyTorch DataLoader best practices and patterns from:
 
 import multiprocessing
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable
 from pathlib import Path
 
+import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, IterableDataset
 
 logger = logging.getLogger('virnucpro.dataloader')
+
+
+def cuda_safe_worker_init(worker_id: int) -> None:
+    """
+    Initialize DataLoader worker with CUDA isolation.
+
+    This function is called in each worker process to ensure:
+    1. CUDA_VISIBLE_DEVICES is empty (no GPU access)
+    2. HuggingFace tokenizer parallelism disabled (prevents deadlocks)
+    3. Worker is seeded for reproducibility
+
+    Args:
+        worker_id: Worker process ID (0 to num_workers-1)
+
+    Raises:
+        RuntimeError: If CUDA is accessible in worker (should never happen with spawn)
+    """
+    import os
+    import numpy as np
+
+    # Hide CUDA devices from worker
+    os.environ['CUDA_VISIBLE_DEVICES'] = ''
+
+    # Disable HuggingFace tokenizer parallelism to prevent deadlocks with DataLoader
+    os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+
+    # Seed for reproducibility
+    np.random.seed(worker_id)
+
+    # Validate CUDA is not accessible
+    # Note: We import torch here to check, but the env var should prevent CUDA init
+    import torch
+    if torch.cuda.is_available():
+        raise RuntimeError(
+            f"Worker {worker_id}: CUDA is accessible despite CUDA_VISIBLE_DEVICES=''. "
+            "This indicates a multiprocessing context issue. Use 'spawn' context."
+        )
+
+    logger.debug(f"Worker {worker_id} initialized with CUDA isolation")
 
 
 class SequenceDataset(Dataset):
