@@ -350,50 +350,53 @@ class ESM2WithFlashAttention(nn.Module):
             Tuple of (rotated_q, rotated_k) with same shapes as input
         """
         # Get sin/cos values from rot_emb buffers
-        # First, inspect what buffers are actually available
         # rot_emb._buffers contains registered buffers
         if not hasattr(self, '_rope_buffers_logged'):
-            logger.info(f"RotaryEmbedding buffers: {list(rot_emb._buffers.keys())}")
-            logger.info(f"RotaryEmbedding state_dict keys: {list(rot_emb.state_dict().keys())}")
+            logger.debug(f"RotaryEmbedding buffers: {list(rot_emb._buffers.keys())}")
             self._rope_buffers_logged = True
 
-        # Try common buffer names
-        if hasattr(rot_emb, 'cos_cached'):
-            cos_cached = rot_emb.cos_cached.to(q.dtype)
-            sin_cached = rot_emb.sin_cached.to(q.dtype)
-        elif hasattr(rot_emb, '_cos_cached'):
-            cos_cached = rot_emb._cos_cached.to(q.dtype)
-            sin_cached = rot_emb._sin_cached.to(q.dtype)
-        elif 'cos_cached' in rot_emb._buffers:
-            cos_cached = rot_emb._buffers['cos_cached'].to(q.dtype)
-            sin_cached = rot_emb._buffers['sin_cached'].to(q.dtype)
-        else:
-            # Fallback: call rot_emb to compute sin/cos then extract from internals
-            raise RuntimeError(
-                f"Cannot find sin/cos buffers in RotaryEmbedding. "
-                f"Available buffers: {list(rot_emb._buffers.keys())}"
-            )
+        # ESM-2's RotaryEmbedding uses inv_freq to compute sin/cos on-the-fly
+        # We need to compute them ourselves using position_ids
+        inv_freq = rot_emb.inv_freq  # Shape: [rotary_dim // 2]
+        rotary_dim = inv_freq.shape[0] * 2  # Full rotary dimension
 
-        # Index sin/cos using position_ids: [total_tokens, dim]
-        cos = cos_cached[position_ids]
-        sin = sin_cached[position_ids]
+        # Compute sin/cos for our position_ids
+        # position_ids: [total_tokens]
+        # inv_freq: [rotary_dim // 2]
+        # freqs: [total_tokens, rotary_dim // 2]
+        freqs = torch.einsum('i,j->ij', position_ids.float(), inv_freq)
+        # Duplicate for sin and cos application: [total_tokens, rotary_dim]
+        emb = torch.cat([freqs, freqs], dim=-1)
+        cos = emb.cos().to(q.dtype)  # [total_tokens, rotary_dim]
+        sin = emb.sin().to(q.dtype)  # [total_tokens, rotary_dim]
 
-        # Reshape for broadcasting: [total_tokens, 1, dim]
+        # Reshape for broadcasting: [total_tokens, 1, rotary_dim]
         cos = cos.unsqueeze(1)
         sin = sin.unsqueeze(1)
 
-        # Apply rotary embedding transformation
-        # Split last dim in half for rotation
+        # ESM-2 uses partial rotary embeddings - only first rotary_dim dimensions
         # q/k shape: [total_tokens, num_heads, head_dim]
+        head_dim = q.shape[-1]
+
+        # Split into rotary and non-rotary parts
+        q_rot = q[..., :rotary_dim]
+        q_pass = q[..., rotary_dim:]
+        k_rot = k[..., :rotary_dim]
+        k_pass = k[..., rotary_dim:]
+
+        # Apply rotation to rotary part only
         def rotate_half(x):
             """Rotate half the hidden dims of the input."""
             x1 = x[..., : x.shape[-1] // 2]
             x2 = x[..., x.shape[-1] // 2 :]
             return torch.cat((-x2, x1), dim=-1)
 
-        # Apply rotation: q_rotated = q * cos + rotate_half(q) * sin
-        q_rotated = (q * cos) + (rotate_half(q) * sin)
-        k_rotated = (k * cos) + (rotate_half(k) * sin)
+        q_rot = (q_rot * cos) + (rotate_half(q_rot) * sin)
+        k_rot = (k_rot * cos) + (rotate_half(k_rot) * sin)
+
+        # Concatenate rotary and non-rotary parts back together
+        q_rotated = torch.cat([q_rot, q_pass], dim=-1)
+        k_rotated = torch.cat([k_rot, k_pass], dim=-1)
 
         return q_rotated, k_rotated
 
