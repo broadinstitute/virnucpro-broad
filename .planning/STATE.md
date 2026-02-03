@@ -11,18 +11,18 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 5 of 10 (Async DataLoader Foundation)
-Plan: 3 of TBD in current phase
+Plan: 4 of TBD in current phase
 Status: In progress
-Last activity: 2026-02-03 — Completed 05-03-PLAN.md
+Last activity: 2026-02-03 — Completed 05-04-PLAN.md
 
-Progress: [████░░░░░░] 37/TBD plans (v1.0: 34/34 complete, v2.0: 3/TBD)
+Progress: [████░░░░░░] 38/TBD plans (v1.0: 34/34 complete, v2.0: 4/TBD)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 37 (v1.0: 34, v2.0: 3)
-- Average duration: 3.2 min
-- Total execution time: 2.4 hours
+- Total plans completed: 38 (v1.0: 34, v2.0: 4)
+- Average duration: 3.1 min
+- Total execution time: 2.5 hours
 
 **By Phase:**
 
@@ -33,7 +33,7 @@ Progress: [████░░░░░░] 37/TBD plans (v1.0: 34/34 complete, v
 | 3 | 7 | 24 min | 3.4 min |
 | 4 | 12 | 41 min | 3.4 min |
 | 4.1 | 3 | 10 min | 3.3 min |
-| 5 | 3 | 7.1 min | 2.4 min |
+| 5 | 4 | 10.1 min | 2.5 min |
 
 **Recent Trend:**
 - Last 5 plans: ~2.7 min average
@@ -61,6 +61,11 @@ Recent decisions affecting current work:
 - **batch_size=None for VarlenCollator (05-03)**: Allows VarlenCollator to control packing via token budget instead of fixed batch size
 - **timeout=600s for FASTA parsing (05-03)**: Increased from default 5 min to handle large FASTA files without timeout errors
 - **prefetch_factor=4 (05-03)**: Aggressive prefetching (4×4=16 batches) saturates GPU even with occasional slow I/O
+- **Inter-batch arrival timing (05-04)**: Measure time BEFORE fetching batch (not processing time) for queue state heuristic
+- **Single GPU transfer (05-04)**: Use gpu_batch_ref to prevent double transfer of cu_seqlens and other tensors
+- **Pinned memory validation (05-04)**: Check tensors on first batch to detect misconfiguration early
+- **FP16→FP32 embeddings (05-04)**: Model may compute in FP16 but embeddings always stored in FP32 for stability
+- **sequence_ids required (05-04)**: ValueError if batch missing sequence_ids, prevents synthetic ID generation bugs
 
 ### Pending Todos
 
@@ -73,7 +78,7 @@ None yet.
 - ✅ DataLoader CUDA isolation: RESOLVED in 05-03 - cuda_safe_worker_init() sets CUDA_VISIBLE_DEVICES='' and validates no CUDA
 - HuggingFace cache race: Not applicable for 05-01 (workers yield raw strings, no model loading) - relevant for future tokenizer integration
 - ⚠️ Persistent worker memory leaks: prefetch_factor=4 chosen for GPU saturation (05-03 decision overrides 05-02 concern - accepted trade-off for inference performance)
-- **ONGOING**: Test environment setup needed - torch/esm not available in current Python environment (verification tests skipped in 05-01, 05-03)
+- **ONGOING**: Test environment setup needed - torch/esm not available in current Python environment (verification tests skipped in 05-01, 05-02, 05-03, 05-04)
 
 **Phase 6 (Sequence Packing Integration):**
 - FlashAttention varlen API: fair-esm 2.0.0 may require manual integration of flash_attn_varlen_func - investigate esm2_flash.py wrapper layer
@@ -85,8 +90,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-03T15:52:54Z
-Stopped at: Completed 05-03-PLAN.md (Async DataLoader Factory)
+Last session: 2026-02-03T15:59:26Z
+Stopped at: Completed 05-04-PLAN.md (Async Inference Runner)
 Resume file: None
 
-**Next step:** Continue with next plan in phase 5 (likely 05-04: Async Inference Runner)
+**Next step:** Continue with next plan in phase 5 (likely 05-05: End-to-end integration test)
