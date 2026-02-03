@@ -164,6 +164,9 @@ class DataLoaderMetrics:
     avg_sequence_length: float = 0.0  # Average tokens per sequence
     max_sequence_length: int = 0      # Longest sequence in batch
 
+    # Packing efficiency (for packed batches)
+    packing_efficiency: Optional[float] = None  # Token utilization 0.0-1.0
+
     # Heuristic queue state (not actual DataLoader queue)
     queue_state: str = 'unknown'  # 'full' | 'starved' | 'normal' | 'unknown'
 
@@ -314,7 +317,8 @@ class NvitopMonitor:
         sequences_in_batch: int,
         tokens_in_batch: int = 0,
         avg_sequence_length: float = 0.0,
-        max_sequence_length: int = 0
+        max_sequence_length: int = 0,
+        packing_efficiency: Optional[float] = None
     ) -> None:
         """
         Record DataLoader fetch timing for bottleneck detection.
@@ -326,6 +330,7 @@ class NvitopMonitor:
             tokens_in_batch: Total tokens in batch (for packed batches)
             avg_sequence_length: Average tokens per sequence
             max_sequence_length: Longest sequence in batch
+            packing_efficiency: Optional packing efficiency (0.0-1.0)
         """
         metrics = DataLoaderMetrics(
             timestamp=time.time(),
@@ -335,12 +340,19 @@ class NvitopMonitor:
             tokens_in_batch=tokens_in_batch,
             avg_sequence_length=avg_sequence_length,
             max_sequence_length=max_sequence_length,
+            packing_efficiency=packing_efficiency,
             queue_state=infer_queue_state(wait_time_ms)
         )
         with self._lock:
             self._dataloader_metrics.append(metrics)
             self._total_sequences += sequences_in_batch
             self._total_tokens += tokens_in_batch
+
+        # Log warning if packing efficiency below threshold
+        if packing_efficiency is not None and packing_efficiency < 0.80:
+            logger.warning(
+                f"Low packing efficiency: {packing_efficiency:.1%} < 80% at batch {batch_idx}"
+            )
 
         # Log every N batches per CONTEXT.md decision
         if batch_idx % self._batch_log_interval == 0:
@@ -403,17 +415,27 @@ class NvitopMonitor:
         seq_lengths = [m.avg_sequence_length for m in metrics if m.avg_sequence_length > 0]
         max_lengths = [m.max_sequence_length for m in metrics if m.max_sequence_length > 0]
 
-        # Packing efficiency: actual_tokens / (num_sequences * max_length_in_batch)
-        # For packed batches: high efficiency means less padding waste
-        total_actual_tokens = sum(m.tokens_in_batch for m in metrics)
-        total_theoretical_tokens = sum(
-            m.sequences_in_batch * m.max_sequence_length
-            for m in metrics if m.max_sequence_length > 0
-        )
-        packing_efficiency = (
-            total_actual_tokens / total_theoretical_tokens
-            if total_theoretical_tokens > 0 else 0.0
-        )
+        # Packing efficiency from recorded metrics (if available)
+        # Use metrics from record_dataloader_wait if provided, otherwise calculate
+        efficiency_values = [m.packing_efficiency for m in metrics if m.packing_efficiency is not None]
+        if efficiency_values:
+            # Use tracked efficiency values
+            avg_packing_efficiency = sum(efficiency_values) / len(efficiency_values)
+            min_packing_efficiency = min(efficiency_values)
+            batches_below_threshold = sum(1 for e in efficiency_values if e < 0.80)
+        else:
+            # Fallback: calculate from batch composition
+            total_actual_tokens = sum(m.tokens_in_batch for m in metrics)
+            total_theoretical_tokens = sum(
+                m.sequences_in_batch * m.max_sequence_length
+                for m in metrics if m.max_sequence_length > 0
+            )
+            avg_packing_efficiency = (
+                total_actual_tokens / total_theoretical_tokens
+                if total_theoretical_tokens > 0 else 0.0
+            )
+            min_packing_efficiency = 0.0
+            batches_below_threshold = 0
 
         # Queue state distribution
         queue_state_counts = {
@@ -437,8 +459,10 @@ class NvitopMonitor:
             'avg_sequence_length': sum(seq_lengths) / len(seq_lengths) if seq_lengths else 0,
             'avg_max_length': sum(max_lengths) / len(max_lengths) if max_lengths else 0,
 
-            # Packing efficiency
-            'packing_efficiency': packing_efficiency,
+            # Packing efficiency (extended metrics)
+            'avg_packing_efficiency': avg_packing_efficiency,
+            'min_packing_efficiency': min_packing_efficiency,
+            'batches_below_threshold': batches_below_threshold,
 
             # Volume
             'total_batches': len(metrics),
