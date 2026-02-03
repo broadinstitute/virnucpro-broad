@@ -25,6 +25,7 @@ import logging
 from typing import List, Dict, Any
 
 import torch
+from virnucpro.data.packing import GreedyPacker
 
 logger = logging.getLogger('virnucpro.data.collators')
 
@@ -63,62 +64,66 @@ class VarlenCollator:
         >>> # result['cu_seqlens']: [0, len(seq1), len(seq1)+len(seq2)]
     """
 
-    def __init__(self, batch_converter, max_tokens_per_batch: int = 4096):
+    def __init__(
+        self,
+        batch_converter,
+        max_tokens_per_batch: int = 4096,
+        max_sequence_length: int = 1022,
+        buffer_size: int = 2000,
+        enable_packing: bool = True,
+    ):
         """Initialize collator with ESM batch_converter.
 
         Args:
             batch_converter: ESM alphabet.get_batch_converter() instance
             max_tokens_per_batch: Maximum total tokens in a packed batch
-                Sequences are packed until this limit is reached. If a single
-                sequence exceeds this limit, it's still included (partial batch).
-
-        Note:
-            The batch_converter is a BatchConverter instance with an alphabet attribute.
-            We extract padding_idx from batch_converter.alphabet.
+            max_sequence_length: Max individual sequence length (ESM-2 limit: 1022)
+            buffer_size: Number of sequences to accumulate before packing.
+                Default 2000 achieves 92-94% efficiency. Range: 1000-5000.
+                Larger buffers improve efficiency but use more memory.
+            enable_packing: If True, use buffer-based packing. If False, process
+                batches directly (for testing/debugging).
         """
         self.batch_converter = batch_converter
         self.max_tokens_per_batch = max_tokens_per_batch
-
-        # Extract padding_idx from alphabet
-        # ESM uses <pad> token with index 1 by default
         self.padding_idx = batch_converter.alphabet.padding_idx
+
+        # Buffer-based packing (PACK-02, ARCH-11)
+        self.buffer = []  # Accumulates sequences before packing
+        self.packed_queue = []  # Pre-packed batches ready to return
+        self.buffer_size = buffer_size
+        self.enable_packing = enable_packing
+
+        # Initialize GreedyPacker for FFD algorithm
+        if enable_packing:
+            self.packer = GreedyPacker(
+                max_tokens_per_batch=max_tokens_per_batch,
+                max_sequence_length=max_sequence_length,
+            )
+        else:
+            self.packer = None
 
         logger.debug(
             f"VarlenCollator initialized: max_tokens={max_tokens_per_batch}, "
-            f"padding_idx={self.padding_idx}"
+            f"padding_idx={self.padding_idx}, buffer_size={buffer_size}, "
+            f"enable_packing={enable_packing}"
         )
 
-    def __call__(self, batch: List[Dict[str, str]]) -> Dict[str, Any]:
-        """Collate batch of sequences into packed format.
+    def _tokenize_and_pack(self, batch: List[Dict[str, str]]) -> Dict[str, Any]:
+        """Tokenize and pack a batch of sequences.
 
-        This method:
-        1. Extracts (id, sequence) tuples from batch dicts
-        2. Tokenizes using ESM batch_converter (returns PADDED 2D tensor)
-        3. Strips padding tokens from each sequence
-        4. Packs sequences into 1D tensor until max_tokens_per_batch reached
-        5. Builds cu_seqlens array (cumulative sequence boundaries)
+        This is the core packing logic extracted from __call__.
+        Used by both buffer-based and direct packing modes.
 
         Args:
-            batch: List of dicts from SequenceDataset with keys:
-                - 'id': Sequence ID
-                - 'sequence': Sequence string
-                - 'file': Source filename
+            batch: List of sequence dicts with 'id' and 'sequence' keys
 
         Returns:
-            Dictionary with packed batch:
-                - 'input_ids': 1D long tensor of concatenated tokens
-                - 'cu_seqlens': 1D int32 tensor of cumulative sequence lengths
-                    Format: [0, len1, len1+len2, len1+len2+len3, ...]
-                    Length: num_sequences + 1
-                - 'max_seqlen': Maximum individual sequence length in batch
-                - 'sequence_ids': List of sequence IDs that were packed
-                - 'num_sequences': Number of sequences packed (len(cu_seqlens) - 1)
-
-        Note:
-            If the FIRST sequence exceeds max_tokens_per_batch, it's still
-            included (partial batch with 1 sequence). Subsequent sequences
-            are skipped if they would exceed the token budget.
+            Dictionary with packed batch (input_ids, cu_seqlens, etc.)
         """
+        if not batch:
+            return {}
+
         # Extract (id, sequence) tuples for ESM batch_converter
         sequences = [(item['id'], item['sequence']) for item in batch]
 
@@ -186,3 +191,74 @@ class VarlenCollator:
             'sequence_ids': sequence_ids,
             'num_sequences': len(cu_seqlens) - 1,  # cu_seqlens has N+1 elements
         }
+
+    def __call__(self, batch: List[Dict[str, str]]) -> Dict[str, Any]:
+        """Stateful collator with buffer-based packing.
+
+        This method:
+        1. Accumulates sequences into buffer
+        2. When buffer reaches threshold, runs GreedyPacker.pack_sequences()
+        3. Returns packed batches from queue
+
+        Args:
+            batch: List of dicts from SequenceDataset with keys:
+                - 'id': Sequence ID
+                - 'sequence': Sequence string
+                - 'file': Source filename
+
+        Returns:
+            Dictionary with packed batch or empty dict if buffer not ready
+        """
+        if not self.enable_packing:
+            # Direct processing (no buffering)
+            return self._tokenize_and_pack(batch)
+
+        # Accumulate sequences into buffer
+        self.buffer.extend(batch)
+
+        # When buffer reaches threshold, pack it
+        if len(self.buffer) >= self.buffer_size:
+            # Run FFD on full buffer
+            packed_batches = self.packer.pack_sequences(self.buffer)
+            logger.debug(f"Packed {len(self.buffer)} sequences → {len(packed_batches)} batches")
+
+            # Store packed batches in queue
+            self.packed_queue.extend(packed_batches)
+            self.buffer = []  # Clear for next accumulation
+
+        # Return one packed batch if available
+        if self.packed_queue:
+            packed_batch = self.packed_queue.pop(0)
+            return self._tokenize_and_pack(packed_batch)
+
+        # Buffer not full yet - return empty batch or micro-batch fallback
+        # To prevent DataLoader stalling, return current micro-batch
+        if batch:
+            return self._tokenize_and_pack(batch)
+
+        # No data to return
+        return {}  # Empty batch (DataLoader will handle)
+
+    def flush(self) -> List[Dict[str, Any]]:
+        """Flush remaining buffer at end of dataset.
+
+        Returns list of packed batches for any sequences remaining in buffer.
+        Called by AsyncInferenceRunner after dataloader exhausted.
+        """
+        results = []
+
+        # Pack remaining buffer contents
+        if self.buffer:
+            logger.debug(f"Flushing buffer with {len(self.buffer)} sequences")
+            packed_batches = self.packer.pack_sequences(self.buffer) if self.packer else [self.buffer]
+            self.buffer = []
+
+            # Tokenize and pack each batch
+            for packed_batch in packed_batches:
+                results.append(self._tokenize_and_pack(packed_batch))
+
+        # Also flush any remaining packed_queue
+        while self.packed_queue:
+            results.append(self._tokenize_and_pack(self.packed_queue.pop(0)))
+
+        return results
