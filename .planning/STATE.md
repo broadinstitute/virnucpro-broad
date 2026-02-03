@@ -11,18 +11,18 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 6 of 10 (Sequence Packing Integration)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-02-03 — Phase 5 complete
+Plan: 2 of 8 in current phase
+Status: In progress
+Last activity: 2026-02-03 — Completed 06-02-PLAN.md
 
-Progress: [█████░░░░░] 39/TBD plans (v1.0: 34/34 complete, v2.0: 5/TBD)
+Progress: [█████░░░░░] 41/TBD plans (v1.0: 34/34 complete, v2.0: 7/TBD)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 39 (v1.0: 34, v2.0: 5)
-- Average duration: 3.1 min
-- Total execution time: 2.5 hours
+- Total plans completed: 41 (v1.0: 34, v2.0: 7)
+- Average duration: 3.0 min
+- Total execution time: 2.6 hours
 
 **By Phase:**
 
@@ -34,10 +34,11 @@ Progress: [█████░░░░░] 39/TBD plans (v1.0: 34/34 complete, v
 | 4 | 12 | 41 min | 3.4 min |
 | 4.1 | 3 | 10 min | 3.3 min |
 | 5 | 5 | 13 min | 2.6 min |
+| 6 | 2 | 5 min | 2.5 min |
 
 **Recent Trend:**
-- Last 5 plans (Phase 5): ~2.6 min average
-- Trend: Faster (parallel execution, streamlined testing)
+- Last 5 plans (Phase 5-6): ~2.6 min average
+- Trend: Faster (streamlined implementation, focused scope)
 
 *Updated after each plan completion*
 
@@ -66,6 +67,9 @@ Recent decisions affecting current work:
 - **Pinned memory validation (05-04)**: Check tensors on first batch to detect misconfiguration early
 - **FP16→FP32 embeddings (05-04)**: Model may compute in FP16 but embeddings always stored in FP32 for stability
 - **sequence_ids required (05-04)**: ValueError if batch missing sequence_ids, prevents synthetic ID generation bugs
+- **Position ID reset at boundaries (06-02)**: Position IDs must reset to 0 at each cu_seqlens boundary for correct positional embeddings in packed format
+- **FlashAttention dtype validation (06-02)**: Validate FP16/BF16 before calling flash_attn_varlen_func - provides clear error messages vs cryptic kernel errors
+- **flash-attn version check (06-02)**: Warn if <2.6.0 but don't block - allows testing while encouraging upgrade for bug fixes
 
 ### Pending Todos
 
@@ -79,9 +83,10 @@ None yet.
 - Phase 6 gate working correctly (packed format raises NotImplementedError)
 
 **Phase 6 (Sequence Packing Integration):**
-- FlashAttention varlen API: fair-esm 2.0.0 may require manual integration of flash_attn_varlen_func - investigate esm2_flash.py wrapper layer
-- Position ID off-by-one: Must reset position IDs to 0 at each cu_seqlens boundary (not sequential [0,1,2,3,4,5])
-- Packing correctness: Need extensive validation (packed output == unpacked output for same sequences)
+- ✅ Position ID generator: Implemented with boundary reset validation (06-02)
+- ✅ FlashAttention wrapper: Implemented with dtype/format validation (06-02)
+- ⏳ ESM-2 forward pass: Need to integrate position IDs and varlen attention (06-03)
+- ⏳ Packing correctness: Need validation tests (packed == unpacked output for same sequences)
 
 **Phase 8 (FP16 Precision Validation):**
 - Numerical precision: LayerNorm may have limited dynamic range in FP16 - may need selective FP32 for specific layers while keeping rest in FP16
@@ -89,7 +94,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Phase 5 complete - async DataLoader foundation with CUDA safety verified
+Stopped at: Completed 06-02-PLAN.md - Position ID generator and FlashAttention varlen wrapper
 Resume file: None
 
-**Next step:** `/gsd:discuss-phase 6` to gather context for Sequence Packing Integration, or `/gsd:plan-phase 6` to plan directly
+**Next step:** Continue with 06-03-PLAN.md to integrate packed attention into ESM-2 forward pass
