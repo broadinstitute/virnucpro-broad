@@ -349,10 +349,30 @@ class ESM2WithFlashAttention(nn.Module):
         Returns:
             Tuple of (rotated_q, rotated_k) with same shapes as input
         """
-        # Get sin/cos values from rot_emb cached buffers
-        # rot_emb has sin_cached and cos_cached buffers: [max_positions, dim]
-        cos_cached = rot_emb.cos_cached.to(q.dtype)
-        sin_cached = rot_emb.sin_cached.to(q.dtype)
+        # Get sin/cos values from rot_emb buffers
+        # First, inspect what buffers are actually available
+        # rot_emb._buffers contains registered buffers
+        if not hasattr(self, '_rope_buffers_logged'):
+            logger.info(f"RotaryEmbedding buffers: {list(rot_emb._buffers.keys())}")
+            logger.info(f"RotaryEmbedding state_dict keys: {list(rot_emb.state_dict().keys())}")
+            self._rope_buffers_logged = True
+
+        # Try common buffer names
+        if hasattr(rot_emb, 'cos_cached'):
+            cos_cached = rot_emb.cos_cached.to(q.dtype)
+            sin_cached = rot_emb.sin_cached.to(q.dtype)
+        elif hasattr(rot_emb, '_cos_cached'):
+            cos_cached = rot_emb._cos_cached.to(q.dtype)
+            sin_cached = rot_emb._sin_cached.to(q.dtype)
+        elif 'cos_cached' in rot_emb._buffers:
+            cos_cached = rot_emb._buffers['cos_cached'].to(q.dtype)
+            sin_cached = rot_emb._buffers['sin_cached'].to(q.dtype)
+        else:
+            # Fallback: call rot_emb to compute sin/cos then extract from internals
+            raise RuntimeError(
+                f"Cannot find sin/cos buffers in RotaryEmbedding. "
+                f"Available buffers: {list(rot_emb._buffers.keys())}"
+            )
 
         # Index sin/cos using position_ids: [total_tokens, dim]
         cos = cos_cached[position_ids]
