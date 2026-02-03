@@ -290,12 +290,13 @@ class ESM2WithFlashAttention(nn.Module):
         v = layer.self_attn.v_proj(hidden_states).reshape(-1, num_heads, head_dim)
 
         # Apply Rotary Position Embeddings (RoPE) to Q and K
-        # ESM-2's rot_emb applies position information to query and key
+        # NOTE: rot_emb.forward(q, k) computes positions as torch.arange(total_tokens)
+        # This doesn't reset at sequence boundaries, which is incorrect for packed sequences
+        # TODO: Implement manual RoPE with position_ids that reset at cu_seqlens boundaries
         if hasattr(layer.self_attn, 'rot_emb') and layer.self_attn.rot_emb is not None:
-            # rot_emb takes q, k and applies rotary embeddings based on position_ids
-            # Expected signature: rot_emb(q, k) where positions come from sequence structure
-            # For packed sequences, we need to pass position_ids that reset at boundaries
-            q, k = layer.self_attn.rot_emb(q, k, position_ids)
+            # Temporarily using standard rot_emb call (positions won't reset)
+            # This will cause test failures but lets us find other issues first
+            q, k = layer.self_attn.rot_emb(q, k)
 
         # FlashAttention varlen - automatically prevents cross-sequence attention
         attn_output = flash_attn_varlen_wrapper(
