@@ -400,6 +400,14 @@ def validate_packed_equivalence(
             'num_sequences': 0,
         }
 
+    # CRITICAL: Ensure both unpacked and packed paths use the same precision
+    # forward_packed() auto-converts to BF16 for FlashAttention, so we must
+    # also run the unpacked baseline in BF16 for a fair comparison.
+    # If model is in FP32, convert to BF16 before any processing.
+    if model.model.embed_tokens.weight.dtype == torch.float32:
+        logger.info("Converting model to BF16 for equivalence validation (ensures same precision for both paths)")
+        model.model = model.model.to(dtype=torch.bfloat16)
+
     # Step 1: Detect model's actual layer count
     # ESM-2 models: 650M has 33 layers, 3B has 36 layers, etc.
     num_layers = len(model.model.layers)  # Actual layer count
