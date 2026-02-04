@@ -332,9 +332,10 @@ class IndexBasedDataset(IterableDataset):
 
         This method:
         1. Validates CUDA isolation (once per worker)
-        2. Groups indices by file_path for efficient I/O
-        3. For each file: seeks to byte offsets and reads sequences
-        4. Yields sequences in index order (preserves length-sorted order)
+        2. Shards indices across DataLoader workers (if num_workers > 1)
+        3. Groups indices by file_path for efficient I/O
+        4. For each file: seeks to byte offsets and reads sequences
+        5. Yields sequences in index order (preserves length-sorted order)
 
         Yields:
             Dictionary with keys:
@@ -346,14 +347,35 @@ class IndexBasedDataset(IterableDataset):
             Sequences are yielded in the exact order of self.indices, which
             preserves the length-sorted order from the index. This is critical
             for packing efficiency when used with FFD algorithm.
+
+            When DataLoader uses num_workers > 1, each worker processes a
+            subset of indices using stride distribution to avoid duplicates.
         """
         # Validate CUDA isolation at start of iteration
         self._validate_cuda_isolation()
 
+        # Shard indices across DataLoader workers to prevent duplicates
+        worker_info = get_worker_info()
+        if worker_info is None:
+            # Single-process loading: process all indices
+            indices_to_process = self.indices
+        else:
+            # Multi-worker: shard indices across workers using stride
+            worker_id = worker_info.id
+            num_workers = worker_info.num_workers
+            indices_to_process = [
+                idx for i, idx in enumerate(self.indices)
+                if i % num_workers == worker_id
+            ]
+            logger.debug(
+                f"Worker {worker_id}/{num_workers}: processing "
+                f"{len(indices_to_process)}/{len(self.indices)} indices"
+            )
+
         # Group indices by file_path for efficient file access
         # file_path -> [(idx, entry), ...]
         file_groups = defaultdict(list)
-        for idx in self.indices:
+        for idx in indices_to_process:
             entry = self._entries[idx]
             file_groups[entry['file_path']].append((idx, entry))
 
@@ -386,8 +408,8 @@ class IndexBasedDataset(IterableDataset):
                 logger.error(f"Error reading {file_path}: {e}")
                 raise
 
-        # Yield sequences in index order
-        for idx in self.indices:
+        # Yield sequences in index order (respecting worker sharding)
+        for idx in indices_to_process:
             yield sequences_by_idx[idx]
 
     def __len__(self) -> int:
