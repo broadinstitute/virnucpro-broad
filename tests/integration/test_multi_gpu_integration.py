@@ -65,6 +65,9 @@ def single_gpu_baseline(test_fasta_files, tmp_path_factory, request):
 
     This baseline is used for embedding equivalence tests.
     Uses a subset of sequences to reduce runtime.
+
+    IMPORTANT: Model is cleaned up after extraction to free GPU memory
+    for multi-GPU tests that need to load models on GPU 0.
     """
     try:
         from virnucpro.data import SequenceDataset, VarlenCollator
@@ -99,7 +102,7 @@ def single_gpu_baseline(test_fasta_files, tmp_path_factory, request):
             all_embeddings.append(result.embeddings.cpu())
             all_ids.extend(result.sequence_ids)
 
-        # Concatenate embeddings
+        # Concatenate embeddings (already on CPU)
         embeddings = torch.cat(all_embeddings, dim=0).numpy()
 
         # Return as dict for easy lookup
@@ -108,7 +111,14 @@ def single_gpu_baseline(test_fasta_files, tmp_path_factory, request):
             for i, seq_id in enumerate(all_ids)
         }
 
-        request.addfinalizer(lambda: model.close() if hasattr(model, 'close') else None)
+        # CRITICAL: Clean up GPU memory BEFORE returning
+        # Multi-GPU tests need GPU 0 to be free for Worker 0
+        del model
+        del runner
+        del dataloader
+        del collator
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
 
         return baseline
     except ImportError as e:
