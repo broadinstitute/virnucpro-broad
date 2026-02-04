@@ -217,6 +217,10 @@ class VarlenCollator:
         if isinstance(batch, dict):
             batch = [batch]
 
+        # Guard: empty batch returns empty dict without processing
+        if not batch:
+            return {}
+
         if not self.enable_packing:
             # Direct processing (no buffering)
             return self._tokenize_and_pack(batch)

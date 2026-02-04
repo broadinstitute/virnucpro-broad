@@ -196,10 +196,12 @@ class TestVarlenCollatorPacking:
             {'id': 'seq2', 'sequence': 'VLSPADKTNV'},
         ]
 
-        with patch.object(collator, '_tokenize_and_pack', return_value={'test': 'data'}):
-            result = collator([{}])
+        with patch.object(collator, '_tokenize_and_pack', return_value={'test': 'data'}) as mock_pack:
+            result = collator([])
 
             assert len(collator.buffer) == 2, "Buffer should remain unchanged"
+            assert result == {}, "Empty batch should return empty dict"
+            mock_pack.assert_not_called(), "Should not tokenize empty batch"
 
 
 class TestDataloaderDynamicBudget:
