@@ -1,0 +1,26 @@
+tests/unit/test_collators.py
+  094eb0febb50f8d2 324-398
+virnucpro/data/collators.py
+  094eb0febb50f8d2 25,196,206,210-211,216-219
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "a4bb449d6bb0a3d710675d64b2c69dc375206ae3",
+  "prompts": {
+    "094eb0febb50f8d2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ae31ecf-1e0a-48eb-9533-6c90812714fa",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 86,
+      "total_deletions": 3,
+      "accepted_lines": 84,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/be7fef5620a57b2010c12792480b60cfb3444b15ec606263c8f8723144a5ed91"
+    }
+  }
+}
