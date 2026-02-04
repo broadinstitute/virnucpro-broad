@@ -1,0 +1,24 @@
+tests/integration/test_multi_gpu_integration.py
+  094eb0febb50f8d2 1-558
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "fd78bf6b21d7f105bfae0c77e5bf562d42b9c4bc",
+  "prompts": {
+    "094eb0febb50f8d2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ae31ecf-1e0a-48eb-9533-6c90812714fa",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 558,
+      "total_deletions": 0,
+      "accepted_lines": 558,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/ee2a25c809da975c3cef44cb428b3120831141968672e91495338996cf87387d"
+    }
+  }
+}
