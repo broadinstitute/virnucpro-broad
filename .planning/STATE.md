@@ -11,18 +11,18 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 7 of 10 (Multi-GPU Coordination)
-Plan: 6 of 8 in current phase
+Plan: 7 of 8 in current phase
 Status: In progress
-Last activity: 2026-02-04 — Completed 07-06-PLAN.md (GPU worker function integration)
+Last activity: 2026-02-04 — Completed 07-07-PLAN.md (run_multi_gpu_inference orchestration entry point)
 
-Progress: [█████░░░░░] 58/TBD plans (v1.0: 34/34 complete, v2.0: 24/TBD)
+Progress: [█████░░░░░] 59/TBD plans (v1.0: 34/34 complete, v2.0: 25/TBD)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 58 (v1.0: 34, v2.0: 24)
+- Total plans completed: 59 (v1.0: 34, v2.0: 25)
 - Average duration: 3.0 min
-- Total execution time: 3.5 hours
+- Total execution time: 3.6 hours
 
 **By Phase:**
 
@@ -35,10 +35,10 @@ Progress: [█████░░░░░] 58/TBD plans (v1.0: 34/34 complete, v
 | 4.1 | 3 | 10 min | 3.3 min |
 | 5 | 5 | 13 min | 2.6 min |
 | 6 | 8 | 28 min | 3.5 min |
-| 7 | 4 (in progress) | 14 min | 3.5 min |
+| 7 | 5 (in progress) | 18 min | 3.6 min |
 
 **Recent Trend:**
-- Last 5 plans: ~3.1 min average
+- Last 5 plans: ~3.3 min average
 - Trend: Steady (Phase 7 multi-GPU integration)
 
 *Updated after each plan completion*
@@ -101,6 +101,9 @@ Recent decisions affecting current work:
 - **Worker logging first (07-06)**: setup_worker_logging() called before any other operations to ensure all worker actions are logged
 - **Empty embeddings handling (07-06)**: Handle zero-sequence case gracefully with empty HDF5 dataset instead of crashing on torch.cat
 - **Status before exit (07-06)**: results_queue.put(status) before sys.exit(1) ensures parent knows which workers failed
+- **Partial failure handling (07-07)**: Return (output_path, failed_ranks) tuple instead of raising - salvages results from successful workers
+- **Auto-detect world_size (07-07)**: Use torch.cuda.device_count() when world_size not specified for simplified common case
+- **Partial expected IDs validation (07-07)**: Calculate expected IDs only from successful workers when failures occur to match actual shard content
 
 ### Pending Todos
 
@@ -130,8 +133,10 @@ None yet.
 - ✅ IndexBasedDataset for byte-offset sequence reading (07-02)
 - ✅ Per-worker logging infrastructure (07-03)
 - ✅ GPUProcessCoordinator for worker lifecycle (07-04)
+- ✅ HDF5 shard aggregation with validation (07-05)
 - ✅ GPU worker function integration (07-06)
-- Pending: HDF5 aggregation (07-05), coordinator integration (07-07), end-to-end testing (07-08)
+- ✅ run_multi_gpu_inference orchestration entry point (07-07)
+- Pending: End-to-end integration tests (07-08)
 
 **Phase 8 (FP16 Precision Validation):**
 - Numerical precision: LayerNorm may have limited dynamic range in FP16 - may need selective FP32 for specific layers while keeping rest in FP16
@@ -139,7 +144,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Completed 07-06-PLAN.md (GPU worker function integration)
+Stopped at: Completed 07-07-PLAN.md (run_multi_gpu_inference orchestration entry point)
 Resume file: None
 
-**Next step:** Continue Phase 7 - Plan 07-05 (HDF5 shard aggregation) or 07-07 (Coordinator integration)
+**Next step:** Continue Phase 7 - Plan 07-08 (End-to-end integration tests)
