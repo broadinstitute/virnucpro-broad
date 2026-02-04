@@ -151,7 +151,7 @@ def test_layer_forward_packed_signature():
     params = list(sig.parameters.keys())
 
     # Verify required parameters
-    expected = ['self', 'layer', 'hidden_states', 'cu_seqlens', 'max_seqlen']
+    expected = ['self', 'layer', 'hidden_states', 'cu_seqlens', 'max_seqlen', 'position_ids']
     assert params == expected, \
         f"Expected {expected}, got {params}"
 
