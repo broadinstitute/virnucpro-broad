@@ -6,23 +6,23 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 
 **Core value:** Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs and automatically queue batches, reducing sample processing time from 45+ hours to under 10 hours.
 
-**Current focus:** Phase 6 - Sequence Packing Integration
+**Current focus:** Phase 7 - Multi-GPU Coordination
 
 ## Current Position
 
-Phase: 6 of 10 (Sequence Packing Integration)
-Plan: 6 of 8 in current phase
+Phase: 7 of 10 (Multi-GPU Coordination)
+Plan: 3 of 8 in current phase
 Status: In progress
-Last activity: 2026-02-03 — Completed 06-05-PLAN.md
+Last activity: 2026-02-04 — Completed 07-03-PLAN.md (Per-worker logging infrastructure)
 
-Progress: [█████░░░░░] 46/TBD plans (v1.0: 34/34 complete, v2.0: 12/TBD)
+Progress: [█████░░░░░] 55/TBD plans (v1.0: 34/34 complete, v2.0: 21/TBD)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 46 (v1.0: 34, v2.0: 12)
+- Total plans completed: 55 (v1.0: 34, v2.0: 21)
 - Average duration: 2.9 min
-- Total execution time: 3.0 hours
+- Total execution time: 3.2 hours
 
 **By Phase:**
 
@@ -34,11 +34,12 @@ Progress: [█████░░░░░] 46/TBD plans (v1.0: 34/34 complete, v
 | 4 | 12 | 41 min | 3.4 min |
 | 4.1 | 3 | 10 min | 3.3 min |
 | 5 | 5 | 13 min | 2.6 min |
-| 6 | 7 | 25 min | 3.6 min |
+| 6 | 8 | 28 min | 3.5 min |
+| 7 | 3 (in progress) | 5 min | 1.7 min |
 
 **Recent Trend:**
-- Last 5 plans (Phase 6): ~3.0 min average
-- Trend: Steady (consistent implementation pace)
+- Last 5 plans: ~2.0 min average
+- Trend: Faster (Phase 7 plans are smaller, more focused)
 
 *Updated after each plan completion*
 
@@ -86,6 +87,9 @@ Recent decisions affecting current work:
 - **Two-tier efficiency thresholds (06-06)**: <80% critical error (packing broken), <85% warning (buffer too small) - distinguishes broken packing from suboptimal buffer sizing
 - **Token utilization metric (06-06)**: Use num_tokens / max_tokens_per_batch as primary efficiency metric - simpler than padding waste calculation
 - **Periodic logging interval (06-06)**: Log efficiency summary every 100 batches to avoid log spam while providing regular progress updates
+- **Append mode for worker logs (07-03)**: Log files opened with mode='a' to preserve history across restarts - critical for debugging failed GPU workers
+- **Console handler WARNING level (07-03)**: File handler captures all INFO+ messages, console filters to WARNING+ only - reduces noise during normal operation
+- **Resume separator logging (07-03)**: When log file exists, log "=== Resume at {timestamp} ===" separator - enables easy session boundary identification
 
 ### Pending Todos
 
@@ -98,22 +102,29 @@ None yet.
 - Integration tests validated on GPU server (7/9 pass, 2 expected Phase 6 failures)
 - Phase 6 gate working correctly (packed format raises NotImplementedError)
 
-**Phase 6 (Sequence Packing Integration):**
-- ✅ Position ID generator: Implemented with boundary reset validation (06-02)
-- ✅ FlashAttention wrapper: Implemented with dtype/format validation (06-02)
-- ✅ ESM-2 forward pass: forward_packed method with layer-level FlashAttention varlen integration (06-03)
-- ✅ Packed inference path: Wired in AsyncInferenceRunner with forward_packed call (06-04)
-- ✅ Embedding extraction: Fixed 1D packed format handling (06-04)
-- ✅ Packing correctness: Validated via equivalence tests (06-05)
-- ✅ Packing efficiency monitoring: Two-tier thresholds and periodic logging (06-06)
+**Phase 6 (Sequence Packing Integration):** ✅ COMPLETE
+- ✅ GreedyPacker with FFD algorithm and dynamic token budget (06-01)
+- ✅ Position ID generator with boundary reset validation (06-02)
+- ✅ FlashAttention wrapper with dtype/format validation (06-02)
+- ✅ ESM-2 forward_packed method with layer-level FlashAttention (06-03)
+- ✅ Packed inference path wired in AsyncInferenceRunner (06-04)
+- ✅ Embedding extraction for 1D packed format (06-04)
+- ✅ Packing correctness validated via cosine similarity tests (06-05)
+- ✅ Packing efficiency monitoring with two-tier thresholds (06-06)
+- ✅ End-to-end integration tests and human verification (06-07)
+- ✅ Buffer-based packing integration in VarlenCollator (06-08)
+
+**Phase 7 (Multi-GPU Coordination):** IN PROGRESS
+- ✅ Per-worker logging infrastructure (07-03)
+- Pending: SequenceIndex creation/caching (07-01), GPUProcessCoordinator (07-02), HDF5 shard aggregation (07-04), end-to-end integration (07-05+)
 
 **Phase 8 (FP16 Precision Validation):**
 - Numerical precision: LayerNorm may have limited dynamic range in FP16 - may need selective FP32 for specific layers while keeping rest in FP16
 
 ## Session Continuity
 
-Last session: 2026-02-03
-Stopped at: Completed 06-05-PLAN.md - Added packed equivalence validation with cosine similarity tests
+Last session: 2026-02-04
+Stopped at: Completed 07-03-PLAN.md (Per-worker logging infrastructure)
 Resume file: None
 
-**Next step:** Continue with remaining Phase 6 plans (06-06 through 06-08) to complete sequence packing integration
+**Next step:** Continue Phase 7 - Complete remaining coordination plans (07-01, 07-02, 07-04, 07-05, 07-06, 07-07, 07-08)
