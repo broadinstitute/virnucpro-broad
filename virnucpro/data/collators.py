@@ -218,7 +218,7 @@ class VarlenCollator:
             batch = [batch]
 
         # Guard: empty batch returns empty dict without processing
-        if not batch:
+        if batch is None or not batch:
             return {}
 
         if not self.enable_packing:
