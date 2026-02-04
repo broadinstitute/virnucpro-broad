@@ -794,6 +794,10 @@ class NvitopMonitor:
             f.write(f"# Summary:\n")
 
             for device_id, device_stats in stats.items():
+                # Skip non-device entries (e.g., 'dataloader')
+                if not isinstance(device_id, int):
+                    continue
+
                 f.write(f"# GPU {device_id}:\n")
                 f.write(f"#   Avg Utilization: {device_stats['gpu_util_avg']:.1f}%\n")
                 f.write(f"#   Peak Memory: {device_stats['mem_used_peak'] / (1024**3):.2f} GB\n")
