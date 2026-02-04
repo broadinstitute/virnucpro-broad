@@ -11,18 +11,18 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 7 of 10 (Multi-GPU Coordination)
-Plan: 3 of 8 in current phase
+Plan: 5 of 8 in current phase
 Status: In progress
-Last activity: 2026-02-04 — Completed 07-03-PLAN.md (Per-worker logging infrastructure)
+Last activity: 2026-02-04 — Completed 07-05-PLAN.md (HDF5 shard aggregation)
 
-Progress: [█████░░░░░] 55/TBD plans (v1.0: 34/34 complete, v2.0: 21/TBD)
+Progress: [█████░░░░░] 57/TBD plans (v1.0: 34/34 complete, v2.0: 23/TBD)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 55 (v1.0: 34, v2.0: 21)
+- Total plans completed: 57 (v1.0: 34, v2.0: 23)
 - Average duration: 2.9 min
-- Total execution time: 3.2 hours
+- Total execution time: 3.3 hours
 
 **By Phase:**
 
@@ -35,11 +35,11 @@ Progress: [█████░░░░░] 55/TBD plans (v1.0: 34/34 complete, v
 | 4.1 | 3 | 10 min | 3.3 min |
 | 5 | 5 | 13 min | 2.6 min |
 | 6 | 8 | 28 min | 3.5 min |
-| 7 | 3 (in progress) | 5 min | 1.7 min |
+| 7 | 5 (in progress) | 13 min | 2.6 min |
 
 **Recent Trend:**
-- Last 5 plans: ~2.0 min average
-- Trend: Faster (Phase 7 plans are smaller, more focused)
+- Last 5 plans: ~2.4 min average
+- Trend: Steady (Phase 7 small focused modules)
 
 *Updated after each plan completion*
 
@@ -90,6 +90,8 @@ Recent decisions affecting current work:
 - **Append mode for worker logs (07-03)**: Log files opened with mode='a' to preserve history across restarts - critical for debugging failed GPU workers
 - **Console handler WARNING level (07-03)**: File handler captures all INFO+ messages, console filters to WARNING+ only - reduces noise during normal operation
 - **Resume separator logging (07-03)**: When log file exists, log "=== Resume at {timestamp} ===" separator - enables easy session boundary identification
+- **CHUNK_SIZE=10000 for HDF5 streaming (07-05)**: Read shards in 10k-sequence chunks to prevent memory overflow on large datasets
+- **Extra sequences warn not error (07-05)**: Missing sequences raise ValueError (integrity issue), extra sequences log warning (allows debug sequences)
 
 ### Pending Todos
 
@@ -116,7 +118,8 @@ None yet.
 
 **Phase 7 (Multi-GPU Coordination):** IN PROGRESS
 - ✅ Per-worker logging infrastructure (07-03)
-- Pending: SequenceIndex creation/caching (07-01), GPUProcessCoordinator (07-02), HDF5 shard aggregation (07-04), end-to-end integration (07-05+)
+- ✅ HDF5 shard aggregation with validation (07-05)
+- Pending: SequenceIndex creation/caching (07-01), GPUProcessCoordinator (07-02), GPU worker process (07-04), coordinator integration (07-06+)
 
 **Phase 8 (FP16 Precision Validation):**
 - Numerical precision: LayerNorm may have limited dynamic range in FP16 - may need selective FP32 for specific layers while keeping rest in FP16
@@ -124,7 +127,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Completed 07-03-PLAN.md (Per-worker logging infrastructure)
+Stopped at: Completed 07-05-PLAN.md (HDF5 shard aggregation)
 Resume file: None
 
-**Next step:** Continue Phase 7 - Complete remaining coordination plans (07-01, 07-02, 07-04, 07-05, 07-06, 07-07, 07-08)
+**Next step:** Continue Phase 7 - Complete remaining coordination plans (07-01, 07-02, 07-04, 07-06, 07-07, 07-08)
