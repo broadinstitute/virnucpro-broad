@@ -1,0 +1,24 @@
+virnucpro/data/shard_index.py
+  094eb0febb50f8d2 1-256
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "d946219220d0e06733b3b5ad9b7797d825308928",
+  "prompts": {
+    "094eb0febb50f8d2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ae31ecf-1e0a-48eb-9533-6c90812714fa",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 634,
+      "total_deletions": 0,
+      "accepted_lines": 634,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/1d6ff11fbf8fadc6bf608f3e6c7732a7d05c9ba250bff4f1841da4cd2eee8303"
+    }
+  }
+}
