@@ -1,0 +1,40 @@
+.planning/phases/07-multi-gpu-coordination/07-07-PLAN.md
+  b5962dd6b1c14c2a 1-275
+.planning/phases/07-multi-gpu-coordination/07-01-PLAN.md
+  b5962dd6b1c14c2a 1-177
+.planning/phases/07-multi-gpu-coordination/07-08-PLAN.md
+  b5962dd6b1c14c2a 1-204
+.planning/phases/07-multi-gpu-coordination/07-04-PLAN.md
+  b5962dd6b1c14c2a 1-235
+.planning/ROADMAP.md
+  b5962dd6b1c14c2a 53,112,119,124,127-134,208,214
+.planning/phases/07-multi-gpu-coordination/07-05-PLAN.md
+  b5962dd6b1c14c2a 1-212
+.planning/phases/07-multi-gpu-coordination/07-06-PLAN.md
+  b5962dd6b1c14c2a 1-261
+.planning/phases/07-multi-gpu-coordination/07-02-PLAN.md
+  b5962dd6b1c14c2a 1-172
+.planning/phases/07-multi-gpu-coordination/07-03-PLAN.md
+  b5962dd6b1c14c2a 1-171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "258d8c99a944c0f7ab4d5cb099384271b0dbd14d",
+  "prompts": {
+    "b5962dd6b1c14c2a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "88868103-ffe1-4841-a83b-0f6c0f226fc6",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 1721,
+      "total_deletions": 7,
+      "accepted_lines": 1721,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/8563872a9607817f8b17d65f9da636f577bde8058568dc1bc89820fe74c6ed0a"
+    }
+  }
+}
