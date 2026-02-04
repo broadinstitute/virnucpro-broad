@@ -157,8 +157,12 @@ def gpu_worker(
 
         with h5py.File(shard_path, 'w') as f:
             # Stack embeddings and convert to numpy
-            embeddings = torch.cat(all_embeddings, dim=0).numpy()
-            f.create_dataset('embeddings', data=embeddings)
+            if all_embeddings:
+                embeddings = torch.cat(all_embeddings, dim=0).numpy()
+                f.create_dataset('embeddings', data=embeddings)
+            else:
+                # Empty shard - create empty dataset
+                f.create_dataset('embeddings', shape=(0, 0), dtype='float32')
 
             # Save sequence IDs with variable-length string dtype
             dt = h5py.special_dtype(vlen=str)
