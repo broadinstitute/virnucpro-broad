@@ -60,23 +60,35 @@ def temp_output_dir(tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
-def single_gpu_baseline(test_fasta_files, tmp_path_factory, request):
+def single_gpu_baseline(test_fasta_files, temp_output_dir, request):
     """Run single-GPU inference for baseline comparison.
 
-    This baseline is used for embedding equivalence tests.
-    Uses a subset of sequences to reduce runtime.
+    Uses the SAME infrastructure as multi-GPU (IndexBasedDataset, index-based
+    sharding) to ensure embeddings are produced identically. The only difference
+    is world_size=1.
 
     IMPORTANT: Model is cleaned up after extraction to free GPU memory
     for multi-GPU tests that need to load models on GPU 0.
     """
     try:
-        from virnucpro.data import SequenceDataset, VarlenCollator
+        from virnucpro.data import VarlenCollator
+        from virnucpro.data.sequence_dataset import IndexBasedDataset
+        from virnucpro.data.shard_index import create_sequence_index, get_worker_indices, load_sequence_index
         from virnucpro.data.dataloader_utils import create_async_dataloader
         from virnucpro.models.esm2_flash import load_esm2_model
         from virnucpro.pipeline.async_inference import AsyncInferenceRunner
 
         # Use first file only (333 sequences) for faster baseline
         baseline_fasta = test_fasta_files[0:1]
+        baseline_output = temp_output_dir / "baseline"
+        baseline_output.mkdir(parents=True, exist_ok=True)
+
+        # Create index (same as multi-GPU would)
+        index_path = baseline_output / "sequence_index.json"
+        create_sequence_index(baseline_fasta, index_path)
+
+        # Get ALL indices (world_size=1, rank=0 means all sequences)
+        all_indices = get_worker_indices(index_path, rank=0, world_size=1)
 
         # Load model on GPU 0
         model, batch_converter = load_esm2_model(
@@ -84,13 +96,13 @@ def single_gpu_baseline(test_fasta_files, tmp_path_factory, request):
             device="cuda:0"
         )
 
-        # Create dataset and dataloader
-        dataset = SequenceDataset(fasta_files=baseline_fasta)
+        # Create dataset using IndexBasedDataset (same as multi-GPU)
+        dataset = IndexBasedDataset(index_path, all_indices)
         collator = VarlenCollator(batch_converter, enable_packing=True, buffer_size=200)
         dataloader = create_async_dataloader(
             dataset, collator,
             device_id=0,
-            batch_size=None  # Use None for VarlenCollator token-budget packing (matches gpu_worker.py)
+            batch_size=None  # Use None for VarlenCollator token-budget packing
         )
 
         # Run inference
