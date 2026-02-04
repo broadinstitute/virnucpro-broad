@@ -1,0 +1,24 @@
+virnucpro/data/sequence_dataset.py
+  094eb0febb50f8d2 335-338,350-352,357-373,378,411-412
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "e1abfba72a9489567f4ab7e16ec3e728b9f4cf65",
+  "prompts": {
+    "094eb0febb50f8d2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ae31ecf-1e0a-48eb-9533-6c90812714fa",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 28,
+      "total_deletions": 6,
+      "accepted_lines": 28,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/d540f68352b7e2585fd23ad3704e744a3df47280ee889419511c740fae4516db"
+    }
+  }
+}
