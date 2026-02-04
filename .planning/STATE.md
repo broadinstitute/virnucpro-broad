@@ -11,18 +11,18 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 7 of 10 (Multi-GPU Coordination)
-Plan: 1 of 8 in current phase
+Plan: 2 of 8 in current phase
 Status: In progress
-Last activity: 2026-02-04 — Completed 07-01-PLAN.md (SequenceIndex with stride distribution)
+Last activity: 2026-02-04 — Completed 07-02-PLAN.md (IndexBasedDataset for byte-offset sequence reading)
 
-Progress: [█████░░░░░] 55/TBD plans (v1.0: 34/34 complete, v2.0: 21/TBD)
+Progress: [█████░░░░░] 56/TBD plans (v1.0: 34/34 complete, v2.0: 22/TBD)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 55 (v1.0: 34, v2.0: 21)
+- Total plans completed: 56 (v1.0: 34, v2.0: 22)
 - Average duration: 3.0 min
-- Total execution time: 3.3 hours
+- Total execution time: 3.35 hours
 
 **By Phase:**
 
@@ -35,10 +35,10 @@ Progress: [█████░░░░░] 55/TBD plans (v1.0: 34/34 complete, v
 | 4.1 | 3 | 10 min | 3.3 min |
 | 5 | 5 | 13 min | 2.6 min |
 | 6 | 8 | 28 min | 3.5 min |
-| 7 | 1 (in progress) | 4 min | 4.0 min |
+| 7 | 2 (in progress) | 7 min | 3.5 min |
 
 **Recent Trend:**
-- Last 5 plans: ~3.2 min average
+- Last 5 plans: ~3.0 min average
 - Trend: Steady (Phase 7 infrastructure modules)
 
 *Updated after each plan completion*
@@ -92,6 +92,9 @@ Recent decisions affecting current work:
 - **JSON index format (07-01)**: Human-readable metadata index (~200MB for 6M sequences) enables manual inspection and debugging
 - **Mtime-based cache validation (07-01)**: Compare max(fasta_mtime) > cached_mtime to detect stale index - automatic rebuild on FASTA changes
 - **Byte-offset tracking (07-01)**: Record sequence byte positions in FASTA files during index creation for future random access capability
+- **File grouping optimization (07-02)**: Group indices by file_path before reading to minimize file operations - improves I/O efficiency with large indices
+- **Memory-buffered ordering (07-02)**: Read sequences into memory dict then yield in index order - preserves length-sorted order for FFD packing
+- **CUDA validation duplication (07-02)**: Copy _validate_cuda_isolation to IndexBasedDataset - acceptable duplication for safety-critical checks
 
 ### Pending Todos
 
@@ -118,7 +121,8 @@ None yet.
 
 **Phase 7 (Multi-GPU Coordination):** IN PROGRESS
 - ✅ SequenceIndex with stride distribution and caching (07-01)
-- Pending: IndexBasedDataset (07-02), Per-worker logging (07-03), GPU worker process (07-04), HDF5 aggregation (07-05), coordinator integration (07-06+)
+- ✅ IndexBasedDataset for byte-offset sequence reading (07-02)
+- Pending: Per-worker logging (07-03), GPU worker process (07-04), HDF5 aggregation (07-05), coordinator integration (07-06+)
 
 **Phase 8 (FP16 Precision Validation):**
 - Numerical precision: LayerNorm may have limited dynamic range in FP16 - may need selective FP32 for specific layers while keeping rest in FP16
@@ -126,7 +130,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Completed 07-01-PLAN.md (SequenceIndex with stride distribution)
+Stopped at: Completed 07-02-PLAN.md (IndexBasedDataset for byte-offset sequence reading)
 Resume file: None
 
-**Next step:** Continue Phase 7 - Plan 07-02 (IndexBasedDataset for index-driven iteration)
+**Next step:** Continue Phase 7 - Plan 07-03 (Per-worker logging infrastructure)
