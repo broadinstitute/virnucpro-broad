@@ -49,8 +49,8 @@ See MILESTONES.md for detailed v1.0 retrospective.
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 5: Async DataLoader Foundation** - Single-GPU async pattern with CUDA safety
-- [ ] **Phase 6: Sequence Packing Integration** - FlashAttention varlen + greedy packing
-- [ ] **Phase 7: Multi-GPU Coordination** - File-level sharding across 4 GPUs
+- [x] **Phase 6: Sequence Packing Integration** - FlashAttention varlen + greedy packing
+- [ ] **Phase 7: Multi-GPU Coordination** - Index-based sharding across N GPUs
 - [ ] **Phase 8: FP16 Precision Validation** - Memory and speed optimization
 - [ ] **Phase 9: Checkpointing Integration** - Robustness for 6M sequence workloads
 - [ ] **Phase 10: Performance Validation & Tuning** - End-to-end benchmarking
@@ -98,33 +98,40 @@ Plans:
 **Plans**: 8 plans in 5 waves
 
 Plans:
-- [ ] 06-01-PLAN.md — GreedyPacker with FFD algorithm and dynamic token budget (PACK-03, ARCH-11)
-- [ ] 06-02-PLAN.md — Position ID generator and FlashAttention varlen wrapper
-- [ ] 06-03-PLAN.md — ESM2 forward_packed method
-- [ ] 06-04-PLAN.md — Wire packed inference in AsyncInferenceRunner
-- [ ] 06-05-PLAN.md — Packed vs unpacked equivalence validation
-- [ ] 06-06-PLAN.md — Packing efficiency metrics and monitoring
-- [ ] 06-07-PLAN.md — End-to-end integration tests and verification
-- [ ] 06-08-PLAN.md — Integrate GreedyPacker into VarlenCollator (PACK-02)
+- [x] 06-01-PLAN.md — GreedyPacker with FFD algorithm and dynamic token budget (PACK-03, ARCH-11)
+- [x] 06-02-PLAN.md — Position ID generator and FlashAttention varlen wrapper
+- [x] 06-03-PLAN.md — ESM2 forward_packed method
+- [x] 06-04-PLAN.md — Wire packed inference in AsyncInferenceRunner
+- [x] 06-05-PLAN.md — Packed vs unpacked equivalence validation
+- [x] 06-06-PLAN.md — Packing efficiency metrics and monitoring
+- [x] 06-07-PLAN.md — End-to-end integration tests and verification
+- [x] 06-08-PLAN.md — Integrate GreedyPacker into VarlenCollator (PACK-02)
 
 ### Phase 7: Multi-GPU Coordination
 
-**Goal**: 4 GPUs process independent file shards without conflicts
+**Goal**: N GPUs process independent sequence shards without conflicts
 
 **Depends on**: Phase 6
 
 **Requirements**: ARCH-06, ARCH-07, ARCH-08, GPU-01, GPU-02, GPU-03, GPU-04
 
 **Success Criteria** (what must be TRUE):
-  1. File sharding distributes work deterministically (rank % world_size)
+  1. Index-based stride distribution balances work across GPUs (within 10%)
   2. Each GPU process runs independently without shared state during processing
   3. Checkpoint aggregation produces complete output with no duplicates or missing sequences
   4. Multi-GPU throughput scales linearly (4 GPUs = 3.8-4x faster than Phase 6 single-GPU)
 
-**Plans**: TBD
+**Plans**: 8 plans in 5 waves
 
 Plans:
-- [ ] TBD during phase planning
+- [ ] 07-01-PLAN.md — SequenceIndex with stride distribution and caching
+- [ ] 07-02-PLAN.md — IndexBasedDataset for byte-offset sequence reading
+- [ ] 07-03-PLAN.md — Per-worker logging infrastructure
+- [ ] 07-04-PLAN.md — GPUProcessCoordinator for worker lifecycle
+- [ ] 07-05-PLAN.md — HDF5 shard aggregation with validation
+- [ ] 07-06-PLAN.md — GPU worker function integrating inference pipeline
+- [ ] 07-07-PLAN.md — run_multi_gpu_inference orchestration entry point
+- [ ] 07-08-PLAN.md — Integration tests and human verification
 
 ### Phase 8: FP16 Precision Validation
 
@@ -197,11 +204,11 @@ Phases execute in numeric order: 5 → 6 → 7 → 8 → 9 → 10
 | 4. Performance Optimization | v1.0 | 12/12 | Complete | 2026-01-15 |
 | 4.1. BFloat16 Precision Integration | v1.0 | 3/3 | Complete | 2026-02-02 |
 | 5. Async DataLoader Foundation | v2.0 | 5/5 | Complete | 2026-02-03 |
-| 6. Sequence Packing Integration | v2.0 | 0/8 | Planning revised | - |
-| 7. Multi-GPU Coordination | v2.0 | 0/TBD | Not started | - |
+| 6. Sequence Packing Integration | v2.0 | 8/8 | Complete | 2026-02-04 |
+| 7. Multi-GPU Coordination | v2.0 | 0/8 | Planned | - |
 | 8. FP16 Precision Validation | v2.0 | 0/TBD | Not started | - |
 | 9. Checkpointing Integration | v2.0 | 0/TBD | Not started | - |
 | 10. Performance Validation & Tuning | v2.0 | 0/TBD | Not started | - |
 
 ---
-*Last updated: 2026-02-03 for Phase 6 plan revision (added 06-08 for PACK-02, PACK-03, ARCH-11 coverage)*
+*Last updated: 2026-02-04 for Phase 7 planning (8 plans in 5 waves)*
