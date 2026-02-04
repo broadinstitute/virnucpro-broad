@@ -16,6 +16,26 @@ from typing import Callable, Dict, List, Optional, Tuple
 logger = logging.getLogger('virnucpro.pipeline.gpu_coordinator')
 
 
+def _worker_wrapper(rank, cuda_device, worker_fn, world_size, queue, *args):
+    """
+    Wrapper that sets CUDA_VISIBLE_DEVICES before calling worker.
+
+    This is necessary because multiprocessing.Process doesn't accept env parameter.
+    We set the environment variable inside the worker process before calling
+    the actual worker function.
+
+    Args:
+        rank: Worker rank (0, 1, 2, ...)
+        cuda_device: CUDA device ID to make visible
+        worker_fn: Actual worker function to call
+        world_size: Total number of workers
+        queue: Results queue for worker reports
+        *args: Additional arguments passed to worker_fn
+    """
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_device)
+    worker_fn(rank, world_size, queue, *args)
+
+
 class GPUProcessCoordinator:
     """
     SPMD coordinator for multi-GPU processing with fault tolerance.
@@ -65,15 +85,10 @@ class GPUProcessCoordinator:
         Each worker sees device 0 which maps to actual GPU {rank}.
         """
         for rank in range(self.world_size):
-            # Set CUDA_VISIBLE_DEVICES for this worker BEFORE spawning
-            # Worker sees device 0, which maps to actual GPU {rank}
-            env = os.environ.copy()
-            env['CUDA_VISIBLE_DEVICES'] = str(rank)
-
-            # Create process with custom environment
+            # Create process with wrapper that sets CUDA_VISIBLE_DEVICES
             p = self.ctx.Process(
-                target=worker_fn,
-                args=(rank, self.world_size, self.results_queue, *worker_args),
+                target=_worker_wrapper,
+                args=(rank, rank, worker_fn, self.world_size, self.results_queue, *worker_args),
                 name=f"gpu_worker_{rank}"
             )
             p.start()
