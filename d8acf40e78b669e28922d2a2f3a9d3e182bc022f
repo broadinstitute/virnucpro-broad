@@ -1,0 +1,24 @@
+tests/unit/test_multi_gpu_inference.py
+  094eb0febb50f8d2 1-700
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "d8acf40e78b669e28922d2a2f3a9d3e182bc022f",
+  "prompts": {
+    "094eb0febb50f8d2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ae31ecf-1e0a-48eb-9533-6c90812714fa",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 703,
+      "total_deletions": 3,
+      "accepted_lines": 700,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/e4542593593813d1935f5aa3c470da1a8555ebed809fc64f9d1e339024ea57f5"
+    }
+  }
+}
