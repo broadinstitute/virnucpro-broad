@@ -321,3 +321,78 @@ class TestVarlenCollatorTokenization:
         # Verify sequence_ids preserved
         assert 'sequence_ids' in result
         assert result['sequence_ids'] == ['seq1', 'seq2']
+
+
+class TestVarlenCollatorSingleItem:
+    """Test VarlenCollator handling of single items (batch_size=None support)."""
+
+    def test_single_dict_wrapped_to_list(self):
+        """Verify single dict input is wrapped to list (batch_size=None behavior)."""
+        from virnucpro.data.collators import VarlenCollator
+        import torch
+
+        mock_bc = MagicMock()
+        mock_bc.alphabet.padding_idx = 1
+        mock_bc.return_value = (
+            ['seq1'],
+            ['MKTAYIAK'],
+            torch.tensor([[0, 10, 11, 12, 1]]),
+        )
+
+        collator = VarlenCollator(mock_bc, enable_packing=False)
+
+        # Single dict (what DataLoader passes with batch_size=None)
+        single_item = {'id': 'seq1', 'sequence': 'MKTAYIAK', 'file': 'test.fasta'}
+        result = collator(single_item)
+
+        # Should work and produce valid output
+        assert 'sequence_ids' in result
+        assert result['sequence_ids'] == ['seq1']
+
+    def test_list_of_dicts_still_works(self):
+        """Verify list of dicts still works (batch_size=N behavior)."""
+        from virnucpro.data.collators import VarlenCollator
+        import torch
+
+        mock_bc = MagicMock()
+        mock_bc.alphabet.padding_idx = 1
+        mock_bc.return_value = (
+            ['seq1', 'seq2'],
+            ['MKTAYIAK', 'VLSPAD'],
+            torch.tensor([[0, 10, 11, 12, 1, 1], [0, 20, 21, 22, 23, 1]]),
+        )
+
+        collator = VarlenCollator(mock_bc, enable_packing=False)
+
+        # List of dicts (what DataLoader passes with batch_size=N)
+        batch = [
+            {'id': 'seq1', 'sequence': 'MKTAYIAK', 'file': 'test.fasta'},
+            {'id': 'seq2', 'sequence': 'VLSPAD', 'file': 'test.fasta'},
+        ]
+        result = collator(batch)
+
+        assert 'sequence_ids' in result
+        assert result['sequence_ids'] == ['seq1', 'seq2']
+
+    def test_single_item_with_packing_enabled(self):
+        """Verify single item works with packing enabled (buffers correctly)."""
+        from virnucpro.data.collators import VarlenCollator
+        import torch
+
+        mock_bc = MagicMock()
+        mock_bc.alphabet.padding_idx = 1
+        mock_bc.return_value = (
+            ['seq1'],
+            ['MKTAYIAK'],
+            torch.tensor([[0, 10, 11, 12, 1]]),
+        )
+
+        collator = VarlenCollator(mock_bc, enable_packing=True, buffer_size=10)
+
+        # Single dict should be buffered
+        single_item = {'id': 'seq1', 'sequence': 'MKTAYIAK', 'file': 'test.fasta'}
+        collator(single_item)
+
+        # Buffer should contain the item
+        assert len(collator.buffer) == 1
+        assert collator.buffer[0]['id'] == 'seq1'

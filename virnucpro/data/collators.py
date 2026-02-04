@@ -22,7 +22,7 @@ Integration:
 """
 
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
 
 import torch
 from virnucpro.data.packing import GreedyPacker
@@ -192,7 +192,9 @@ class VarlenCollator:
             'num_sequences': len(cu_seqlens) - 1,  # cu_seqlens has N+1 elements
         }
 
-    def __call__(self, batch: List[Dict[str, str]]) -> Dict[str, Any]:
+    def __call__(
+        self, batch: Union[List[Dict[str, str]], Dict[str, str]]
+    ) -> Dict[str, Any]:
         """Stateful collator with buffer-based packing.
 
         This method:
@@ -201,14 +203,20 @@ class VarlenCollator:
         3. Returns packed batches from queue
 
         Args:
-            batch: List of dicts from SequenceDataset with keys:
+            batch: Single dict or list of dicts from SequenceDataset with keys:
                 - 'id': Sequence ID
                 - 'sequence': Sequence string
                 - 'file': Source filename
+                When batch_size=None in DataLoader, receives single dicts.
+                When batch_size=N, receives lists of N dicts.
 
         Returns:
             Dictionary with packed batch or empty dict if buffer not ready
         """
+        # Handle single item when batch_size=None (DataLoader passes individual items)
+        if isinstance(batch, dict):
+            batch = [batch]
+
         if not self.enable_packing:
             # Direct processing (no buffering)
             return self._tokenize_and_pack(batch)
