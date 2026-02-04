@@ -1,0 +1,24 @@
+tests/unit/test_worker_logging.py
+  094eb0febb50f8d2 107,111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "1d592e4a7649290b59b49da19a967ce03da671b4",
+  "prompts": {
+    "094eb0febb50f8d2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ae31ecf-1e0a-48eb-9533-6c90812714fa",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 3,
+      "accepted_lines": 2,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/1d6ff11fbf8fadc6bf608f3e6c7732a7d05c9ba250bff4f1841da4cd2eee8303"
+    }
+  }
+}
