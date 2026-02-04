@@ -367,8 +367,10 @@ class ESM2WithFlashAttention(nn.Module):
         freqs = torch.einsum('i,j->ij', position_ids.float(), inv_freq)
         # Duplicate for sin and cos application: [total_tokens, rotary_dim]
         emb = torch.cat([freqs, freqs], dim=-1)
-        cos = emb.cos().to(q.dtype)  # [total_tokens, rotary_dim]
-        sin = emb.sin().to(q.dtype)  # [total_tokens, rotary_dim]
+        # CRITICAL: Keep sin/cos in FP32 to avoid precision loss over 36 layers
+        # Casting to BF16 too early causes accumulated rounding errors for long sequences
+        cos = emb.cos()  # [total_tokens, rotary_dim] - FP32
+        sin = emb.sin()  # [total_tokens, rotary_dim] - FP32
 
         # Reshape for broadcasting: [total_tokens, 1, rotary_dim]
         cos = cos.unsqueeze(1)
@@ -376,7 +378,7 @@ class ESM2WithFlashAttention(nn.Module):
 
         # ESM-2 uses partial rotary embeddings - only first rotary_dim dimensions
         # q/k shape: [total_tokens, num_heads, head_dim]
-        head_dim = q.shape[-1]
+        original_dtype = q.dtype
 
         # Split into rotary and non-rotary parts
         q_rot = q[..., :rotary_dim]
@@ -384,15 +386,18 @@ class ESM2WithFlashAttention(nn.Module):
         k_rot = k[..., :rotary_dim]
         k_pass = k[..., rotary_dim:]
 
-        # Apply rotation to rotary part only
+        # Apply rotation in FP32 to preserve precision
         def rotate_half(x):
             """Rotate half the hidden dims of the input."""
             x1 = x[..., : x.shape[-1] // 2]
             x2 = x[..., x.shape[-1] // 2 :]
             return torch.cat((-x2, x1), dim=-1)
 
-        q_rot = (q_rot * cos) + (rotate_half(q_rot) * sin)
-        k_rot = (k_rot * cos) + (rotate_half(k_rot) * sin)
+        # Convert to FP32 for rotation, then back to original dtype
+        q_rot_fp32 = q_rot.float()
+        k_rot_fp32 = k_rot.float()
+        q_rot = ((q_rot_fp32 * cos) + (rotate_half(q_rot_fp32) * sin)).to(original_dtype)
+        k_rot = ((k_rot_fp32 * cos) + (rotate_half(k_rot_fp32) * sin)).to(original_dtype)
 
         # Concatenate rotary and non-rotary parts back together
         q_rotated = torch.cat([q_rot, q_pass], dim=-1)
