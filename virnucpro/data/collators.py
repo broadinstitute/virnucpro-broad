@@ -224,8 +224,8 @@ class VarlenCollator:
         # If we have pre-packed batches ready, return one and buffer the new sequences
         if self.packed_queue:
             self.buffer.extend(batch)  # Save for later packing
-            packed_batch = self.packed_queue.pop(0)
-            return self._tokenize_and_pack(packed_batch)
+            batch_to_return = self.packed_queue.pop(0)
+            return self._tokenize_and_pack(batch_to_return)
 
         # Add sequences to buffer
         self.buffer.extend(batch)
@@ -242,13 +242,14 @@ class VarlenCollator:
 
             # Return first packed batch
             if self.packed_queue:
-                packed_batch = self.packed_queue.pop(0)
-                return self._tokenize_and_pack(packed_batch)
+                batch_to_return = self.packed_queue.pop(0)
+                return self._tokenize_and_pack(batch_to_return)
 
         # Buffer not full yet - return micro-batch directly
         # IMPORTANT: Remove from buffer to prevent duplication during flush()
         # We're returning these sequences now, so they shouldn't be in buffer
-        del self.buffer[-len(batch):]
+        if batch:
+            del self.buffer[-len(batch):]
         return self._tokenize_and_pack(batch)
 
     def flush(self) -> List[Dict[str, Any]]:
