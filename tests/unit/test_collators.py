@@ -182,6 +182,25 @@ class TestVarlenCollatorPacking:
             # Buffer should remain empty
             assert len(collator.buffer) == 0
 
+    def test_empty_batch_does_not_clear_buffer(self):
+        """Verify empty batch doesn't delete buffer content."""
+        from virnucpro.data.collators import VarlenCollator
+
+        mock_bc = MagicMock()
+        mock_bc.alphabet.padding_idx = 1
+
+        collator = VarlenCollator(mock_bc, enable_packing=True, buffer_size=100)
+
+        collator.buffer = [
+            {'id': 'seq1', 'sequence': 'MKTAYIAK'},
+            {'id': 'seq2', 'sequence': 'VLSPADKTNV'},
+        ]
+
+        with patch.object(collator, '_tokenize_and_pack', return_value={'test': 'data'}):
+            result = collator([{}])
+
+            assert len(collator.buffer) == 2, "Buffer should remain unchanged"
+
 
 class TestDataloaderDynamicBudget:
     """Test create_async_dataloader dynamic token budget (PACK-03)."""
