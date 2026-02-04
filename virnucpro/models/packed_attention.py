@@ -115,6 +115,7 @@ def flash_attn_varlen_wrapper(
     max_seqlen: int,
     dropout_p: float = 0.0,
     causal: bool = False,
+    softmax_scale: Optional[float] = None,
 ) -> torch.Tensor:
     """
     Wrapper around flash_attn_varlen_func with validation.
@@ -131,6 +132,8 @@ def flash_attn_varlen_wrapper(
         max_seqlen: Maximum sequence length in batch
         dropout_p: Dropout probability (0.0 for inference)
         causal: Use causal attention (False for BERT/ESM bidirectional)
+        softmax_scale: Scaling factor for attention scores. If None, defaults to
+                       1/sqrt(head_dim). ESM-2 uses 1/sqrt(64) = 0.125.
 
     Returns:
         Attention output [total_tokens, num_heads, head_dim]
@@ -145,7 +148,7 @@ def flash_attn_varlen_wrapper(
         >>> k = torch.randn(10, 32, 64, dtype=torch.float16, device='cuda')
         >>> v = torch.randn(10, 32, 64, dtype=torch.float16, device='cuda')
         >>> cu_seqlens = torch.tensor([0, 3, 7, 10], dtype=torch.int32, device='cuda')
-        >>> output = flash_attn_varlen_wrapper(q, k, v, cu_seqlens, max_seqlen=4)
+        >>> output = flash_attn_varlen_wrapper(q, k, v, cu_seqlens, max_seqlen=4, softmax_scale=0.125)
     """
     # Check FlashAttention availability
     if not FLASH_ATTN_AVAILABLE:
@@ -195,6 +198,7 @@ def flash_attn_varlen_wrapper(
         max_seqlen_k=max_seqlen,
         dropout_p=dropout_p,
         causal=causal,
+        softmax_scale=softmax_scale,
     )
 
     return output

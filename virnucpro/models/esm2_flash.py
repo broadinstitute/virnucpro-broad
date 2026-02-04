@@ -297,6 +297,8 @@ class ESM2WithFlashAttention(nn.Module):
             )
 
         # FlashAttention varlen - automatically prevents cross-sequence attention
+        # ESM-2 uses scaling factor of 1/sqrt(head_dim)
+        softmax_scale = layer.self_attn.scaling
         attn_output = flash_attn_varlen_wrapper(
             q=q,
             k=k,
@@ -305,6 +307,7 @@ class ESM2WithFlashAttention(nn.Module):
             max_seqlen=max_seqlen,
             dropout_p=0.0,  # No dropout for inference
             causal=False,   # Bidirectional attention for ESM/BERT
+            softmax_scale=softmax_scale,
         )
 
         # Reshape back: [total_tokens, num_heads, head_dim] -> [total_tokens, hidden_dim]
