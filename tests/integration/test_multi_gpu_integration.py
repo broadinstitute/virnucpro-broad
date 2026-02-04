@@ -84,7 +84,7 @@ def single_gpu_baseline(test_fasta_files, tmp_path_factory):
     dataloader = create_async_dataloader(
         dataset, collator,
         device_id=0,
-        batch_size=None,  # Let collator control batch size
+        batch_size=8,  # Explicit batch size for baseline (batch_size=None doesn't batch)
         num_workers=2
     )
 
