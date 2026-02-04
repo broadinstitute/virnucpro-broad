@@ -35,7 +35,12 @@ class TestVarlenCollatorPacking:
         assert collator.packer is None
 
     def test_buffer_accumulation(self):
-        """Verify sequences accumulate in buffer before packing."""
+        """Verify micro-batches NOT buffered to prevent flush duplicates.
+
+        When buffer isn't full and no packed_queue exists, sequences are
+        returned immediately as micro-batches and NOT kept in buffer.
+        This prevents sequence duplication when flush() is called later.
+        """
         from virnucpro.data.collators import VarlenCollator
 
         mock_bc = MagicMock()
@@ -44,7 +49,6 @@ class TestVarlenCollatorPacking:
         # Create collator with large buffer (won't trigger packing)
         collator = VarlenCollator(mock_bc, buffer_size=1000, enable_packing=True)
 
-        # Add sequences - should accumulate in buffer
         batch = [
             {'id': 'seq1', 'sequence': 'MKTAYIAK'},
             {'id': 'seq2', 'sequence': 'VLSPADKTNV'},
@@ -52,11 +56,13 @@ class TestVarlenCollatorPacking:
 
         # Mock tokenization to prevent actual ESM calls
         with patch.object(collator, '_tokenize_and_pack', return_value={'test': 'data'}):
-            # First call - should accumulate
+            # First call - returns micro-batch immediately
             result = collator(batch)
 
-            # Buffer should have sequences
-            assert len(collator.buffer) == 2
+            # Buffer should be EMPTY (micro-batches not buffered)
+            assert len(collator.buffer) == 0
+            # Result should be returned
+            assert result == {'test': 'data'}
 
     def test_packing_triggered_at_threshold(self):
         """Verify packing runs when buffer reaches threshold."""
@@ -375,7 +381,7 @@ class TestVarlenCollatorSingleItem:
         assert result['sequence_ids'] == ['seq1', 'seq2']
 
     def test_single_item_with_packing_enabled(self):
-        """Verify single item works with packing enabled (buffers correctly)."""
+        """Verify single item processed and NOT buffered (prevents flush duplicates)."""
         from virnucpro.data.collators import VarlenCollator
         import torch
 
@@ -389,10 +395,12 @@ class TestVarlenCollatorSingleItem:
 
         collator = VarlenCollator(mock_bc, enable_packing=True, buffer_size=10)
 
-        # Single dict should be buffered
+        # Single dict - returned as micro-batch, NOT buffered
         single_item = {'id': 'seq1', 'sequence': 'MKTAYIAK', 'file': 'test.fasta'}
-        collator(single_item)
+        result = collator(single_item)
 
-        # Buffer should contain the item
-        assert len(collator.buffer) == 1
-        assert collator.buffer[0]['id'] == 'seq1'
+        # Buffer should be EMPTY (micro-batches not buffered to prevent duplicates)
+        assert len(collator.buffer) == 0
+        # Result should contain the sequence
+        assert 'sequence_ids' in result
+        assert result['sequence_ids'] == ['seq1']

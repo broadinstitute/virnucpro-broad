@@ -221,7 +221,13 @@ class VarlenCollator:
             # Direct processing (no buffering)
             return self._tokenize_and_pack(batch)
 
-        # Accumulate sequences into buffer
+        # If we have pre-packed batches ready, return one and buffer the new sequences
+        if self.packed_queue:
+            self.buffer.extend(batch)  # Save for later packing
+            packed_batch = self.packed_queue.pop(0)
+            return self._tokenize_and_pack(packed_batch)
+
+        # Add sequences to buffer
         self.buffer.extend(batch)
 
         # When buffer reaches threshold, pack it
@@ -230,22 +236,20 @@ class VarlenCollator:
             packed_batches = self.packer.pack_sequences(self.buffer)
             logger.debug(f"Packed {len(self.buffer)} sequences → {len(packed_batches)} batches")
 
-            # Store packed batches in queue
+            # Store packed batches in queue and clear buffer
             self.packed_queue.extend(packed_batches)
-            self.buffer = []  # Clear for next accumulation
+            self.buffer = []  # Clear - all sequences now in packed_queue
 
-        # Return one packed batch if available
-        if self.packed_queue:
-            packed_batch = self.packed_queue.pop(0)
-            return self._tokenize_and_pack(packed_batch)
+            # Return first packed batch
+            if self.packed_queue:
+                packed_batch = self.packed_queue.pop(0)
+                return self._tokenize_and_pack(packed_batch)
 
-        # Buffer not full yet - return empty batch or micro-batch fallback
-        # To prevent DataLoader stalling, return current micro-batch
-        if batch:
-            return self._tokenize_and_pack(batch)
-
-        # No data to return
-        return {}  # Empty batch (DataLoader will handle)
+        # Buffer not full yet - return micro-batch directly
+        # IMPORTANT: Remove from buffer to prevent duplication during flush()
+        # We're returning these sequences now, so they shouldn't be in buffer
+        del self.buffer[-len(batch):]
+        return self._tokenize_and_pack(batch)
 
     def flush(self) -> List[Dict[str, Any]]:
         """Flush remaining buffer at end of dataset.
