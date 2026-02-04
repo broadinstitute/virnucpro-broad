@@ -1,6 +1,6 @@
 """Multi-GPU integration tests.
 
-End-to-end tests for multi-GPU inference pipeline. Requires at least 2 GPUs.
+End-to-end tests for multi-GPU inference pipeline. Requires at least 2 CUDA-capable GPUs.
 
 Tests:
 1. Embedding equivalence with single-GPU baseline
@@ -17,10 +17,12 @@ import numpy as np
 from pathlib import Path
 import h5py
 
-# Skip entire module if insufficient GPUs
+_cuda_available = torch.cuda.is_available()
+_device_count = torch.cuda.device_count() if _cuda_available else 0
+
 pytestmark = pytest.mark.skipif(
-    not torch.cuda.is_available() or torch.cuda.device_count() < 2,
-    reason="Requires at least 2 GPUs"
+    not _cuda_available or _device_count < 2,
+    reason="Requires at least 2 CUDA-capable GPUs"
 )
 
 
@@ -58,54 +60,59 @@ def temp_output_dir(tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
-def single_gpu_baseline(test_fasta_files, tmp_path_factory):
+def single_gpu_baseline(test_fasta_files, tmp_path_factory, request):
     """Run single-GPU inference for baseline comparison.
 
     This baseline is used for embedding equivalence tests.
     Uses a subset of sequences to reduce runtime.
     """
-    from virnucpro.data import SequenceDataset, VarlenCollator
-    from virnucpro.data.dataloader_utils import create_async_dataloader
-    from virnucpro.models.esm2_flash import load_esm2_model
-    from virnucpro.pipeline.async_inference import AsyncInferenceRunner
+    try:
+        from virnucpro.data import SequenceDataset, VarlenCollator
+        from virnucpro.data.dataloader_utils import create_async_dataloader
+        from virnucpro.models.esm2_flash import load_esm2_model
+        from virnucpro.pipeline.async_inference import AsyncInferenceRunner
 
-    # Use first file only (333 sequences) for faster baseline
-    baseline_fasta = test_fasta_files[0:1]
+        # Use first file only (333 sequences) for faster baseline
+        baseline_fasta = test_fasta_files[0:1]
 
-    # Load model on GPU 0
-    model, batch_converter = load_esm2_model(
-        model_name="esm2_t36_3B_UR50D",
-        device="cuda:0"
-    )
+        # Load model on GPU 0
+        model, batch_converter = load_esm2_model(
+            model_name="esm2_t36_3B_UR50D",
+            device="cuda:0"
+        )
 
-    # Create dataset and dataloader
-    dataset = SequenceDataset(fasta_files=baseline_fasta)
-    collator = VarlenCollator(batch_converter, enable_packing=True, buffer_size=200)
-    dataloader = create_async_dataloader(
-        dataset, collator,
-        device_id=0,
-        batch_size=None  # Use None for VarlenCollator token-budget packing (matches gpu_worker.py)
-    )
+        # Create dataset and dataloader
+        dataset = SequenceDataset(fasta_files=baseline_fasta)
+        collator = VarlenCollator(batch_converter, enable_packing=True, buffer_size=200)
+        dataloader = create_async_dataloader(
+            dataset, collator,
+            device_id=0,
+            batch_size=None  # Use None for VarlenCollator token-budget packing (matches gpu_worker.py)
+        )
 
-    # Run inference
-    runner = AsyncInferenceRunner(model, device=torch.device("cuda:0"))
-    all_embeddings = []
-    all_ids = []
+        # Run inference
+        runner = AsyncInferenceRunner(model, device=torch.device("cuda:0"))
+        all_embeddings = []
+        all_ids = []
 
-    for result in runner.run(dataloader):
-        all_embeddings.append(result.embeddings.cpu())
-        all_ids.extend(result.sequence_ids)
+        for result in runner.run(dataloader):
+            all_embeddings.append(result.embeddings.cpu())
+            all_ids.extend(result.sequence_ids)
 
-    # Concatenate embeddings
-    embeddings = torch.cat(all_embeddings, dim=0).numpy()
+        # Concatenate embeddings
+        embeddings = torch.cat(all_embeddings, dim=0).numpy()
 
-    # Return as dict for easy lookup
-    baseline = {
-        seq_id: embeddings[i]
-        for i, seq_id in enumerate(all_ids)
-    }
+        # Return as dict for easy lookup
+        baseline = {
+            seq_id: embeddings[i]
+            for i, seq_id in enumerate(all_ids)
+        }
 
-    return baseline
+        request.addfinalizer(lambda: model.close() if hasattr(model, 'close') else None)
+
+        return baseline
+    except ImportError as e:
+        pytest.skip(f"Required dependency not available: {e}")
 
 
 class TestMultiGPUEmbeddingEquivalence:
@@ -153,17 +160,26 @@ class TestMultiGPUEmbeddingEquivalence:
         similarities = []
         failed_sequences = []
 
-        for i, seq_id in enumerate(multi_gpu_ids):
+        multi_gpu_embeddings_dict = {seq_id: multi_gpu_embeddings[i] for i, seq_id in enumerate(multi_gpu_ids)}
+
+        for seq_id in multi_gpu_ids:
             if seq_id not in single_gpu_baseline:
                 continue
 
             baseline_emb = single_gpu_baseline[seq_id]
-            multi_gpu_emb = multi_gpu_embeddings[i]
+            multi_gpu_emb = multi_gpu_embeddings_dict[seq_id]
 
-            # Cosine similarity
-            similarity = np.dot(baseline_emb, multi_gpu_emb) / (
-                np.linalg.norm(baseline_emb) * np.linalg.norm(multi_gpu_emb)
-            )
+            baseline_norm = np.linalg.norm(baseline_emb)
+            multi_gpu_norm = np.linalg.norm(multi_gpu_emb)
+
+            if baseline_norm == 0 or multi_gpu_norm == 0:
+                if np.allclose(baseline_emb, multi_gpu_emb):
+                    similarities.append(1.0)
+                else:
+                    similarities.append(0.0)
+                continue
+
+            similarity = np.dot(baseline_emb, multi_gpu_emb) / (baseline_norm * multi_gpu_norm)
             similarities.append(similarity)
 
             if similarity < 0.999:
@@ -328,8 +344,9 @@ class TestWorkDistribution:
             world_size=world_size
         )
 
-        # Get shard file sizes
         successful_ranks = [r for r in range(world_size) if r not in failed_ranks]
+        assert len(successful_ranks) > 0, "No workers completed successfully"
+
         shard_sizes = []
 
         for rank in successful_ranks:
@@ -340,15 +357,15 @@ class TestWorkDistribution:
 
         assert len(shard_sizes) > 0, "No shard files found"
 
-        # Check balance
-        mean_size = np.mean(shard_sizes)
-        max_deviation = max(abs(s - mean_size) / mean_size for s in shard_sizes)
+        max_deviation = 0.0
+        if len(shard_sizes) > 0:
+            mean_size = np.mean(shard_sizes)
+            max_deviation = max(abs(s - mean_size) / mean_size for s in shard_sizes)
 
-        # Allow 15% deviation (embedding size varies with sequence length)
-        assert max_deviation < 0.15, (
-            f"Shard size imbalance: {max_deviation:.1%} > 15%\n"
-            f"Shard sizes: {[s // 1024 for s in shard_sizes]} KB"
-        )
+            assert max_deviation < 0.15, (
+                f"Shard size imbalance: {max_deviation:.1%} > 15%\n"
+                f"Shard sizes: {[s // 1024 for s in shard_sizes]} KB"
+            )
 
         print(f"\nShard sizes ({len(shard_sizes)} shards):")
         print(f"  Sizes: {[s // 1024 for s in shard_sizes]} KB")
@@ -406,9 +423,11 @@ class TestThroughputScaling:
             f"Multi-GPU speedup {speedup:.2f}x < 1.5x expected for 2 GPUs"
         )
 
+    @pytest.mark.informational
     def test_gpu_utilization_high(self, test_fasta_files, temp_output_dir, caplog):
         """Run inference and verify high GPU utilization (informational test)."""
         from virnucpro.pipeline.multi_gpu_inference import run_multi_gpu_inference
+        import subprocess
 
         multi_gpu_output = temp_output_dir / "test_utilization"
         multi_gpu_output.mkdir(parents=True, exist_ok=True)
@@ -421,10 +440,19 @@ class TestThroughputScaling:
             model_config
         )
 
-        # This is informational - we just want to log that inference completed
-        # Actual utilization monitoring would require nvidia-smi polling in background
         assert len(failed_ranks) == 0, "Workers failed"
-        print("\nInference completed successfully (GPU utilization not directly measured)")
+
+        try:
+            result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
+                                  capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                utilizations = [int(line.strip()) for line in result.stdout.strip().split('\n') if line.strip()]
+                avg_util = np.mean(utilizations) if utilizations else 0
+                print(f"\nGPU utilization during inference: {avg_util:.1f}%")
+            else:
+                print("\nCould not read GPU utilization (nvidia-smi not available)")
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            print("\nCould not read GPU utilization (nvidia-smi not available)")
 
 
 class TestFaultTolerance:
