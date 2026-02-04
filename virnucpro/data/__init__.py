@@ -11,6 +11,12 @@ from virnucpro.data.dataloader_utils import (
 from virnucpro.data.sequence_dataset import SequenceDataset
 from virnucpro.data.collators import VarlenCollator
 from virnucpro.data.packing import GreedyPacker, calculate_token_budget, validate_packed_equivalence
+from virnucpro.data.shard_index import (
+    SequenceEntry,
+    create_sequence_index,
+    get_worker_indices,
+    load_sequence_index,
+)
 
 __all__ = [
     'create_optimized_dataloader',
@@ -24,4 +30,8 @@ __all__ = [
     'GreedyPacker',
     'calculate_token_budget',
     'validate_packed_equivalence',
+    'SequenceEntry',
+    'create_sequence_index',
+    'get_worker_indices',
+    'load_sequence_index',
 ]
