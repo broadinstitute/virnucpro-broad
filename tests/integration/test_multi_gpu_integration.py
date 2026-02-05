@@ -518,12 +518,9 @@ class TestFaultTolerance:
     """
 
     def test_inference_completes_with_timeout(self, test_fasta_files, temp_output_dir):
-        """Verify inference completes within timeout and handles any failures.
-
-        This test verifies the pipeline can complete successfully with a timeout.
-        The actual partial failure recovery logic is tested at the unit level
-        in test_shard_aggregator.py::TestPartialFailureRecovery.
-        """
+        """Verify inference completes within timeout. Actual partial failure
+        recovery is tested at unit level in
+        test_shard_aggregator.py::TestPartialFailureRecovery."""
         from virnucpro.pipeline.multi_gpu_inference import run_multi_gpu_inference
 
         multi_gpu_output = temp_output_dir / "test_fault_tolerance"

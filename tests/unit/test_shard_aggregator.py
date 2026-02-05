@@ -426,8 +426,10 @@ class TestPartialFailureRecovery:
         create_test_shard(shard0_path, ['seq0', 'seq4'])
         create_test_shard(shard1_path, ['seq4', 'seq8'])  # seq4 duplicated!
 
+        expected_ids = {'seq0', 'seq4', 'seq8'}
+
         with pytest.raises(ValueError, match="Duplicate sequence ID found: seq4"):
-            aggregate_shards([shard0_path, shard1_path], output_path)
+            aggregate_shards([shard0_path, shard1_path], output_path, expected_ids)
 
     def test_single_worker_survival(self, temp_output_dir):
         """Only one worker survived - output still valid."""
@@ -463,3 +465,21 @@ class TestPartialFailureRecovery:
 
         with h5py.File(result, 'r') as f:
             assert f['embeddings'].shape[0] == 2
+            assert f['sequence_ids'].shape[0] == 2
+
+    def test_all_workers_fail_produces_empty_or_error(self, temp_output_dir):
+        """No shards produced - all workers failed."""
+        output_path = temp_output_dir / 'merged.h5'
+
+        with pytest.raises(ValueError, match="No shard files provided"):
+            aggregate_shards([], output_path, set())
+
+    def test_wrong_expected_ids_raises(self, temp_output_dir):
+        """Validation fails when expected_ids doesn't match shard contents."""
+        shard_path = temp_output_dir / 'shard_0.h5'
+        output_path = temp_output_dir / 'merged.h5'
+        create_test_shard(shard_path, ['seq0', 'seq1'])
+
+        # Wrong expected IDs - seq999 doesn't exist in shard
+        with pytest.raises(ValueError):
+            aggregate_shards([shard_path], output_path, {'seq999'})
