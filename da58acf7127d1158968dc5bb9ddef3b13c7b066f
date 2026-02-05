@@ -1,0 +1,24 @@
+tests/unit/test_async_inference.py
+  ccda82b2a99d2561 1-242
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "da58acf7127d1158968dc5bb9ddef3b13c7b066f",
+  "prompts": {
+    "ccda82b2a99d2561": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "81bee629-634c-43bb-acb7-296216a2fc28",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 242,
+      "total_deletions": 0,
+      "accepted_lines": 242,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/819d6f20e65da03c18ba7d7bd166cd5123778d081aaaa9392f3d9bc4519d17cf"
+    }
+  }
+}
