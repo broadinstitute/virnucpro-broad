@@ -1,0 +1,32 @@
+.planning/ROADMAP.md
+  cc9be4a32220dd64 138,150,153-156,212,217
+.planning/phases/08-fp16-precision-validation**---memory-and-speed-optimization/08-01-PLAN.md
+  cc9be4a32220dd64 1-193
+.planning/phases/08-fp16-precision-validation**---memory-and-speed-optimization/08-04-PLAN.md
+  cc9be4a32220dd64 1-210
+.planning/phases/08-fp16-precision-validation**---memory-and-speed-optimization/08-03-PLAN.md
+  cc9be4a32220dd64 1-193
+.planning/phases/08-fp16-precision-validation**---memory-and-speed-optimization/08-02-PLAN.md
+  cc9be4a32220dd64 1-185
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "c0445e8963c3fc9f0f475699428de55ab5deba0c",
+  "prompts": {
+    "cc9be4a32220dd64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cfc179c9-edfa-49c6-bf4f-91c5befd9802",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 789,
+      "total_deletions": 5,
+      "accepted_lines": 789,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/036d102fd444e71fd0668eebf7e63eda87c7308f627d16d6e4b141045955a58d"
+    }
+  }
+}
