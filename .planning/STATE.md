@@ -6,16 +6,16 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 
 **Core value:** Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs and automatically queue batches, reducing sample processing time from 45+ hours to under 10 hours.
 
-**Current focus:** Phase 7 - Multi-GPU Coordination
+**Current focus:** Phase 8 - FP16 Precision Validation
 
 ## Current Position
 
-Phase: 7 of 10 (Multi-GPU Coordination)
-Plan: 7 of 8 in current phase
-Status: In progress
-Last activity: 2026-02-04 — Completed 07-07-PLAN.md (run_multi_gpu_inference orchestration entry point)
+Phase: 7 of 10 (Multi-GPU Coordination) - COMPLETE
+Plan: 8 of 8 in phase - COMPLETE
+Status: Ready for Phase 8
+Last activity: 2026-02-05 — Completed 07-08-PLAN.md (Integration tests and stream sync fix)
 
-Progress: [█████░░░░░] 59/TBD plans (v1.0: 34/34 complete, v2.0: 25/TBD)
+Progress: [██████░░░░] 67/TBD plans (v1.0: 34/34 complete, v2.0: 33/TBD)
 
 ## Performance Metrics
 
@@ -104,6 +104,7 @@ Recent decisions affecting current work:
 - **Partial failure handling (07-07)**: Return (output_path, failed_ranks) tuple instead of raising - salvages results from successful workers
 - **Auto-detect world_size (07-07)**: Use torch.cuda.device_count() when world_size not specified for simplified common case
 - **Partial expected IDs validation (07-07)**: Calculate expected IDs only from successful workers when failures occur to match actual shard content
+- **Stream sync before extraction (07-08)**: Must synchronize compute stream before _extract_embeddings when retrieve_fn=None - prevents race condition where extraction runs on default stream before compute completes
 
 ### Pending Todos
 
@@ -128,7 +129,7 @@ None yet.
 - ✅ End-to-end integration tests and human verification (06-07)
 - ✅ Buffer-based packing integration in VarlenCollator (06-08)
 
-**Phase 7 (Multi-GPU Coordination):** IN PROGRESS
+**Phase 7 (Multi-GPU Coordination):** ✅ COMPLETE
 - ✅ SequenceIndex with stride distribution and caching (07-01)
 - ✅ IndexBasedDataset for byte-offset sequence reading (07-02)
 - ✅ Per-worker logging infrastructure (07-03)
@@ -136,15 +137,15 @@ None yet.
 - ✅ HDF5 shard aggregation with validation (07-05)
 - ✅ GPU worker function integration (07-06)
 - ✅ run_multi_gpu_inference orchestration entry point (07-07)
-- Pending: End-to-end integration tests (07-08)
+- ✅ Integration tests + stream sync race condition fix (07-08)
 
 **Phase 8 (FP16 Precision Validation):**
 - Numerical precision: LayerNorm may have limited dynamic range in FP16 - may need selective FP32 for specific layers while keeping rest in FP16
 
 ## Session Continuity
 
-Last session: 2026-02-04
-Stopped at: Completed 07-07-PLAN.md (run_multi_gpu_inference orchestration entry point)
+Last session: 2026-02-05
+Stopped at: Completed 07-08-PLAN.md (Integration tests + stream sync fix)
 Resume file: None
 
-**Next step:** Continue Phase 7 - Plan 07-08 (End-to-end integration tests)
+**Next step:** Begin Phase 8 - FP16 Precision Validation
