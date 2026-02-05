@@ -21,8 +21,7 @@ def detect_torch_pollution():
     # After test: verify torch is not a Mock object
     import torch
     if hasattr(torch, '_mock_name'):
-        import warnings
-        warnings.warn(
+        pytest.fail(
             "torch module was replaced with Mock - test pollution detected. "
             "Use @patch decorators instead of sys.modules replacement."
         )
