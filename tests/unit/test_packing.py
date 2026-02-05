@@ -5,24 +5,8 @@ Tests GreedyPacker FFD algorithm and calculate_token_budget function.
 
 import pytest
 import logging
-
-# Mock torch for testing without CUDA
-import sys
-from unittest.mock import MagicMock, Mock
-
-# Create mock torch module
-torch_mock = MagicMock()
-torch_mock.tensor = lambda data, dtype=None: data
-torch_mock.long = 'long'
-torch_mock.int32 = 'int32'
-torch_mock.cuda.is_available.return_value = False
-
-# Mock torch.cuda.get_device_properties
-device_props_mock = Mock()
-device_props_mock.total_memory = 16 * 1024**3  # 16GB
-torch_mock.cuda.get_device_properties.return_value = device_props_mock
-
-sys.modules['torch'] = torch_mock
+import torch
+from unittest.mock import Mock, patch
 
 from virnucpro.data.packing import GreedyPacker, calculate_token_budget
 
@@ -189,25 +173,28 @@ class TestCalculateTokenBudget:
 
     def test_calculate_token_budget_no_cuda(self, caplog):
         """Test fallback when CUDA unavailable."""
-        # torch_mock.cuda.is_available already returns False
-        with caplog.at_level(logging.WARNING):
-            budget = calculate_token_budget(device_id=0)
+        with patch.object(torch.cuda, 'is_available', return_value=False):
+            with caplog.at_level(logging.WARNING):
+                budget = calculate_token_budget(device_id=0)
 
-        assert budget == 4096
-        assert 'CUDA not available' in caplog.text
+            assert budget == 4096
+            assert 'CUDA not available' in caplog.text
 
     def test_calculate_token_budget_with_cuda(self, caplog):
         """Test GPU memory-based calculation (mocked)."""
-        # Enable CUDA mock
-        torch_mock.cuda.is_available.return_value = True
+        # Create mock device properties
+        mock_props = Mock()
+        mock_props.total_memory = 16 * 1024**3  # 16GB
 
-        with caplog.at_level(logging.INFO):
-            budget = calculate_token_budget(
-                device_id=0,
-                model_memory_gb=5.0,
-                safety_margin_gb=2.0,
-                bytes_per_token=4096,
-            )
+        with patch.object(torch.cuda, 'is_available', return_value=True):
+            with patch.object(torch.cuda, 'get_device_properties', return_value=mock_props):
+                with caplog.at_level(logging.INFO):
+                    budget = calculate_token_budget(
+                        device_id=0,
+                        model_memory_gb=5.0,
+                        safety_margin_gb=2.0,
+                        bytes_per_token=4096,
+                    )
 
         # 16GB GPU - 5GB model - 2GB safety = 9GB available
         # 9GB = 9 * 1024^3 bytes
@@ -219,51 +206,38 @@ class TestCalculateTokenBudget:
         assert 'Token budget' in caplog.text
         assert '16.0GB total' in caplog.text
 
-        # Reset for other tests
-        torch_mock.cuda.is_available.return_value = False
-
     def test_calculate_token_budget_min_clamp(self):
         """Test minimum token budget clamping."""
-        torch_mock.cuda.is_available.return_value = True
-
-        # Set very low available memory
+        # Create mock for small GPU
         small_gpu_props = Mock()
         small_gpu_props.total_memory = 2 * 1024**3  # 2GB GPU
-        torch_mock.cuda.get_device_properties.return_value = small_gpu_props
 
-        budget = calculate_token_budget(
-            device_id=0,
-            model_memory_gb=1.5,  # Model uses most of GPU
-            safety_margin_gb=0.4,
-            min_tokens=1024,
-        )
+        with patch.object(torch.cuda, 'is_available', return_value=True):
+            with patch.object(torch.cuda, 'get_device_properties', return_value=small_gpu_props):
+                budget = calculate_token_budget(
+                    device_id=0,
+                    model_memory_gb=1.5,  # Model uses most of GPU
+                    safety_margin_gb=0.4,
+                    min_tokens=1024,
+                )
 
         # Should clamp to minimum
         assert budget >= 1024
 
-        # Reset
-        torch_mock.cuda.is_available.return_value = False
-        torch_mock.cuda.get_device_properties.return_value = device_props_mock
-
     def test_calculate_token_budget_max_clamp(self):
         """Test maximum token budget clamping."""
-        torch_mock.cuda.is_available.return_value = True
-
-        # Set very high available memory
+        # Create mock for large GPU
         large_gpu_props = Mock()
         large_gpu_props.total_memory = 80 * 1024**3  # 80GB A100
-        torch_mock.cuda.get_device_properties.return_value = large_gpu_props
 
-        budget = calculate_token_budget(
-            device_id=0,
-            model_memory_gb=5.0,
-            safety_margin_gb=2.0,
-            max_tokens=16384,
-        )
+        with patch.object(torch.cuda, 'is_available', return_value=True):
+            with patch.object(torch.cuda, 'get_device_properties', return_value=large_gpu_props):
+                budget = calculate_token_budget(
+                    device_id=0,
+                    model_memory_gb=5.0,
+                    safety_margin_gb=2.0,
+                    max_tokens=16384,
+                )
 
         # Should clamp to maximum
         assert budget == 16384
-
-        # Reset
-        torch_mock.cuda.is_available.return_value = False
-        torch_mock.cuda.get_device_properties.return_value = device_props_mock
