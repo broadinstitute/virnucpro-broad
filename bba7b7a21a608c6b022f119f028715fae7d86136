@@ -1,0 +1,26 @@
+tests/unit/conftest.py
+  ccda82b2a99d2561 1-28
+tests/unit/test_packing.py
+  ccda82b2a99d2561 8-9,176,185-190,211,215-216,229,233-234
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "bba7b7a21a608c6b022f119f028715fae7d86136",
+  "prompts": {
+    "ccda82b2a99d2561": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "81bee629-634c-43bb-acb7-296216a2fc28",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 115,
+      "total_deletions": 113,
+      "accepted_lines": 45,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/8d9155497995ff94b8d89193ad8fc34ae819039da4867831d5797b2af2916a2c"
+    }
+  }
+}
