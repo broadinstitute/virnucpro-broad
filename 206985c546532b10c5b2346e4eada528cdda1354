@@ -1,0 +1,30 @@
+.planning/phases/08-fp16-precision-validation**---memory-and-speed-optimization/08-04-PLAN.md
+  cc9be4a32220dd64 14-16,31,33,35,63-67,69-70,101-106,159-165,167-171,175-176,178-179,182,185,190,198,206-207,213-215,217
+.planning/phases/08-fp16-precision-validation**---memory-and-speed-optimization/08-05-PLAN.md
+  cc9be4a32220dd64 1-183
+.planning/ROADMAP.md
+  cc9be4a32220dd64 150,154,156-157,213,218
+.planning/phases/08-fp16-precision-validation**---memory-and-speed-optimization/08-02-PLAN.md
+  cc9be4a32220dd64 17-18,25,37,39-41,46,48,50,70,115,125-130,134-138,140-141,145-146,152,195,201
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "206985c546532b10c5b2346e4eada528cdda1354",
+  "prompts": {
+    "cc9be4a32220dd64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cfc179c9-edfa-49c6-bf4f-91c5befd9802",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 269,
+      "total_deletions": 49,
+      "accepted_lines": 269,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/36999f47ceae4d92b94c925a705545b344cc06175526cc600fafe6d485d295de"
+    }
+  }
+}
