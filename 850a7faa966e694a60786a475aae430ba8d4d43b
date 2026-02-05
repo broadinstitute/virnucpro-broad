@@ -1,0 +1,24 @@
+virnucpro/pipeline/async_inference.py
+  ccda82b2a99d2561 283-288
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "850a7faa966e694a60786a475aae430ba8d4d43b",
+  "prompts": {
+    "ccda82b2a99d2561": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "81bee629-634c-43bb-acb7-296216a2fc28",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 371,
+      "total_deletions": 252,
+      "accepted_lines": 119,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/458dc76b5a74d97a7a46b10e711def7f157649464d19cf441d34961f04dc44b4"
+    }
+  }
+}
