@@ -1,0 +1,26 @@
+tests/unit/test_shard_aggregator.py
+  094eb0febb50f8d2 355-465
+tests/integration/test_multi_gpu_integration.py
+  094eb0febb50f8d2 513,515-518,520-521,523-525
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "f8f488a8bce5fdf7a45e7f73a1aac06e4e7a6f02",
+  "prompts": {
+    "094eb0febb50f8d2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ae31ecf-1e0a-48eb-9533-6c90812714fa",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 122,
+      "total_deletions": 5,
+      "accepted_lines": 122,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/30375eb30174e136bb0309954890b6796a9abd649c85f29c3b2f82ab0d9f632f"
+    }
+  }
+}
