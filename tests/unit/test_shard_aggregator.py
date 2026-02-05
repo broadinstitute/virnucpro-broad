@@ -352,3 +352,114 @@ class TestGetShardInfo:
 
         assert info['num_sequences'] == 100
         assert len(info['sequence_ids_sample']) == 5
+
+
+class TestPartialFailureRecovery:
+    """Test aggregation with partial worker failure scenarios.
+
+    When some GPU workers fail, the pipeline should still produce valid
+    output from successful workers. These tests verify:
+    1. Aggregation works with subset of expected shards
+    2. Partial validation correctly validates only successful workers' sequences
+    3. Missing shards are handled gracefully
+    """
+
+    def test_aggregate_subset_of_shards(self, temp_output_dir):
+        """Aggregation succeeds with only some shards present (worker failure).
+
+        Simulates 4-GPU run where workers 2,3 fail - only shards 0,1 exist.
+        """
+        # Create shards for successful workers (0, 1)
+        shard0_path = temp_output_dir / 'shard_0.h5'
+        shard1_path = temp_output_dir / 'shard_1.h5'
+        output_path = temp_output_dir / 'merged.h5'
+
+        # Worker 0: sequences 0, 4, 8 (stride distribution)
+        create_test_shard(shard0_path, ['seq0', 'seq4', 'seq8'])
+        # Worker 1: sequences 1, 5, 9
+        create_test_shard(shard1_path, ['seq1', 'seq5', 'seq9'])
+
+        # Workers 2,3 "failed" - no shard files created
+        # Only aggregate from successful workers
+        shard_files = [shard0_path, shard1_path]
+
+        # Expected IDs = only from successful workers
+        expected_ids = {'seq0', 'seq4', 'seq8', 'seq1', 'seq5', 'seq9'}
+
+        result = aggregate_shards(shard_files, output_path, expected_ids)
+
+        assert result == output_path
+        assert output_path.exists()
+
+        with h5py.File(output_path, 'r') as f:
+            assert f['embeddings'].shape[0] == 6
+            sequence_ids = [sid.decode('utf-8') if isinstance(sid, bytes) else sid
+                           for sid in f['sequence_ids'][:]]
+            assert set(sequence_ids) == expected_ids
+
+    def test_partial_validation_passes_with_correct_subset(self, temp_output_dir):
+        """Validation passes when expected_ids matches successful workers only.
+
+        This is the key partial failure behavior: validation is adjusted
+        to only check IDs from workers that completed successfully.
+        """
+        shard_path = temp_output_dir / 'shard_0.h5'
+        output_path = temp_output_dir / 'merged.h5'
+
+        # Only worker 0 succeeded with sequences 0,4,8
+        create_test_shard(shard_path, ['seq0', 'seq4', 'seq8'])
+
+        # Expected = only worker 0's sequences (workers 1,2,3 failed)
+        expected_ids = {'seq0', 'seq4', 'seq8'}
+
+        # Should pass validation
+        result = aggregate_shards([shard_path], output_path, expected_ids)
+        assert result == output_path
+
+    def test_partial_failure_still_detects_duplicates(self, temp_output_dir):
+        """Even with partial shards, duplicate detection works."""
+        shard0_path = temp_output_dir / 'shard_0.h5'
+        shard1_path = temp_output_dir / 'shard_1.h5'
+        output_path = temp_output_dir / 'merged.h5'
+
+        # Simulate bug where two workers got same sequence
+        create_test_shard(shard0_path, ['seq0', 'seq4'])
+        create_test_shard(shard1_path, ['seq4', 'seq8'])  # seq4 duplicated!
+
+        with pytest.raises(ValueError, match="Duplicate sequence ID found: seq4"):
+            aggregate_shards([shard0_path, shard1_path], output_path)
+
+    def test_single_worker_survival(self, temp_output_dir):
+        """Only one worker survived - output still valid."""
+        shard_path = temp_output_dir / 'shard_0.h5'
+        output_path = temp_output_dir / 'merged.h5'
+
+        # Only worker 0 succeeded out of 4
+        sequences = [f'seq{i*4}' for i in range(10)]  # seq0, seq4, seq8...
+        create_test_shard(shard_path, sequences)
+
+        expected_ids = set(sequences)
+
+        result = aggregate_shards([shard_path], output_path, expected_ids)
+
+        with h5py.File(result, 'r') as f:
+            assert f['embeddings'].shape[0] == 10
+            assert f['sequence_ids'].shape[0] == 10
+
+    def test_empty_shard_from_idle_worker(self, temp_output_dir):
+        """Worker assigned no sequences (more GPUs than sequences)."""
+        shard0_path = temp_output_dir / 'shard_0.h5'
+        shard1_path = temp_output_dir / 'shard_1.h5'
+        output_path = temp_output_dir / 'merged.h5'
+
+        # Worker 0 got all 2 sequences
+        create_test_shard(shard0_path, ['seq0', 'seq1'])
+        # Worker 1 was idle (no sequences assigned in stride distribution)
+        create_test_shard(shard1_path, [])
+
+        expected_ids = {'seq0', 'seq1'}
+
+        result = aggregate_shards([shard0_path, shard1_path], output_path, expected_ids)
+
+        with h5py.File(result, 'r') as f:
+            assert f['embeddings'].shape[0] == 2

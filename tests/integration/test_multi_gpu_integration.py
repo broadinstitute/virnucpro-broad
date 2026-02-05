@@ -510,13 +510,19 @@ class TestThroughputScaling:
 
 
 class TestFaultTolerance:
-    """Test partial failure handling."""
+    """Test fault tolerance infrastructure.
 
-    def test_partial_failure_produces_partial_results(self, test_fasta_files, temp_output_dir):
-        """Verify inference completes with reasonable timeout.
+    Note: Partial failure recovery logic (shard aggregation with missing shards)
+    is tested at the unit level in tests/unit/test_shard_aggregator.py::TestPartialFailureRecovery.
+    These integration tests verify the full pipeline completes successfully.
+    """
 
-        Note: Simulating partial failure with timeout is unreliable - model loading
-        alone takes 15-20s. This test verifies the pipeline completes normally.
+    def test_inference_completes_with_timeout(self, test_fasta_files, temp_output_dir):
+        """Verify inference completes within timeout and handles any failures.
+
+        This test verifies the pipeline can complete successfully with a timeout.
+        The actual partial failure recovery logic is tested at the unit level
+        in test_shard_aggregator.py::TestPartialFailureRecovery.
         """
         from virnucpro.pipeline.multi_gpu_inference import run_multi_gpu_inference
 
