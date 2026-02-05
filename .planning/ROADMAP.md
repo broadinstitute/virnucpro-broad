@@ -135,7 +135,7 @@ Plans:
 
 ### Phase 8: FP16 Precision Validation
 
-**Goal**: FP16 delivers 2x memory reduction without accuracy degradation
+**Goal**: FP16 delivers throughput improvement while maintaining embedding accuracy
 
 **Depends on**: Phase 7
 
@@ -147,10 +147,13 @@ Plans:
   3. Throughput improves 1.5-2x over Phase 7 FP32 baseline
   4. Batch sizes double (64-128 vs 32-64) due to memory headroom
 
-**Plans**: TBD
+**Plans**: 4 plans in 2 waves
 
 Plans:
-- [ ] TBD during phase planning
+- [ ] 08-01-PLAN.md — FP16 model conversion with feature flag and FlashAttention alignment
+- [ ] 08-02-PLAN.md — NaN/Inf detection, gpu_worker FP16 passthrough, and unit tests
+- [ ] 08-03-PLAN.md — FP16 vs FP32 equivalence integration tests (stratified validation)
+- [ ] 08-04-PLAN.md — FP16 vs FP32 throughput benchmarking
 
 ### Phase 9: Checkpointing Integration
 
@@ -206,9 +209,9 @@ Phases execute in numeric order: 5 → 6 → 7 → 8 → 9 → 10
 | 5. Async DataLoader Foundation | v2.0 | 5/5 | Complete | 2026-02-03 |
 | 6. Sequence Packing Integration | v2.0 | 8/8 | Complete | 2026-02-04 |
 | 7. Multi-GPU Coordination | v2.0 | 0/8 | Planned | - |
-| 8. FP16 Precision Validation | v2.0 | 0/TBD | Not started | - |
+| 8. FP16 Precision Validation | v2.0 | 0/4 | Planned | - |
 | 9. Checkpointing Integration | v2.0 | 0/TBD | Not started | - |
 | 10. Performance Validation & Tuning | v2.0 | 0/TBD | Not started | - |
 
 ---
-*Last updated: 2026-02-04 for Phase 7 planning (8 plans in 5 waves)*
+*Last updated: 2026-02-05 for Phase 8 planning (4 plans in 2 waves)*
