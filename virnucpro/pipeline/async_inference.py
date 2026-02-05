@@ -280,6 +280,12 @@ class AsyncInferenceRunner:
             retrieve_fn=None  # Keep on GPU for embedding extraction
         )
 
+        # FIX 8: Synchronize compute stream before extracting embeddings
+        # When retrieve_fn=None, process_batch_async returns without syncing.
+        # Without this, _extract_embeddings may run on default stream before
+        # representations are fully computed, causing race conditions.
+        self.stream_processor.synchronize()
+
         # FIX 2: Use gpu_batch_ref (already on GPU) instead of re-transferring
         # Extract embeddings (representations and gpu_batch_ref both on GPU)
         embeddings = self._extract_embeddings(representations, gpu_batch_ref)
