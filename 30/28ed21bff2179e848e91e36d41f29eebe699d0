@@ -1,0 +1,26 @@
+tests/unit/test_cli_predict.py
+  c6caafbd08ff5bbf 23,30-31,75-76,113-114,128,131,133,137,141-142,161-162,176,179,182,186-187,201-207,213-214,224-226,230,237-239,248,250,271-464
+virnucpro/pipeline/prediction.py
+  c6caafbd08ff5bbf 10,85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "3028ed21bff2179e848e91e36d41f29eebe699d0",
+  "prompts": {
+    "c6caafbd08ff5bbf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82e7aa61-a6ae-4414-80d0-ebc7cd195145",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 312,
+      "total_deletions": 118,
+      "accepted_lines": 235,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/9d77b20af2c07e957385f0574060f6635a9f98b56ab9cbd9b64055c30274875b"
+    }
+  }
+}
