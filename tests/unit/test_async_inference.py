@@ -240,3 +240,91 @@ class TestEmbeddingExtraction:
         # Should return single embedding
         assert embeddings.shape == (1, hidden_dim)
         assert embeddings.dtype == torch.float32
+
+
+class TestRankValidation:
+    """Tests for rank parameter validation."""
+
+    def test_negative_rank_raises_value_error(self):
+        """Verify ValueError is raised for negative rank values."""
+        from virnucpro.pipeline.async_inference import AsyncInferenceRunner
+
+        mock_model = Mock()
+        device = torch.device("cuda:0")
+
+        with pytest.raises(ValueError, match="rank must be non-negative"):
+            AsyncInferenceRunner(mock_model, device=device, rank=-1)
+
+    def test_negative_rank_with_checkpoint_dir_raises_value_error(self):
+        """Verify ValueError is raised for negative rank even with checkpointing enabled."""
+        from virnucpro.pipeline.async_inference import AsyncInferenceRunner
+        import tempfile
+        from pathlib import Path
+
+        mock_model = Mock()
+        device = torch.device("cuda:0")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with pytest.raises(ValueError, match="rank must be non-negative"):
+                AsyncInferenceRunner(
+                    mock_model,
+                    device=device,
+                    rank=-1,
+                    checkpoint_dir=Path(tmpdir)
+                )
+
+    def test_valid_rank_zero(self):
+        """Verify rank=0 is accepted (valid default)."""
+        from virnucpro.pipeline.async_inference import AsyncInferenceRunner
+
+        mock_model = Mock()
+        device = torch.device("cuda:0")
+
+        runner = AsyncInferenceRunner(mock_model, device=device, rank=0)
+        assert runner.rank == 0
+
+    def test_valid_positive_rank(self):
+        """Verify positive rank values are accepted."""
+        from virnucpro.pipeline.async_inference import AsyncInferenceRunner
+
+        mock_model = Mock()
+        device = torch.device("cuda:0")
+
+        runner = AsyncInferenceRunner(mock_model, device=device, rank=2)
+        assert runner.rank == 2
+
+
+class TestModelConfigHash:
+    """Tests for _compute_model_config_hash validation."""
+
+    def test_empty_model_raises_value_error(self):
+        """Verify ValueError is raised when model has no parameters."""
+        from virnucpro.pipeline.async_inference import AsyncInferenceRunner
+
+        mock_model = Mock()
+        mock_model.parameters.return_value = iter([])
+
+        device = torch.device("cuda:0")
+        runner = AsyncInferenceRunner(mock_model, device=device)
+
+        with pytest.raises(ValueError, match="Model has no parameters"):
+            runner._compute_model_config_hash()
+
+    def test_model_with_parameters_returns_hash(self):
+        """Verify hash is computed correctly for models with parameters."""
+        from virnucpro.pipeline.async_inference import AsyncInferenceRunner
+
+        mock_param = Mock()
+        mock_param.dtype = torch.float32
+        mock_param.numel.return_value = 1000000
+
+        mock_model = Mock()
+        mock_model.parameters.return_value = iter([mock_param])
+
+        device = torch.device("cuda:0")
+        runner = AsyncInferenceRunner(mock_model, device=device)
+
+        hash_value = runner._compute_model_config_hash()
+
+        assert isinstance(hash_value, str)
+        assert len(hash_value) == 16

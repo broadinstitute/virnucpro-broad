@@ -169,12 +169,12 @@ class AsyncInferenceRunner:
         self._total_sequences = 0
 
         # Checkpointing setup
+        if rank < 0:
+            raise ValueError(f"rank must be non-negative, got {rank}")
+
         self.checkpoint_dir = checkpoint_dir
         self.rank = rank
         self.manifest = manifest
-
-        if rank < 0:
-            raise ValueError(f"rank must be non-negative, got {rank}")
 
         if checkpoint_dir is not None and manifest is None:
             # Create shard-specific directory
