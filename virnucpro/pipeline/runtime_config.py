@@ -9,9 +9,9 @@ This separation ensures:
 - Clear distinction between "what model" vs "how to run it"
 """
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Any, Optional
 
 
 @dataclass
@@ -52,7 +52,21 @@ class RuntimeConfig:
     # Elastic redistribution (Issue 5)
     enable_elastic_redistribution: bool = True
 
-    def to_dict(self) -> dict:
+    def __post_init__(self):
+        if self.max_retries_transient < 0:
+            raise ValueError("max_retries_transient must be non-negative")
+        if self.max_retries_poison < 0:
+            raise ValueError("max_retries_poison must be non-negative")
+        if self.checkpoint_time_threshold <= 0:
+            raise ValueError("checkpoint_time_threshold must be positive")
+        if self.checkpoint_seq_threshold <= 0:
+            raise ValueError("checkpoint_seq_threshold must be positive")
+        if self.spot_retry_poll_interval <= 0:
+            raise ValueError("spot_retry_poll_interval must be positive")
+        if self.timeout_per_attempt is not None and self.timeout_per_attempt <= 0:
+            raise ValueError("timeout_per_attempt must be positive or None")
+
+    def to_dict(self) -> Dict[str, Any]:
         """Convert to dict for passing to workers."""
         d = asdict(self)
         # Convert Path to str for serialization
@@ -65,4 +79,6 @@ class RuntimeConfig:
         """Reconstruct from dict."""
         if 'checkpoint_dir' in d and d['checkpoint_dir']:
             d['checkpoint_dir'] = Path(d['checkpoint_dir'])
-        return cls(**d)
+        known_fields = {f.name for f in fields(cls)}
+        filtered = {k: v for k, v in d.items() if k in known_fields}
+        return cls(**filtered)
