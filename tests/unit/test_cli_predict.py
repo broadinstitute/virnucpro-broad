@@ -5,12 +5,16 @@ while DNABERT-S stays v1.0, and --v1-fallback routes both to v1.0.
 Uses mocking to avoid GPU/model dependencies.
 """
 
+import sys
 import pytest
 from pathlib import Path
 from click.testing import CliRunner
 from unittest.mock import patch, MagicMock
 
 from virnucpro.cli.main import cli
+
+if 'esm' not in sys.modules:
+    sys.modules['esm'] = MagicMock()
 
 try:
     from virnucpro.pipeline.runtime_config import RuntimeConfig
@@ -29,39 +33,48 @@ def tmp_fasta(tmp_path):
 
 
 @pytest.fixture
-def cli_mocks():
-    """Common mocking setup for CLI tests."""
-    with patch('virnucpro.cli.predict.validate_and_get_device') as mock_device, \
-         patch('virnucpro.cli.predict.detect_cuda_devices') as mock_detect, \
-         patch('virnucpro.cli.predict.Config') as mock_config, \
-         patch('virnucpro.pipeline.prediction.run_prediction') as mock_run:
+def cli_mocks(tmp_path):
+    """Common mocking setup for CLI tests. Creates fresh mocks per test."""
+    import torch
+    from unittest.mock import MagicMock, patch
 
-        # Setup mock returns
-        import torch
-        mock_device.return_value = torch.device('cpu')
-        mock_detect.return_value = [0, 1]  # Default: 2 GPUs
+    mock_device = MagicMock(return_value=torch.device('cpu'))
+    mock_detect = MagicMock(return_value=[0, 1])  # Default: 2 GPUs
+    mock_run = MagicMock(return_value=0)  # Success exit code
 
-        # Mock config.get to return sensible defaults
-        def config_get(key, default=None):
-            defaults = {
-                'prediction.models.500': '/fake/model.pth',
-                'prediction.batch_size': 256,
-                'prediction.num_workers': 4,
-                'features.dnabert.batch_size': 2048,
-                'device.fallback_to_cpu': True,
-                'files.auto_cleanup': True,
-            }
-            return defaults.get(key, default)
-
-        mock_config.return_value.get = config_get
-        mock_run.return_value = 0  # Success exit code
-
-        yield {
-            'device': mock_device,
-            'detect': mock_detect,
-            'config': mock_config,
-            'run_prediction': mock_run,
+    def config_get(key, default=None):
+        defaults = {
+            'prediction.models.500': '/fake/model.pth',
+            'prediction.batch_size': 256,
+            'prediction.num_workers': 4,
+            'features.dnabert.batch_size': 2048,
+            'device.fallback_to_cpu': True,
+            'files.auto_cleanup': True,
         }
+        return defaults.get(key, default)
+
+    mock_config = MagicMock()
+    mock_config.return_value.get = config_get
+
+    patchers = [
+        patch('virnucpro.cli.predict.validate_and_get_device', mock_device),
+        patch('virnucpro.cli.predict.detect_cuda_devices', mock_detect),
+        patch('virnucpro.cli.predict.Config', mock_config),
+        patch('virnucpro.pipeline.prediction.run_prediction', mock_run),
+    ]
+
+    for p in patchers:
+        p.start()
+
+    yield {
+        'device': mock_device,
+        'detect': mock_detect,
+        'config': mock_config,
+        'run_prediction': mock_run,
+    }
+
+    for p in reversed(patchers):
+        p.stop()
 
 
 def test_parallel_routes_esm2_to_v2(tmp_fasta, tmp_path, cli_mocks):
@@ -96,10 +109,10 @@ def test_parallel_routes_esm2_to_v2(tmp_fasta, tmp_path, cli_mocks):
     runtime_config = call_kwargs['runtime_config']
     assert isinstance(runtime_config, RuntimeConfig), \
         "Expected RuntimeConfig instance"
-    assert runtime_config.enable_checkpointing is True, \
-        "Expected enable_checkpointing=True for --parallel (default)"
+    assert runtime_config.enable_checkpointing is False, \
+        "Expected enable_checkpointing=False for --parallel (no --resume)"
     assert runtime_config.force_restart is False, \
-        "Expected force_restart=False for --parallel (default)"
+        "Expected force_restart=False for --parallel (no --force-resume)"
 
 
 def test_v1_fallback_routes_all_to_v1(tmp_fasta, tmp_path, cli_mocks):
@@ -243,3 +256,18 @@ def test_v1_fallback_architecture_logged(tmp_fasta, tmp_path, cli_mocks):
         "Expected 'v1.0' in log output for fallback"
     assert "--v1-fallback" in result.output, \
         "Expected '--v1-fallback' in log output"
+
+
+def test_failure_exit_code_propagated(tmp_fasta, tmp_path, cli_mocks):
+    """Test that failure exit codes from run_prediction are properly propagated."""
+    cli_mocks['run_prediction'].return_value = 2  # Partial failure exit code
+
+    runner = CliRunner()
+    result = runner.invoke(cli, [
+        'predict',
+        str(tmp_fasta),
+        '--parallel',
+        '--output-dir', str(tmp_path / 'output')
+    ])
+
+    assert result.exit_code == 2, f"Expected exit code 2, got {result.exit_code}: {result.output}"
