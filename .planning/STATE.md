@@ -114,6 +114,10 @@ Recent decisions affecting current work:
 - **FlashAttention verification before benchmarking (08-04)**: verify_flashattention_active() checks forward_packed exists and runs test inference to catch fallback warnings - ensures measuring FlashAttention+FP16 not just FP16
 - **No specific speedup assertion (08-04)**: Assert FP16 ≥ 1.0x (not slower) but don't assert ≥1.5x - environment-dependent, print comprehensive table for user evaluation
 - **Warmup 10 iterations (08-04)**: Increased from typical 5 for 3B model + FlashAttention kernel compilation - ensures stable timing measurements
+- **Function-scoped fixtures for memory (08-03)**: Sequential loading (FP32 → cleanup → FP16) reduces peak memory from ~40GB to ~22GB - enables reliable testing on A100-40GB GPUs
+- **Realistic FP16 validation thresholds (08-03)**: Mean abs diff <0.01 (not 0.1), std rel diff <5% (not absolute), cosine >0.99 - reflects ESM-2 FP16 mantissa precision
+- **Per-token similarity for packed format (08-03)**: Validates production forward_packed() code path separately due to RoPE timing and FlashAttention kernel differences
+- **Statistical validation beyond similarity (08-03)**: Mean/std/L2 norm/outlier distributions confirm FP16 preserves statistical properties, not just cosine similarity
 
 ### Pending Todos
 
@@ -154,7 +158,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 08-04-PLAN.md (FP16 throughput benchmark)
+Stopped at: Completed 08-03-PLAN.md (FP16 validation integration tests)
 Resume file: None
 
-**Next step:** Continue Phase 8 - FP16 Precision Validation
+**Next step:** Continue Phase 8 - FP16 Precision Validation (08-05 remaining)
