@@ -1,0 +1,24 @@
+docs/MIGRATION_v2.md
+  7e45c47f3a6392bb 1-165
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "09a9788111d57875b24133d7edca8ca6036de1cc",
+  "prompts": {
+    "7e45c47f3a6392bb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "422db091-069f-40aa-9fcf-83272c2622f6",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 285,
+      "total_deletions": 6,
+      "accepted_lines": 283,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/f72176a4038cbe59bbe902bae8361a5ceecdb35ddd2ba85ac7411ede337fdf21"
+    }
+  }
+}
