@@ -175,9 +175,9 @@ def gpu_worker(
         batch_idx = 0
         try:
             for result in runner.run(dataloader):
+                batch_idx += 1
                 all_embeddings.append(result.embeddings)
                 all_ids.extend(result.sequence_ids)
-                batch_idx += 1
         except RuntimeError as e:
             if "Numerical instability" in str(e):
                 # Log which sequences failed for debugging

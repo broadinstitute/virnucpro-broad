@@ -203,7 +203,8 @@ class AsyncInferenceRunner:
                 )
 
                 # Check numerical stability (catches FP16 overflow)
-                check_numerical_stability(representations, context=f"batch_{self._batch_count}")
+                input_ids_list = gpu_batch.get('sequence_ids', [])
+                check_numerical_stability(representations, context=f"batch_{self._batch_count}_seqs_{len(input_ids_list)}")
                 return representations
             else:
                 # Unpacked path (fallback):
@@ -221,7 +222,8 @@ class AsyncInferenceRunner:
                 representations = outputs['representations'][36]
 
                 # Check numerical stability (catches FP16 overflow)
-                check_numerical_stability(representations, context=f"batch_{self._batch_count}")
+                input_ids_list = gpu_batch.get('sequence_ids', [])
+                check_numerical_stability(representations, context=f"batch_{self._batch_count}_seqs_{len(input_ids_list)}")
                 return representations
 
     def _extract_embeddings(
