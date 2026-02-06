@@ -123,11 +123,13 @@ def benchmark_model_packed(model, sequences, device, num_warmup=10, num_iteratio
         Dict with elapsed_sec, tokens_per_sec, sequences_per_sec, peak_memory_gb
     """
     from virnucpro.data.collators import VarlenCollator
-    from virnucpro.data.packing import GreedyPacker
 
-    # Create packed batches on CPU (isolate from compute timing)
-    packer = GreedyPacker(max_tokens_per_batch=8192)  # Realistic production budget
-    collator = VarlenCollator(packer=packer, batch_converter=model.model.alphabet.get_batch_converter())
+    # Create collator with packing enabled
+    collator = VarlenCollator(
+        batch_converter=model.model.alphabet.get_batch_converter(),
+        max_tokens_per_batch=8192,  # Realistic production budget
+        enable_packing=True
+    )
 
     batches = []
     batch_size = 32  # Pack 32 sequences per batch
