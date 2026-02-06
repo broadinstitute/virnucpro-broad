@@ -23,6 +23,7 @@ from virnucpro.models.packed_attention import (
     flash_attn_varlen_wrapper,
     FLASH_ATTN_AVAILABLE,
 )
+from virnucpro.utils.precision import should_use_fp16
 
 logger = logging.getLogger('virnucpro.models.esm2_flash')
 
@@ -53,6 +54,7 @@ class ESM2WithFlashAttention(nn.Module):
         self,
         base_model: nn.Module,
         device: torch.device,
+        enable_fp16: bool = True,
         logger_instance: Optional[logging.Logger] = None
     ):
         """
@@ -61,6 +63,7 @@ class ESM2WithFlashAttention(nn.Module):
         Args:
             base_model: Base ESM-2 model from esm.pretrained
             device: Device to run model on
+            enable_fp16: Enable FP16 precision (default: True)
             logger_instance: Optional logger for configuration messages
         """
         super().__init__()
@@ -79,10 +82,13 @@ class ESM2WithFlashAttention(nn.Module):
         # Configure FlashAttention-2 if available
         self.model = configure_flash_attention(self.model, log)
 
-        # EXPERIMENTAL: Force FP32 to test vanilla compatibility
-        # Original code checked capability[0] >= 8 for BF16
-        self.use_bf16 = False
-        log.info("EXPERIMENTAL: Forcing FP32 precision (BF16 disabled for vanilla compatibility test)")
+        # Convert to FP16 if enabled
+        self.use_fp16 = enable_fp16
+        if self.use_fp16:
+            self.model = self.model.half()
+            log.info("Model converted to FP16 precision")
+        else:
+            log.warning("FP16 precision disabled - using FP32 (diagnostic mode)")
 
     def forward(
         self,
@@ -481,7 +487,7 @@ class ESM2WithFlashAttention(nn.Module):
             f"ESM2WithFlashAttention("
             f"attention={self.attention_impl}, "
             f"device={self.device}, "
-            f"dtype={'bfloat16' if self.use_bf16 else 'float32'})"
+            f"dtype={'float16' if self.use_fp16 else 'float32'})"
         )
 
 
@@ -492,6 +498,7 @@ def load_esm2_model(
         "esm2_t48_15B_UR50D"
     ] = "esm2_t36_3B_UR50D",
     device: str = "cuda",
+    enable_fp16: Optional[bool] = None,
     logger_instance: Optional[logging.Logger] = None
 ) -> Tuple[ESM2WithFlashAttention, Any]:
     """
@@ -509,6 +516,7 @@ def load_esm2_model(
     Args:
         model_name: Name of ESM-2 model variant to load
         device: Device to load model on (e.g., "cuda", "cuda:0", "cpu")
+        enable_fp16: Enable FP16 precision. If None, uses should_use_fp16() (checks env var)
         logger_instance: Optional logger for configuration messages
 
     Returns:
@@ -537,10 +545,15 @@ def load_esm2_model(
     # Convert device string to torch.device
     device_obj = torch.device(device)
 
+    # Check FP16 setting from env var if not explicitly provided
+    if enable_fp16 is None:
+        enable_fp16 = should_use_fp16()
+
     # Wrap with FlashAttention-2 support
     model = ESM2WithFlashAttention(
         base_model,
         device_obj,
+        enable_fp16=enable_fp16,
         logger_instance=log
     )
 
