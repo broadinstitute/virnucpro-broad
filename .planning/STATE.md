@@ -11,18 +11,18 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 9 of 10 (Checkpointing Integration) - IN PROGRESS
-Plan: 1 of 6 in phase - COMPLETE
-Status: Checkpoint foundation complete (trigger, async writer, validation, resume)
-Last activity: 2026-02-06 — Completed 09-01-PLAN.md (checkpoint_writer.py foundation)
+Plan: 2 of 6 in phase - COMPLETE (Wave 1: 2/3)
+Status: CheckpointManifest coordination complete
+Last activity: 2026-02-06 — Completed 09-02-PLAN.md (CheckpointManifest coordination)
 
-Progress: [███████░░░] 72/TBD plans (v1.0: 34/34 complete, v2.0: 38/TBD)
+Progress: [███████░░░] 73/TBD plans (v1.0: 34/34 complete, v2.0: 39/TBD)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 72 (v1.0: 34, v2.0: 38)
+- Total plans completed: 73 (v1.0: 34, v2.0: 39)
 - Average duration: 3.1 min
-- Total execution time: 3.8 hours
+- Total execution time: 3.9 hours
 
 **By Phase:**
 
@@ -37,11 +37,11 @@ Progress: [███████░░░] 72/TBD plans (v1.0: 34/34 complete, v
 | 6 | 8 | 28 min | 3.5 min |
 | 7 | 8 | 29 min | 3.6 min |
 | 8 | 4 (complete) | 13 min | 3.25 min |
-| 9 | 1 | 3.6 min | 3.6 min |
+| 9 | 2 | 8 min | 3.7 min |
 
 **Recent Trend:**
-- Last 5 plans: ~3.3 min average
-- Trend: Steady (Phase 9 checkpoint foundation complete)
+- Last 5 plans: ~3.4 min average
+- Trend: Steady (Phase 9 Wave 1 in progress)
 
 *Updated after each plan completion*
 
@@ -123,6 +123,12 @@ Recent decisions affecting current work:
 - **Env var precedence for checkpoints (09-01)**: VIRNUCPRO_VIRAL_CHECKPOINT_MODE overrides default thresholds (5K seq / 180s) but not explicit constructor args - enables viral workload tuning
 - **Corrupted sequence requeue (09-01)**: resume_from_checkpoints returns 4-tuple with corrupted_sequence_ids for caller requeue - enables idempotent recovery without full restart
 - **Manifest optional for resume (09-01)**: Manifest validation logs warnings but doesn't fail - filesystem checkpoints are source of truth for per-shard resume
+- **POSIX file locking for manifest (09-02)**: Use fcntl.flock for cross-process coordination instead of threading.Lock - GPU workers are spawned processes with independent memory spaces
+- **Checkpoint file validation before manifest update (09-02)**: update_shard_checkpoint validates file exists to ensure filesystem and manifest state consistency
+- **Elastic shard redistribution (09-02)**: Separate original_rank (immutable) and assigned_rank (mutable) fields enable reassigning failed work to healthy workers
+- **Triple-redundancy manifest recovery (09-02)**: Primary -> .tmp -> .backup fallback chain provides high fault tolerance for JSON corruption
+- **Staleness threshold 600s default (09-02)**: Conservative 10-minute threshold for zombie detection avoids false positives from slow I/O or large batches
+- **Orphaned shards retry_count >= 3 (09-02)**: Max 3 retries per shard before marking as orphaned for redistribution - prevents infinite retry loops
 
 ### Pending Todos
 
@@ -163,14 +169,15 @@ None yet.
 - ✅ FP16 performance benchmarks (454K seq/hour, 6.06GB memory)
 - Note: LayerNorm may have limited dynamic range in FP16 - selective FP32 for specific layers if needed
 
-**Phase 9 (Checkpointing Integration):** IN PROGRESS
+**Phase 9 (Checkpointing Integration):** IN PROGRESS - Wave 1
 - ✅ Checkpoint foundation (CheckpointTrigger, AsyncCheckpointWriter, validation, resume) - 09-01
-- Next: AsyncInferenceRunner integration (09-02)
+- ✅ CheckpointManifest for multi-GPU coordination - 09-02
+- Next: AsyncInferenceRunner integration (09-03)
 
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 09-01-PLAN.md (checkpoint_writer.py foundation)
+Stopped at: Completed 09-02-PLAN.md (CheckpointManifest coordination)
 Resume file: None
 
-**Next step:** Continue Phase 9 - Checkpointing Integration (09-02: AsyncInferenceRunner integration)
+**Next step:** Continue Phase 9 Wave 1 - AsyncInferenceRunner integration (09-03)
