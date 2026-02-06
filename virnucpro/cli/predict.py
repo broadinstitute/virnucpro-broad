@@ -56,6 +56,9 @@ logger = logging.getLogger('virnucpro.cli.predict')
 @click.option('--parallel',
               is_flag=True,
               help='Enable multi-GPU parallel processing for feature extraction')
+@click.option('--v1-fallback',
+              is_flag=True,
+              help='Use v1.0 multi-worker architecture for ESM-2 instead of v2.0 async DataLoader')
 @click.option('--gpus',
               type=str,
               default=None,
@@ -103,7 +106,7 @@ logger = logging.getLogger('virnucpro.cli.predict')
 def predict(ctx, input_file, model_type, model_path, expected_length,
             output_dir, device, batch_size, num_workers,
             keep_intermediate, resume, force, no_progress,
-            dnabert_batch_size, parallel, gpus, esm_batch_size, threads, verbose,
+            dnabert_batch_size, parallel, v1_fallback, gpus, esm_batch_size, threads, verbose,
             skip_checkpoint_validation, force_resume, dataloader_workers, pin_memory,
             expandable_segments, cache_clear_interval, cuda_streams, persistent_models):
     """
@@ -245,6 +248,28 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
         else:
             logger.info(f"  Persistent models: disabled (standard model loading)")
 
+        # Determine architecture version for ESM-2
+        use_v2 = parallel and not v1_fallback
+
+        if use_v2:
+            logger.info("Architecture: v2.0 hybrid")
+            logger.info("  ESM-2 embedding: v2.0 (async DataLoader + sequence packing)")
+            logger.info("  DNABERT-S embedding: v1.0 (fast enough, v2.0 planned for v2.1)")
+        elif v1_fallback:
+            logger.info("Architecture: v1.0 (--v1-fallback, all stages use legacy multi-worker)")
+        else:
+            logger.info("Architecture: v1.0 (single-GPU or non-parallel mode)")
+
+        # Construct RuntimeConfig when v2.0 is active
+        runtime_config = None
+        if use_v2:
+            from virnucpro.pipeline.runtime_config import RuntimeConfig
+            runtime_config = RuntimeConfig(
+                enable_checkpointing=resume or force_resume,
+                checkpoint_dir=output_dir / '.checkpoints',
+                force_restart=force_resume,
+            )
+
         # Import torch for CUDA validation
         import torch
 
@@ -283,7 +308,9 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
             expandable_segments=expandable_segments,
             cache_clear_interval=cache_clear_interval,
             cuda_streams=cuda_streams,
-            persistent_models=persistent_models
+            persistent_models=persistent_models,
+            use_v2_architecture=use_v2,
+            runtime_config=runtime_config
         )
 
         if exit_code == 0:

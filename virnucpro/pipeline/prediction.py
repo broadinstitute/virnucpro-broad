@@ -23,6 +23,71 @@ from virnucpro.models.esm2_flash import load_esm2_model
 logger = logging.getLogger('virnucpro.pipeline.prediction')
 
 
+def _stream_h5_to_pt_files(
+    h5_path: Path,
+    output_dir: Path,
+    nucleotide_feature_files: list
+) -> list:
+    """Convert v2.0 HDF5 embeddings to v1.0 per-file .pt format for merge stage.
+
+    Uses chunked reading to avoid loading entire HDF5 into memory.
+    Creates .pt files that match the naming convention expected by the merge stage:
+    each nucleotide feature file (e.g., output_0_DNABERT_S.pt) has a corresponding
+    ESM feature file (e.g., output_0_ESM.pt).
+
+    The merge stage (Stage 7) zips nucleotide and protein feature files by position,
+    so this function must produce files in the same order as nucleotide_feature_files.
+
+    Args:
+        h5_path: Path to v2.0 merged embeddings.h5
+        output_dir: Directory to write .pt files
+        nucleotide_feature_files: List of DNABERT .pt files (used for naming alignment)
+
+    Returns:
+        List of created .pt file paths, ordered to match nucleotide_feature_files
+    """
+    import h5py
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Read all embeddings from HDF5 (v2.0 format: sequence_ids + embeddings datasets)
+    with h5py.File(h5_path, 'r') as f:
+        seq_ids = [s.decode() if isinstance(s, bytes) else s for s in f['sequence_ids'][:]]
+        embeddings = f['embeddings']  # Don't load all into memory yet
+
+        # Build lookup: sequence_id -> embedding (chunked read)
+        seq_to_embedding = {}
+        chunk_size = 10000
+        for start in range(0, len(seq_ids), chunk_size):
+            end = min(start + chunk_size, len(seq_ids))
+            chunk_embs = embeddings[start:end]
+            for i, sid in enumerate(seq_ids[start:end]):
+                seq_to_embedding[sid] = torch.tensor(chunk_embs[i])
+
+    # Create per-file .pt files matching nucleotide feature file naming
+    # nucleotide: output_0_DNABERT_S.pt -> protein: output_0_ESM.pt
+    pt_files = []
+    for nuc_feat_path in nucleotide_feature_files:
+        # Load nucleotide .pt to get sequence IDs in this file
+        nuc_data = torch.load(nuc_feat_path, weights_only=False)
+
+        # Build ESM features dict for sequences in this file
+        esm_features = {}
+        for seq_id in nuc_data.keys():
+            if seq_id in seq_to_embedding:
+                esm_features[seq_id] = seq_to_embedding[seq_id]
+            else:
+                logger.warning(f"Sequence {seq_id} not found in v2.0 ESM-2 output")
+
+        # Save with matching name: output_0_DNABERT_S.pt -> output_0_ESM.pt
+        esm_filename = nuc_feat_path.name.replace('_DNABERT_S.pt', '_ESM.pt')
+        esm_path = output_dir / esm_filename
+        atomic_save(esm_features, esm_path)
+        pt_files.append(esm_path)
+
+    return pt_files
+
+
 def run_prediction(
     input_file: Path,
     model_path: Path,
@@ -49,7 +114,9 @@ def run_prediction(
     expandable_segments: bool = False,
     cache_clear_interval: int = 100,
     cuda_streams: bool = True,
-    persistent_models: bool = False
+    persistent_models: bool = False,
+    use_v2_architecture: bool = False,
+    runtime_config: Optional['RuntimeConfig'] = None
 ) -> int:
     """
     Main prediction pipeline orchestration.
@@ -81,6 +148,8 @@ def run_prediction(
         cache_clear_interval: Clear CUDA cache every N batches (optional, default: 100)
         cuda_streams: Use CUDA streams for I/O overlap (optional, default: True)
         persistent_models: Keep models loaded in GPU memory between pipeline stages (optional, default: False)
+        use_v2_architecture: Route ESM-2 through v2.0 async DataLoader (DNABERT-S stays v1.0)
+        runtime_config: Runtime configuration for v2.0 architecture (checkpointing, retries, etc.)
 
     Returns:
         Exit code: 0 for success, 1 for total failure, 2 for partial success, 4 for OOM
@@ -563,194 +632,239 @@ def run_prediction(
             logger.info("=== Stage 6: Protein Feature Extraction ===")
             checkpoint_manager.mark_stage_started(state, PipelineStage.PROTEIN_FEATURES)
 
-            from virnucpro.pipeline.features import extract_esm_features
+            if use_v2_architecture and parallel:
+                # v2.0 ESM-2: async DataLoader + sequence packing + FlashAttention
+                logger.info("ESM-2: Using v2.0 async architecture")
+                logger.info("  Features: FP16, FlashAttention varlen, stride-based sharding")
 
-            protein_feature_files = []
-            failed_files = []
+                from virnucpro.pipeline.multi_gpu_inference import run_multi_gpu_inference
 
-            # Extract ESM-2 features with multi-GPU support
-            logger.info("Extracting ESM-2 features from protein sequences")
-            truncation_length = config.get('features.esm.truncation_seq_length', 1024)
-            if toks_per_batch is None:
-                toks_per_batch = config.get('features.esm.toks_per_batch', 2048)
+                cuda_devices = detect_cuda_devices()
+                num_gpus = len(cuda_devices) if cuda_devices else 1
 
-            # Detect available GPUs
-            cuda_devices = detect_cuda_devices()
-            num_gpus = len(cuda_devices) if cuda_devices else 1
-            # Use parallel processing if multiple GPUs available and parallel mode enabled
-            # Note: Works with single files - sequences are distributed across GPUs
-            use_parallel = num_gpus > 1 and parallel
+                esm_model_config = {
+                    'model_type': 'esm2',
+                    'model_name': 'esm2_t36_3B_UR50D',
+                    'enable_fp16': True,
+                }
+                esm_output_dir = output_dir / 'esm_v2'
 
-            # Log GPU capabilities and BF16 status
-            if torch.cuda.is_available() and cuda_devices:
-                for gpu_id in cuda_devices:
-                    device_name = torch.cuda.get_device_name(gpu_id)
-                    capability = torch.cuda.get_device_capability(gpu_id)
-                    compute_version = f"{capability[0]}.{capability[1]}"
-                    bf16_enabled = capability[0] >= 8
-                    logger.info(f"GPU {gpu_id} ({device_name}): Compute {compute_version}, BF16 {'enabled' if bf16_enabled else 'disabled'}")
+                esm_output_path, esm_failed_ranks = run_multi_gpu_inference(
+                    fasta_files=protein_files,
+                    output_dir=esm_output_dir,
+                    model_config=esm_model_config,
+                    world_size=num_gpus,
+                    runtime_config=runtime_config,
+                )
 
-                # Log batch size based on BF16 status
-                if cuda_devices and torch.cuda.get_device_capability(cuda_devices[0])[0] >= 8:
-                    effective_batch = 3072 if toks_per_batch == 2048 else toks_per_batch
-                    logger.info(f"BF16 mixed precision available, using batch size {effective_batch}")
-                else:
-                    logger.info(f"Using FP32 precision, batch size {toks_per_batch}")
-
-            if use_parallel:
-                logger.info(f"Using {num_gpus} GPUs for ESM-2 extraction")
-
-                # Filter out files with existing outputs for checkpoint resume
-                # Use .done markers for quick completion check without loading multi-GB checkpoints
-                files_to_process = []
-                complete_count = 0
-                for pro_file in protein_files:
-                    output_file = pro_file.parent / f"{pro_file.stem}_ESM.pt"
-
-                    # Quick check: .done marker indicates completed checkpoint
-                    if output_file.exists() and has_done_marker(output_file):
-                        protein_feature_files.append(output_file)
-                        complete_count += 1
-                        logger.debug(f"Skipping {pro_file.name} (checkpoint complete with .done marker)")
-                    elif output_file.exists() and not has_done_marker(output_file):
-                        # Checkpoint exists but no .done marker - may be incomplete
-                        logger.warning(f"Re-processing {pro_file.name} (checkpoint missing .done marker)")
-                        remove_done_marker(output_file)  # Defensive cleanup
-                        files_to_process.append(pro_file)
-                    else:
-                        files_to_process.append(pro_file)
-
-                if complete_count > 0:
-                    logger.info(f"Resuming: {complete_count} ESM-2 checkpoints complete, {len(files_to_process)} to process")
-
-                # Skip parallel processing if no files to process
-                if not files_to_process:
-                    logger.info("All ESM-2 feature files already exist, skipping extraction")
-                else:
-                    # Assign files round-robin across GPUs
-                    file_assignments = assign_files_round_robin(files_to_process, num_gpus)
-
-                    # Create progress queue for live updates
-                    import multiprocessing
-                    import threading
-                    ctx = multiprocessing.get_context('spawn')
-                    progress_queue = ctx.Queue()
-
-                    # Create and start dashboard
-                    from virnucpro.pipeline.dashboard import monitor_progress, MultiGPUDashboard
-                    total_files_per_gpu = {i: len(file_assignments[i]) for i in range(num_gpus)}
-                    dashboard = MultiGPUDashboard(num_gpus, total_files_per_gpu)
-                    dashboard.start()
-
-                    # Start progress monitor thread
-                    stop_event = threading.Event()
-                    monitor_thread = threading.Thread(
-                        target=monitor_progress,
-                        args=(progress_queue, dashboard, stop_event),
-                        daemon=True
+                # FAIL-FAST on worker failures (Issue 3: no synthetic format conversion)
+                # v2.0 returns failed_ranks (List[int]), not failed_files (List[Tuple[str, str]])
+                # We cannot map ranks back to individual files without index lookup,
+                # so if any rank fails, the entire ESM-2 stage fails
+                if esm_failed_ranks:
+                    raise RuntimeError(
+                        f"v2.0 ESM-2 inference failed on {len(esm_failed_ranks)}/{num_gpus} workers: "
+                        f"ranks {esm_failed_ranks}. Check logs: {esm_output_dir / 'logs' / 'worker_*.log'}"
                     )
-                    monitor_thread.start()
 
-                    try:
-                        # Process with queue manager
-                        queue_manager = BatchQueueManager(
-                            num_gpus,
-                            process_esm_files_worker,
-                            progress_queue=progress_queue,
-                            use_persistent_pool=persistent_models,
-                            model_type='esm2' if persistent_models else None
-                        )
+                # Convert v2.0 HDF5 output to v1.0 per-file .pt format for merge stage compatibility
+                # Uses streaming approach to avoid loading entire HDF5 into memory (Issue 2)
+                protein_feature_files = _stream_h5_to_pt_files(
+                    esm_output_path, protein_split_dir, nucleotide_feature_files
+                )
+                failed_files = []  # No failures (we fail-fast above)
 
-                        # Create persistent pool if enabled
-                        if persistent_models:
-                            logger.info("Creating persistent worker pool for ESM-2...")
-                            queue_manager.create_persistent_pool()
-
-                        processed, failed = queue_manager.process_files(
-                            file_assignments,
-                            toks_per_batch=toks_per_batch,
-                            output_dir=protein_split_dir,
-                            enable_streams=cuda_streams and torch.cuda.is_available()
-                        )
-
-                        protein_feature_files.extend(processed)
-                        failed_files.extend(failed)
-
-                        # Clear cache after ESM-2 stage if memory manager active
-                        if memory_manager:
-                            memory_manager.clear_cache()
-                            if persistent_models:
-                                # Extra aggressive clearing for persistent models
-                                torch.cuda.synchronize()
-                                torch.cuda.empty_cache()
-                            if not quiet:
-                                stats = memory_manager.get_memory_stats()
-                                mode = "persistent" if persistent_models else "standard"
-                                logger.info(f"  Post-ESM-2 memory ({mode}): {stats['allocated']:.2f}GB allocated, "
-                                           f"{stats['free']:.2f}GB free")
-
-                        # Close persistent pool if created
-                        if persistent_models and queue_manager:
-                            logger.info("Closing ESM-2 persistent worker pool...")
-                            queue_manager.close_persistent_pool()
-                    finally:
-                        # Stop monitor thread and complete dashboard
-                        stop_event.set()
-                        monitor_thread.join(timeout=1.0)
-                        dashboard.complete_all()
-
-                    # Log failures
-                    if failed:
-                        failed_file_path = output_dir / "failed_files.txt"
-                        with open(failed_file_path, 'w') as f:
-                            for file_path, error in failed:
-                                f.write(f"{file_path}|ESM-2|{error}\n")
-                        logger.warning(f"Failed to process {len(failed)} files, see {failed_file_path}")
+                logger.info(f"v2.0 ESM-2 complete: {len(protein_feature_files)} feature files created")
             else:
-                logger.info("Using single GPU for ESM-2 extraction")
-                device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+                # --- v1.0 ESM-2 CODE BELOW (UNCHANGED) ---
+                from virnucpro.pipeline.features import extract_esm_features
 
-                # Filter out files with existing outputs for checkpoint resume
-                # Use .done markers for quick completion check without loading multi-GB checkpoints
-                files_to_process = []
-                complete_count = 0
-                for pro_file in protein_files:
-                    output_file = pro_file.parent / f"{pro_file.stem}_ESM.pt"
+                protein_feature_files = []
+                failed_files = []
 
-                    # Quick check: .done marker indicates completed checkpoint
-                    if output_file.exists() and has_done_marker(output_file):
-                        protein_feature_files.append(output_file)
-                        complete_count += 1
-                        logger.debug(f"Skipping {pro_file.name} (checkpoint complete with .done marker)")
-                    elif output_file.exists() and not has_done_marker(output_file):
-                        # Checkpoint exists but no .done marker - may be incomplete
-                        logger.warning(f"Re-processing {pro_file.name} (checkpoint missing .done marker)")
-                        remove_done_marker(output_file)  # Defensive cleanup
-                        files_to_process.append(pro_file)
+                # Extract ESM-2 features with multi-GPU support
+                logger.info("Extracting ESM-2 features from protein sequences")
+                truncation_length = config.get('features.esm.truncation_seq_length', 1024)
+                if toks_per_batch is None:
+                    toks_per_batch = config.get('features.esm.toks_per_batch', 2048)
+
+                # Detect available GPUs
+                cuda_devices = detect_cuda_devices()
+                num_gpus = len(cuda_devices) if cuda_devices else 1
+                # Use parallel processing if multiple GPUs available and parallel mode enabled
+                # Note: Works with single files - sequences are distributed across GPUs
+                use_parallel = num_gpus > 1 and parallel
+
+                # Log GPU capabilities and BF16 status
+                if torch.cuda.is_available() and cuda_devices:
+                    for gpu_id in cuda_devices:
+                        device_name = torch.cuda.get_device_name(gpu_id)
+                        capability = torch.cuda.get_device_capability(gpu_id)
+                        compute_version = f"{capability[0]}.{capability[1]}"
+                        bf16_enabled = capability[0] >= 8
+                        logger.info(f"GPU {gpu_id} ({device_name}): Compute {compute_version}, BF16 {'enabled' if bf16_enabled else 'disabled'}")
+
+                    # Log batch size based on BF16 status
+                    if cuda_devices and torch.cuda.get_device_capability(cuda_devices[0])[0] >= 8:
+                        effective_batch = 3072 if toks_per_batch == 2048 else toks_per_batch
+                        logger.info(f"BF16 mixed precision available, using batch size {effective_batch}")
                     else:
-                        files_to_process.append(pro_file)
+                        logger.info(f"Using FP32 precision, batch size {toks_per_batch}")
 
-                if complete_count > 0:
-                    logger.info(f"Resuming: {complete_count} ESM-2 checkpoints complete, {len(files_to_process)} to process")
+                if use_parallel:
+                    logger.info(f"Using {num_gpus} GPUs for ESM-2 extraction")
 
-                with progress.create_file_bar(len(files_to_process), desc="ESM-2 extraction") as pbar:
-                    for pro_file in files_to_process:
-                        # Construct output filename: output_0.fa -> output_0_ESM.pt
+                    # Filter out files with existing outputs for checkpoint resume
+                    # Use .done markers for quick completion check without loading multi-GB checkpoints
+                    files_to_process = []
+                    complete_count = 0
+                    for pro_file in protein_files:
                         output_file = pro_file.parent / f"{pro_file.stem}_ESM.pt"
-                        try:
-                            extract_esm_features(
-                                pro_file,
-                                output_file,
-                                device,
-                                truncation_length=truncation_length,
-                                toks_per_batch=toks_per_batch
-                            )
+
+                        # Quick check: .done marker indicates completed checkpoint
+                        if output_file.exists() and has_done_marker(output_file):
                             protein_feature_files.append(output_file)
-                        except Exception as e:
-                            logger.error(f"Failed to process {pro_file.name}: {e}")
-                            failed_files.append((pro_file, str(e)))
-                        pbar.update(1)
-                        pbar.set_postfix_str(f"Current: {pro_file.name}")
+                            complete_count += 1
+                            logger.debug(f"Skipping {pro_file.name} (checkpoint complete with .done marker)")
+                        elif output_file.exists() and not has_done_marker(output_file):
+                            # Checkpoint exists but no .done marker - may be incomplete
+                            logger.warning(f"Re-processing {pro_file.name} (checkpoint missing .done marker)")
+                            remove_done_marker(output_file)  # Defensive cleanup
+                            files_to_process.append(pro_file)
+                        else:
+                            files_to_process.append(pro_file)
+
+                    if complete_count > 0:
+                        logger.info(f"Resuming: {complete_count} ESM-2 checkpoints complete, {len(files_to_process)} to process")
+
+                    # Skip parallel processing if no files to process
+                    if not files_to_process:
+                        logger.info("All ESM-2 feature files already exist, skipping extraction")
+                    else:
+                        # Assign files round-robin across GPUs
+                        file_assignments = assign_files_round_robin(files_to_process, num_gpus)
+
+                        # Create progress queue for live updates
+                        import multiprocessing
+                        import threading
+                        ctx = multiprocessing.get_context('spawn')
+                        progress_queue = ctx.Queue()
+
+                        # Create and start dashboard
+                        from virnucpro.pipeline.dashboard import monitor_progress, MultiGPUDashboard
+                        total_files_per_gpu = {i: len(file_assignments[i]) for i in range(num_gpus)}
+                        dashboard = MultiGPUDashboard(num_gpus, total_files_per_gpu)
+                        dashboard.start()
+
+                        # Start progress monitor thread
+                        stop_event = threading.Event()
+                        monitor_thread = threading.Thread(
+                            target=monitor_progress,
+                            args=(progress_queue, dashboard, stop_event),
+                            daemon=True
+                        )
+                        monitor_thread.start()
+
+                        try:
+                            # Process with queue manager
+                            queue_manager = BatchQueueManager(
+                                num_gpus,
+                                process_esm_files_worker,
+                                progress_queue=progress_queue,
+                                use_persistent_pool=persistent_models,
+                                model_type='esm2' if persistent_models else None
+                            )
+
+                            # Create persistent pool if enabled
+                            if persistent_models:
+                                logger.info("Creating persistent worker pool for ESM-2...")
+                                queue_manager.create_persistent_pool()
+
+                            processed, failed = queue_manager.process_files(
+                                file_assignments,
+                                toks_per_batch=toks_per_batch,
+                                output_dir=protein_split_dir,
+                                enable_streams=cuda_streams and torch.cuda.is_available()
+                            )
+
+                            protein_feature_files.extend(processed)
+                            failed_files.extend(failed)
+
+                            # Clear cache after ESM-2 stage if memory manager active
+                            if memory_manager:
+                                memory_manager.clear_cache()
+                                if persistent_models:
+                                    # Extra aggressive clearing for persistent models
+                                    torch.cuda.synchronize()
+                                    torch.cuda.empty_cache()
+                                if not quiet:
+                                    stats = memory_manager.get_memory_stats()
+                                    mode = "persistent" if persistent_models else "standard"
+                                    logger.info(f"  Post-ESM-2 memory ({mode}): {stats['allocated']:.2f}GB allocated, "
+                                               f"{stats['free']:.2f}GB free")
+
+                            # Close persistent pool if created
+                            if persistent_models and queue_manager:
+                                logger.info("Closing ESM-2 persistent worker pool...")
+                                queue_manager.close_persistent_pool()
+                        finally:
+                            # Stop monitor thread and complete dashboard
+                            stop_event.set()
+                            monitor_thread.join(timeout=1.0)
+                            dashboard.complete_all()
+
+                        # Log failures
+                        if failed:
+                            failed_file_path = output_dir / "failed_files.txt"
+                            with open(failed_file_path, 'w') as f:
+                                for file_path, error in failed:
+                                    f.write(f"{file_path}|ESM-2|{error}\n")
+                            logger.warning(f"Failed to process {len(failed)} files, see {failed_file_path}")
+                else:
+                    logger.info("Using single GPU for ESM-2 extraction")
+                    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+                    # Filter out files with existing outputs for checkpoint resume
+                    # Use .done markers for quick completion check without loading multi-GB checkpoints
+                    files_to_process = []
+                    complete_count = 0
+                    for pro_file in protein_files:
+                        output_file = pro_file.parent / f"{pro_file.stem}_ESM.pt"
+
+                        # Quick check: .done marker indicates completed checkpoint
+                        if output_file.exists() and has_done_marker(output_file):
+                            protein_feature_files.append(output_file)
+                            complete_count += 1
+                            logger.debug(f"Skipping {pro_file.name} (checkpoint complete with .done marker)")
+                        elif output_file.exists() and not has_done_marker(output_file):
+                            # Checkpoint exists but no .done marker - may be incomplete
+                            logger.warning(f"Re-processing {pro_file.name} (checkpoint missing .done marker)")
+                            remove_done_marker(output_file)  # Defensive cleanup
+                            files_to_process.append(pro_file)
+                        else:
+                            files_to_process.append(pro_file)
+
+                    if complete_count > 0:
+                        logger.info(f"Resuming: {complete_count} ESM-2 checkpoints complete, {len(files_to_process)} to process")
+
+                    with progress.create_file_bar(len(files_to_process), desc="ESM-2 extraction") as pbar:
+                        for pro_file in files_to_process:
+                            # Construct output filename: output_0.fa -> output_0_ESM.pt
+                            output_file = pro_file.parent / f"{pro_file.stem}_ESM.pt"
+                            try:
+                                extract_esm_features(
+                                    pro_file,
+                                    output_file,
+                                    device,
+                                    truncation_length=truncation_length,
+                                    toks_per_batch=toks_per_batch
+                                )
+                                protein_feature_files.append(output_file)
+                            except Exception as e:
+                                logger.error(f"Failed to process {pro_file.name}: {e}")
+                                failed_files.append((pro_file, str(e)))
+                            pbar.update(1)
+                            pbar.set_postfix_str(f"Current: {pro_file.name}")
 
             checkpoint_manager.mark_stage_completed(
                 state,
