@@ -626,7 +626,7 @@ class TestWorkerErrorHandling:
 
 
 class TestFP16Wiring:
-    """Test FP16 precision wiring and env var override in gpu_worker."""
+    """Test FP16 precision wiring, env var override, and numerical instability handling in gpu_worker."""
 
     @patch.dict(os.environ, {'VIRNUCPRO_DISABLE_FP16': ''}, clear=False)
     @patch('virnucpro.pipeline.gpu_worker.torch.cuda')
@@ -796,7 +796,7 @@ class TestFP16Wiring:
         mock_create_loader.return_value = mock_loader
 
         mock_runner = Mock()
-        mock_runner.run = Mock(side_effect=RuntimeError("Numerical instability in batch_2: NaN=5"))
+        mock_runner.run = Mock(side_effect=RuntimeError("Numerical instability in batch_2_seqs_1: NaN=5, Inf=0"))
         mock_runner_class.return_value = mock_runner
 
         model_config = {'model_type': 'esm2'}
@@ -814,6 +814,7 @@ class TestFP16Wiring:
         mock_results_queue.put.assert_called_once()
         call_args = mock_results_queue.put.call_args[0][0]
         assert call_args['status'] == 'numerical_instability'
+        assert call_args['error'].startswith('Numerical instability')
         assert 'NaN' in call_args['error']
 
     @patch('virnucpro.pipeline.gpu_worker.torch.cuda')
@@ -849,23 +850,18 @@ class TestFP16Wiring:
             embeddings=torch.randn(1, 768),
             batch_idx=0
         )
-        fake_result2 = InferenceResult(
-            sequence_ids=['seq2'],
-            embeddings=torch.randn(1, 768),
-            batch_idx=1
-        )
 
-        call_count = [0]
-        def run_side_effect():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return iter([fake_result1])
-            else:
-                raise RuntimeError("Numerical instability in batch_1: NaN=1")
+        def results_iterator():
+            yield fake_result1
+            raise RuntimeError("Numerical instability in batch_1_seqs_1: NaN=1, Inf=0")
 
         mock_runner = Mock()
-        mock_runner.run = Mock(side_effect=run_side_effect)
+        mock_runner.run = Mock(return_value=results_iterator())
         mock_runner_class.return_value = mock_runner
+
+        mock_loader = Mock()
+        mock_loader.__iter__ = Mock(return_value=iter([Mock()]))
+        mock_create_loader.return_value = mock_loader
 
         model_config = {'model_type': 'esm2'}
 
@@ -882,4 +878,148 @@ class TestFP16Wiring:
         mock_results_queue.put.assert_called_once()
         call_args = mock_results_queue.put.call_args[0][0]
         assert call_args['status'] == 'numerical_instability'
+        assert call_args['error'].startswith('Numerical instability')
         assert call_args['failed_batch'] == 1
+
+    @patch.dict(os.environ, {'VIRNUCPRO_DISABLE_FP16': ' 1 '}, clear=False)
+    @patch('virnucpro.pipeline.gpu_worker.torch.cuda')
+    @patch('virnucpro.pipeline.gpu_worker.AsyncInferenceRunner')
+    @patch('virnucpro.pipeline.gpu_worker.create_async_dataloader')
+    @patch('virnucpro.models.esm2_flash.load_esm2_model')
+    @patch('virnucpro.pipeline.gpu_worker.setup_worker_logging')
+    def test_worker_fp16_disabled_by_env_var_with_whitespace(
+        self,
+        mock_setup_logging,
+        mock_load_model,
+        mock_create_loader,
+        mock_runner_class,
+        mock_cuda,
+        temp_index,
+        temp_output_dir,
+        mock_results_queue,
+        mock_model,
+        mock_batch_converter
+    ):
+        """Verify VIRNUCPRO_DISABLE_FP16=' 1 ' with whitespace is correctly parsed."""
+        mock_setup_logging.return_value = temp_output_dir / "logs" / "worker_0.log"
+        mock_load_model.return_value = (mock_model, mock_batch_converter)
+        mock_cuda.get_device_name.return_value = "Mock GPU"
+
+        mock_loader = Mock()
+        mock_loader.__iter__ = Mock(return_value=iter([]))
+        mock_create_loader.return_value = mock_loader
+
+        mock_runner = Mock()
+        mock_runner.run = Mock(return_value=iter([]))
+        mock_runner_class.return_value = mock_runner
+
+        model_config = {'model_type': 'esm2', 'enable_fp16': True}
+
+        gpu_worker(
+            rank=0,
+            world_size=4,
+            results_queue=mock_results_queue,
+            index_path=temp_index,
+            output_dir=temp_output_dir,
+            model_config=model_config
+        )
+
+        mock_load_model.assert_called_once()
+        call_kwargs = mock_load_model.call_args[1]
+        assert call_kwargs['enable_fp16'] is False
+
+    @patch.dict(os.environ, {'VIRNUCPRO_DISABLE_FP16': ' true '}, clear=False)
+    @patch('virnucpro.pipeline.gpu_worker.torch.cuda')
+    @patch('virnucpro.pipeline.gpu_worker.AsyncInferenceRunner')
+    @patch('virnucpro.pipeline.gpu_worker.create_async_dataloader')
+    @patch('virnucpro.models.esm2_flash.load_esm2_model')
+    @patch('virnucpro.pipeline.gpu_worker.setup_worker_logging')
+    def test_worker_fp16_disabled_by_env_var_true_with_whitespace(
+        self,
+        mock_setup_logging,
+        mock_load_model,
+        mock_create_loader,
+        mock_runner_class,
+        mock_cuda,
+        temp_index,
+        temp_output_dir,
+        mock_results_queue,
+        mock_model,
+        mock_batch_converter
+    ):
+        """Verify VIRNUCPRO_DISABLE_FP16=' true ' with whitespace is correctly parsed."""
+        mock_setup_logging.return_value = temp_output_dir / "logs" / "worker_0.log"
+        mock_load_model.return_value = (mock_model, mock_batch_converter)
+        mock_cuda.get_device_name.return_value = "Mock GPU"
+
+        mock_loader = Mock()
+        mock_loader.__iter__ = Mock(return_value=iter([]))
+        mock_create_loader.return_value = mock_loader
+
+        mock_runner = Mock()
+        mock_runner.run = Mock(return_value=iter([]))
+        mock_runner_class.return_value = mock_runner
+
+        model_config = {'model_type': 'esm2', 'enable_fp16': True}
+
+        gpu_worker(
+            rank=0,
+            world_size=4,
+            results_queue=mock_results_queue,
+            index_path=temp_index,
+            output_dir=temp_output_dir,
+            model_config=model_config
+        )
+
+        mock_load_model.assert_called_once()
+        call_kwargs = mock_load_model.call_args[1]
+        assert call_kwargs['enable_fp16'] is False
+
+    @patch('virnucpro.pipeline.gpu_worker.torch.cuda')
+    @patch('virnucpro.pipeline.gpu_worker.AsyncInferenceRunner')
+    @patch('virnucpro.pipeline.gpu_worker.create_async_dataloader')
+    @patch('virnucpro.models.esm2_flash.load_esm2_model')
+    @patch('virnucpro.pipeline.gpu_worker.setup_worker_logging')
+    def test_worker_numerical_instability_packed_path(
+        self,
+        mock_setup_logging,
+        mock_load_model,
+        mock_create_loader,
+        mock_runner_class,
+        mock_cuda,
+        temp_index,
+        temp_output_dir,
+        mock_results_queue,
+        mock_model,
+        mock_batch_converter
+    ):
+        """Verify numerical instability error in packed inference path (use_packed=True)."""
+        mock_setup_logging.return_value = temp_output_dir / "logs" / "worker_0.log"
+        mock_load_model.return_value = (mock_model, mock_batch_converter)
+        mock_cuda.get_device_name.return_value = "Mock GPU"
+
+        mock_loader = Mock()
+        mock_loader.__iter__ = Mock(return_value=iter([]))
+        mock_create_loader.return_value = mock_loader
+
+        mock_runner = Mock()
+        mock_runner.run = Mock(side_effect=RuntimeError("Numerical instability in batch_0_seqs_3: NaN=2, Inf=0"))
+        mock_runner_class.return_value = mock_runner
+
+        model_config = {'model_type': 'esm2', 'use_packed': True}
+
+        with pytest.raises(SystemExit):
+            gpu_worker(
+                rank=0,
+                world_size=4,
+                results_queue=mock_results_queue,
+                index_path=temp_index,
+                output_dir=temp_output_dir,
+                model_config=model_config
+            )
+
+        mock_results_queue.put.assert_called_once()
+        call_args = mock_results_queue.put.call_args[0][0]
+        assert call_args['status'] == 'numerical_instability'
+        assert call_args['error'].startswith('Numerical instability')
+        assert 'NaN' in call_args['error']
