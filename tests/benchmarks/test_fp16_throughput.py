@@ -27,7 +27,6 @@ from typing import Dict, List, Tuple
 
 from virnucpro.models.esm2_flash import load_esm2_model
 from virnucpro.data.collators import VarlenCollator
-from virnucpro.data.packing import GreedyPacker
 
 logger = logging.getLogger('virnucpro.benchmarks.test_fp16_throughput')
 
@@ -109,7 +108,7 @@ def verify_flashattention_active(model):
 def benchmark_model_packed(model, sequences, device, num_warmup=10, num_iterations=50):
     """Benchmark forward_packed() with production code path.
 
-    Uses VarlenCollator + GreedyPacker to create packed batches (production path).
+    Uses VarlenCollator with internal packing (production path).
     Isolates GPU compute time from data transfer by pre-batching on CPU.
 
     Args:
