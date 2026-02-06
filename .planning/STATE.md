@@ -11,18 +11,18 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 9 of 10 (Checkpointing Integration) - IN PROGRESS
-Plan: 2 of 6 in phase - COMPLETE (Wave 1: 2/3)
-Status: CheckpointManifest coordination complete
-Last activity: 2026-02-06 — Completed 09-02-PLAN.md (CheckpointManifest coordination)
+Plan: 3 of 6 in phase - COMPLETE (Wave 2: 1/3)
+Status: AsyncInferenceRunner checkpoint integration complete
+Last activity: 2026-02-06 — Completed 09-03-PLAN.md (AsyncInferenceRunner checkpoint integration)
 
-Progress: [███████░░░] 73/TBD plans (v1.0: 34/34 complete, v2.0: 39/TBD)
+Progress: [███████░░░] 74/TBD plans (v1.0: 34/34 complete, v2.0: 40/TBD)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 73 (v1.0: 34, v2.0: 39)
+- Total plans completed: 74 (v1.0: 34, v2.0: 40)
 - Average duration: 3.1 min
-- Total execution time: 3.9 hours
+- Total execution time: 4.0 hours
 
 **By Phase:**
 
@@ -37,11 +37,11 @@ Progress: [███████░░░] 73/TBD plans (v1.0: 34/34 complete, v
 | 6 | 8 | 28 min | 3.5 min |
 | 7 | 8 | 29 min | 3.6 min |
 | 8 | 4 (complete) | 13 min | 3.25 min |
-| 9 | 2 | 8 min | 3.7 min |
+| 9 | 3 | 11 min | 3.5 min |
 
 **Recent Trend:**
-- Last 5 plans: ~3.4 min average
-- Trend: Steady (Phase 9 Wave 1 in progress)
+- Last 5 plans: ~3.1 min average
+- Trend: Steady (Phase 9 Wave 2 in progress)
 
 *Updated after each plan completion*
 
@@ -129,6 +129,10 @@ Recent decisions affecting current work:
 - **Triple-redundancy manifest recovery (09-02)**: Primary -> .tmp -> .backup fallback chain provides high fault tolerance for JSON corruption
 - **Staleness threshold 600s default (09-02)**: Conservative 10-minute threshold for zombie detection avoids false positives from slow I/O or large batches
 - **Orphaned shards retry_count >= 3 (09-02)**: Max 3 retries per shard before marking as orphaned for redistribution - prevents infinite retry loops
+- **Batch boundary checkpointing (09-03)**: Checkpoint trigger fires AFTER yield, at batch boundaries only - respects packed attention atomicity by never checkpointing mid-batch
+- **CPU transfer before accumulation (09-03)**: Transfer embeddings to CPU via .cpu().numpy() before accumulation - prevents CUDA memory growth from accumulating GPU tensors
+- **Resumed data as InferenceResult (09-03)**: Yield resumed data as normal InferenceResult with batch_idx=-1 marker - seamless pipeline integration without special downstream handling
+- **Packing stats in checkpoint metadata (09-03)**: Capture packing efficiency from batch result and include in checkpoint metadata - enables post-mortem debugging
 
 ### Pending Todos
 
@@ -169,15 +173,16 @@ None yet.
 - ✅ FP16 performance benchmarks (454K seq/hour, 6.06GB memory)
 - Note: LayerNorm may have limited dynamic range in FP16 - selective FP32 for specific layers if needed
 
-**Phase 9 (Checkpointing Integration):** IN PROGRESS - Wave 1
+**Phase 9 (Checkpointing Integration):** IN PROGRESS - Wave 2
 - ✅ Checkpoint foundation (CheckpointTrigger, AsyncCheckpointWriter, validation, resume) - 09-01
 - ✅ CheckpointManifest for multi-GPU coordination - 09-02
-- Next: AsyncInferenceRunner integration (09-03)
+- ✅ AsyncInferenceRunner checkpoint integration (batch boundaries, resume, metadata) - 09-03
+- Next: GPU worker integration (09-04)
 
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 09-02-PLAN.md (CheckpointManifest coordination)
+Stopped at: Completed 09-03-PLAN.md (AsyncInferenceRunner checkpoint integration)
 Resume file: None
 
-**Next step:** Continue Phase 9 Wave 1 - AsyncInferenceRunner integration (09-03)
+**Next step:** Continue Phase 9 Wave 2 - GPU worker integration (09-04)
