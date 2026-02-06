@@ -11,11 +11,11 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 9 of 10 (Checkpointing Integration) - IN PROGRESS
-Plan: 5 of 6 in phase - COMPLETE (Wave 2: 3/3 complete)
-Status: Coordinator integration with fault-tolerant retry policies complete
-Last activity: 2026-02-06 — Completed 09-05-PLAN.md (Coordinator integration)
+Plan: 6 of 6 in phase - COMPLETE (Wave 3: 1/1 complete)
+Status: Checkpoint integration tests complete - all components verified
+Last activity: 2026-02-06 — Completed 09-07-PLAN.md (Integration tests)
 
-Progress: [███████░░░] 76/TBD plans (v1.0: 34/34 complete, v2.0: 42/TBD)
+Progress: [███████░░░] 77/TBD plans (v1.0: 34/34 complete, v2.0: 43/TBD)
 
 ## Performance Metrics
 
@@ -37,11 +37,11 @@ Progress: [███████░░░] 76/TBD plans (v1.0: 34/34 complete, v
 | 6 | 8 | 28 min | 3.5 min |
 | 7 | 8 | 29 min | 3.6 min |
 | 8 | 4 (complete) | 13 min | 3.25 min |
-| 9 | 5 | 22.5 min | 4.5 min |
+| 9 | 6 (complete) | 32.5 min | 5.4 min |
 
 **Recent Trend:**
-- Last 5 plans: ~4.2 min average
-- Trend: Steady (Phase 9 Wave 2 complete)
+- Last 5 plans: ~4.1 min average
+- Trend: Steady (Phase 9 complete)
 
 *Updated after each plan completion*
 
@@ -98,6 +98,7 @@ Recent decisions affecting current work:
 - **Memory-buffered ordering (07-02)**: Read sequences into memory dict then yield in index order - preserves length-sorted order for FFD packing
 - **CUDA validation duplication (07-02)**: Copy _validate_cuda_isolation to IndexBasedDataset - acceptable duplication for safety-critical checks
 - **multiprocessing.Process over mp.spawn (07-04)**: Use Process directly instead of mp.spawn for fault tolerance - allows partial completion when one worker fails
+- **CPU-only integration tests (09-07)**: All checkpoint integration tests run on CPU with MockModel and mocked CUDA - verifies checkpoint mechanics without GPU requirements
 - **Module-level wrapper for CUDA_VISIBLE_DEVICES (07-04)**: Wrapper function must be module-level for pickle compatibility with spawn context
 - **Per-rank completion tracking (07-04)**: wait_for_completion returns Dict[int, bool] to identify which workers succeeded/failed for partial aggregation
 - **Worker logging first (07-06)**: setup_worker_logging() called before any other operations to ensure all worker actions are logged
