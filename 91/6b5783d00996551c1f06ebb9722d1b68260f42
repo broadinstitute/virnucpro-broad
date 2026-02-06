@@ -1,0 +1,38 @@
+.planning/phases/10.1-cli-integration-for-v2-0-architecture/10.1-RESEARCH.md
+  9d2c0f570ec098d1 1-357
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "916b5783d00996551c1f06ebb9722d1b68260f42",
+  "prompts": {
+    "32a0db45509bb1f4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a3829bd-50da-47b3-a196-12029a001849",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 40,
+      "total_deletions": 9,
+      "accepted_lines": 40,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/bfffbfe72f5716fcfb6a4905f06b38c2efb2aa2e97fd275f745946c1e930562e"
+    },
+    "9d2c0f570ec098d1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e651f94c-0fe3-4cf0-8bf3-f8e0503a79d0",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 357,
+      "total_deletions": 0,
+      "accepted_lines": 357,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/dca74465983f1013f5417a6f8f95e3249d028c7ecda6bbf594758b2bd56afc3b"
+    }
+  }
+}
