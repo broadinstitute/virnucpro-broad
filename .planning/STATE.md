@@ -11,11 +11,11 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 8 of 10 (FP16 Precision Validation) - IN PROGRESS
-Plan: 2 of 5 in phase - COMPLETE
+Plan: 4 of 5 in phase - COMPLETE
 Status: Executing Phase 8 plans
-Last activity: 2026-02-06 — Completed 08-02-PLAN.md (NaN/Inf detection and FP16 wiring)
+Last activity: 2026-02-06 — Completed 08-04-PLAN.md (FP16 throughput benchmark)
 
-Progress: [██████░░░░] 69/TBD plans (v1.0: 34/34 complete, v2.0: 35/TBD)
+Progress: [██████░░░░] 70/TBD plans (v1.0: 34/34 complete, v2.0: 36/TBD)
 
 ## Performance Metrics
 
@@ -36,7 +36,7 @@ Progress: [██████░░░░] 69/TBD plans (v1.0: 34/34 complete, v
 | 5 | 5 | 13 min | 2.6 min |
 | 6 | 8 | 28 min | 3.5 min |
 | 7 | 8 | 29 min | 3.6 min |
-| 8 | 2 (in progress) | 8 min | 4.0 min |
+| 8 | 4 (in progress) | 12 min | 3.0 min |
 
 **Recent Trend:**
 - Last 5 plans: ~3.7 min average
@@ -109,6 +109,11 @@ Recent decisions affecting current work:
 - **Single CUDA sync for NaN/Inf detection (08-02)**: Batch all GPU ops before .item() calls reduces overhead from 5-10ms to <1ms - critical for per-batch stability checks
 - **Env var precedence pattern (08-02)**: Caller (gpu_worker) checks VIRNUCPRO_DISABLE_FP16 and overrides model_config before calling load_esm2_model - separation of policy (worker) vs implementation (loader)
 - **NaN/Inf detection on both inference paths (08-02)**: check_numerical_stability runs after packed AND unpacked inference - universal FP16 overflow protection regardless of packing state
+- **Expected FP16 speedup 1.5-1.8x (08-04)**: FP16 tensor cores ~1.3-1.5x + larger batches ~1.2x over Phase 7 FP32+FlashAttention baseline - adjusted from 1.8-2x because baseline already includes FlashAttention
+- **Stratified length testing (08-04)**: Separate measurements for short/medium/long sequences prevent padding skew - homogeneous lengths show true per-length performance variance
+- **FlashAttention verification before benchmarking (08-04)**: verify_flashattention_active() checks forward_packed exists and runs test inference to catch fallback warnings - ensures measuring FlashAttention+FP16 not just FP16
+- **No specific speedup assertion (08-04)**: Assert FP16 ≥ 1.0x (not slower) but don't assert ≥1.5x - environment-dependent, print comprehensive table for user evaluation
+- **Warmup 10 iterations (08-04)**: Increased from typical 5 for 3B model + FlashAttention kernel compilation - ensures stable timing measurements
 
 ### Pending Todos
 
@@ -149,7 +154,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 08-02-PLAN.md (NaN/Inf detection and FP16 wiring)
+Stopped at: Completed 08-04-PLAN.md (FP16 throughput benchmark)
 Resume file: None
 
-**Next step:** Begin Phase 8 - FP16 Precision Validation
+**Next step:** Continue Phase 8 - FP16 Precision Validation
