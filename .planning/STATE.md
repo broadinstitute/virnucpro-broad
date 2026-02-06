@@ -11,18 +11,18 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 8 of 10 (FP16 Precision Validation) - IN PROGRESS
-Plan: 1 of 5 in phase - COMPLETE
+Plan: 2 of 5 in phase - COMPLETE
 Status: Executing Phase 8 plans
-Last activity: 2026-02-06 — Completed 08-01-PLAN.md (FP16 model loading with feature flag)
+Last activity: 2026-02-06 — Completed 08-02-PLAN.md (NaN/Inf detection and FP16 wiring)
 
-Progress: [██████░░░░] 68/TBD plans (v1.0: 34/34 complete, v2.0: 34/TBD)
+Progress: [██████░░░░] 69/TBD plans (v1.0: 34/34 complete, v2.0: 35/TBD)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 60 (v1.0: 34, v2.0: 26)
-- Average duration: 3.0 min
-- Total execution time: 3.6 hours
+- Total plans completed: 61 (v1.0: 34, v2.0: 27)
+- Average duration: 3.1 min
+- Total execution time: 3.7 hours
 
 **By Phase:**
 
@@ -36,10 +36,10 @@ Progress: [██████░░░░] 68/TBD plans (v1.0: 34/34 complete, v
 | 5 | 5 | 13 min | 2.6 min |
 | 6 | 8 | 28 min | 3.5 min |
 | 7 | 8 | 29 min | 3.6 min |
-| 8 | 1 (in progress) | 4 min | 4.0 min |
+| 8 | 2 (in progress) | 8 min | 4.0 min |
 
 **Recent Trend:**
-- Last 5 plans: ~3.4 min average
+- Last 5 plans: ~3.7 min average
 - Trend: Steady (Phase 8 FP16 precision validation)
 
 *Updated after each plan completion*
@@ -106,6 +106,9 @@ Recent decisions affecting current work:
 - **Auto-detect world_size (07-07)**: Use torch.cuda.device_count() when world_size not specified for simplified common case
 - **Partial expected IDs validation (07-07)**: Calculate expected IDs only from successful workers when failures occur to match actual shard content
 - **Stream sync before extraction (07-08)**: Must synchronize compute stream before _extract_embeddings when retrieve_fn=None - prevents race condition where extraction runs on default stream before compute completes
+- **Single CUDA sync for NaN/Inf detection (08-02)**: Batch all GPU ops before .item() calls reduces overhead from 5-10ms to <1ms - critical for per-batch stability checks
+- **Env var precedence pattern (08-02)**: Caller (gpu_worker) checks VIRNUCPRO_DISABLE_FP16 and overrides model_config before calling load_esm2_model - separation of policy (worker) vs implementation (loader)
+- **NaN/Inf detection on both inference paths (08-02)**: check_numerical_stability runs after packed AND unpacked inference - universal FP16 overflow protection regardless of packing state
 
 ### Pending Todos
 
@@ -145,8 +148,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-05
-Stopped at: Completed 07-08-PLAN.md (Integration tests + stream sync fix)
+Last session: 2026-02-06
+Stopped at: Completed 08-02-PLAN.md (NaN/Inf detection and FP16 wiring)
 Resume file: None
 
 **Next step:** Begin Phase 8 - FP16 Precision Validation
