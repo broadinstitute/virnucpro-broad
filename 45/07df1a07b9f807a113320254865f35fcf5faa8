@@ -1,0 +1,24 @@
+tests/unit/test_gpu_coordinator.py
+  73d5b4ecf77d33d1 336-471
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "4507df1a07b9f807a113320254865f35fcf5faa8",
+  "prompts": {
+    "73d5b4ecf77d33d1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "29ac33fa-13c5-45c6-88f0-efcf023573c2",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 136,
+      "total_deletions": 0,
+      "accepted_lines": 136,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/0b68cb28ca9806edcc26f2692a385509a6e4e25054a839ae92dd02b8fca98de8"
+    }
+  }
+}
