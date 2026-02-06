@@ -213,16 +213,21 @@ class ESM2WithFlashAttention(nn.Module):
         # Get token embeddings - shape: [total_tokens, hidden_dim]
         embeddings = self.model.embed_tokens(input_ids)
 
-        # FlashAttention requires FP16/BF16 - auto-convert if needed
-        if embeddings.dtype not in [torch.float16, torch.bfloat16]:
-            logger.warning(
-                f"Model loaded in {embeddings.dtype}, but FlashAttention requires FP16/BF16. "
-                "Auto-converting to BF16 for packed inference. "
-                "For best performance, load model with: model.to(dtype=torch.bfloat16)"
+        # Defensive validation: FlashAttention varlen requires FP16/BF16 inputs
+        # Fail fast if user explicitly disabled FP16 but tries to use packed inference
+        if embeddings.dtype not in (torch.float16, torch.bfloat16):
+            raise TypeError(
+                f"Packed inference requires FP16/BF16 model. Got {embeddings.dtype}. "
+                f"Either remove VIRNUCPRO_DISABLE_FP16 (recommended) or use unpacked inference. "
+                f"Packed inference cannot run in FP32 due to FlashAttention requirements."
             )
-            # Convert model to BF16 (better numerical stability than FP16 for this model)
-            self.model = self.model.to(dtype=torch.bfloat16)
-            embeddings = self.model.embed_tokens(input_ids)
+
+        # Verify FP16 is used (not BF16) for best throughput
+        if embeddings.dtype == torch.bfloat16:
+            logger.warning(
+                "Model using BF16 but FP16 is recommended for better throughput. "
+                "Ensure load_esm2_model uses enable_fp16=True (default)."
+            )
 
         # NOTE: ESM-2 uses Rotary Position Embeddings (RoPE), not learned position embeddings
         # Position information is applied inside attention (to Q/K), not as a separate embedding
@@ -377,7 +382,7 @@ class ESM2WithFlashAttention(nn.Module):
         # Duplicate for sin and cos application: [total_tokens, rotary_dim]
         emb = torch.cat([freqs, freqs], dim=-1)
         # CRITICAL: Keep sin/cos in FP32 to avoid precision loss over 36 layers
-        # Casting to BF16 too early causes accumulated rounding errors for long sequences
+        # Casting to FP16 too early causes accumulated rounding errors for long sequences
         cos = emb.cos()  # [total_tokens, rotary_dim] - FP32
         sin = emb.sin()  # [total_tokens, rotary_dim] - FP32
 
