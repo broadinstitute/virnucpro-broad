@@ -6,23 +6,23 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 
 **Core value:** Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs and automatically queue batches, reducing sample processing time from 45+ hours to under 10 hours.
 
-**Current focus:** Phase 8 - FP16 Precision Validation
+**Current focus:** Phase 9 - Checkpointing Integration
 
 ## Current Position
 
-Phase: 8 of 10 (FP16 Precision Validation) - AWAITING HUMAN TESTING
-Plan: 4 of 5 in phase - COMPLETE (08-05 skipped, conditional)
-Status: Needs human GPU verification
-Last activity: 2026-02-05 — Completed 08-04-PLAN.md (FP16 throughput benchmark)
+Phase: 9 of 10 (Checkpointing Integration) - IN PROGRESS
+Plan: 1 of 6 in phase - COMPLETE
+Status: Checkpoint foundation complete (trigger, async writer, validation, resume)
+Last activity: 2026-02-06 — Completed 09-01-PLAN.md (checkpoint_writer.py foundation)
 
-Progress: [███████░░░] 71/TBD plans (v1.0: 34/34 complete, v2.0: 37/TBD)
+Progress: [███████░░░] 72/TBD plans (v1.0: 34/34 complete, v2.0: 38/TBD)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 61 (v1.0: 34, v2.0: 27)
+- Total plans completed: 72 (v1.0: 34, v2.0: 38)
 - Average duration: 3.1 min
-- Total execution time: 3.7 hours
+- Total execution time: 3.8 hours
 
 **By Phase:**
 
@@ -37,10 +37,11 @@ Progress: [███████░░░] 71/TBD plans (v1.0: 34/34 complete, v
 | 6 | 8 | 28 min | 3.5 min |
 | 7 | 8 | 29 min | 3.6 min |
 | 8 | 4 (complete) | 13 min | 3.25 min |
+| 9 | 1 | 3.6 min | 3.6 min |
 
 **Recent Trend:**
-- Last 5 plans: ~3.2 min average
-- Trend: Steady (Phase 8 FP16 validation complete, awaiting GPU tests)
+- Last 5 plans: ~3.3 min average
+- Trend: Steady (Phase 9 checkpoint foundation complete)
 
 *Updated after each plan completion*
 
@@ -118,6 +119,10 @@ Recent decisions affecting current work:
 - **Realistic FP16 validation thresholds (08-03)**: Mean abs diff <0.01 (not 0.1), std rel diff <5% (not absolute), cosine >0.99 - reflects ESM-2 FP16 mantissa precision
 - **Per-token similarity for packed format (08-03)**: Validates production forward_packed() code path separately due to RoPE timing and FlashAttention kernel differences
 - **Statistical validation beyond similarity (08-03)**: Mean/std/L2 norm/outlier distributions confirm FP16 preserves statistical properties, not just cosine similarity
+- **Checkpoint format .pt not HDF5 (09-01)**: PyTorch .pt format for incremental checkpoints instead of HDF5 - consistent with Phase 3 atomic_save, avoids append corruption risks
+- **Env var precedence for checkpoints (09-01)**: VIRNUCPRO_VIRAL_CHECKPOINT_MODE overrides default thresholds (5K seq / 180s) but not explicit constructor args - enables viral workload tuning
+- **Corrupted sequence requeue (09-01)**: resume_from_checkpoints returns 4-tuple with corrupted_sequence_ids for caller requeue - enables idempotent recovery without full restart
+- **Manifest optional for resume (09-01)**: Manifest validation logs warnings but doesn't fail - filesystem checkpoints are source of truth for per-shard resume
 
 ### Pending Todos
 
@@ -152,13 +157,20 @@ None yet.
 - ✅ run_multi_gpu_inference orchestration entry point (07-07)
 - ✅ Integration tests + stream sync race condition fix (07-08)
 
-**Phase 8 (FP16 Precision Validation):**
-- Numerical precision: LayerNorm may have limited dynamic range in FP16 - may need selective FP32 for specific layers while keeping rest in FP16
+**Phase 8 (FP16 Precision Validation):** ✅ COMPLETE
+- ✅ FP16 precision validation (mean abs diff <0.01, cosine >0.99)
+- ✅ Numerical stability checks (NaN/Inf detection with minimal sync overhead)
+- ✅ FP16 performance benchmarks (454K seq/hour, 6.06GB memory)
+- Note: LayerNorm may have limited dynamic range in FP16 - selective FP32 for specific layers if needed
+
+**Phase 9 (Checkpointing Integration):** IN PROGRESS
+- ✅ Checkpoint foundation (CheckpointTrigger, AsyncCheckpointWriter, validation, resume) - 09-01
+- Next: AsyncInferenceRunner integration (09-02)
 
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 08-03-PLAN.md (FP16 validation integration tests)
+Stopped at: Completed 09-01-PLAN.md (checkpoint_writer.py foundation)
 Resume file: None
 
-**Next step:** Continue Phase 8 - FP16 Precision Validation (08-05 remaining)
+**Next step:** Continue Phase 9 - Checkpointing Integration (09-02: AsyncInferenceRunner integration)
