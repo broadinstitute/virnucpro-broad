@@ -445,7 +445,8 @@ class AsyncInferenceRunner:
     def run(
         self,
         dataloader: DataLoader,
-        progress_callback: Optional[Callable[[int, int], None]] = None
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+        force_restart: bool = False
     ) -> Iterator[InferenceResult]:
         """
         Run inference on all batches from DataLoader.
@@ -453,6 +454,7 @@ class AsyncInferenceRunner:
         Args:
             dataloader: Async DataLoader with prefetched batches
             progress_callback: Optional callback(batch_idx, num_sequences)
+            force_restart: If True, ignore checkpoints and start fresh (default: False)
 
         Yields:
             InferenceResult for each batch
@@ -466,6 +468,43 @@ class AsyncInferenceRunner:
         self.monitor.set_stage('inference')
 
         logger.info("Starting async inference loop")
+
+        # Resume from checkpoints if available
+        if self._checkpointing_enabled and not force_restart:
+            resumed_ids, resumed_embs, resume_batch_idx, corrupted_sequence_ids = resume_from_checkpoints(
+                self.checkpoint_dir,
+                self.rank,
+                force_restart,
+                self.manifest
+            )
+
+            # Handle corrupted sequences
+            if corrupted_sequence_ids:
+                logger.warning(
+                    f"Checkpoint corruption detected: {len(corrupted_sequence_ids)} sequences need reprocessing "
+                    f"(from batches after corruption point)"
+                )
+                logger.debug(f"Corrupted sequence IDs (first 10): {corrupted_sequence_ids[:10]}")
+
+            # Yield resumed data if available
+            if resumed_ids:
+                # Store resumed data in accumulators
+                self._ckpt_embeddings = [resumed_embs]
+                self._ckpt_ids = resumed_ids
+                self._ckpt_batch_idx = resume_batch_idx
+
+                logger.info(
+                    f"Resuming shard {self.rank}: {len(resumed_ids)} sequences "
+                    f"from {resume_batch_idx} checkpoints"
+                )
+
+                # Yield resumed data as InferenceResult (batch_idx=-1 as marker)
+                resumed_embeddings_tensor = torch.from_numpy(resumed_embs).float()
+                yield InferenceResult(
+                    sequence_ids=resumed_ids,
+                    embeddings=resumed_embeddings_tensor,
+                    batch_idx=-1
+                )
 
         # FIX 1: Track inter-batch arrival time (not processing time)
         last_batch_time = time.perf_counter()
@@ -550,6 +589,31 @@ class AsyncInferenceRunner:
                     progress_callback(batch_idx, num_sequences)
 
                 yield result
+
+                # Checkpoint trigger (after yield, at batch boundaries)
+                if self._checkpointing_enabled:
+                    # Accumulate embeddings (transfer to CPU before storing)
+                    self._ckpt_embeddings.append(result.embeddings.cpu().numpy())
+                    self._ckpt_ids.extend(result.sequence_ids)
+
+                    # Capture packing stats if available
+                    if hasattr(result, 'packing_stats') and result.packing_stats:
+                        self._last_packing_stats = result.packing_stats
+                    elif hasattr(result, 'metadata') and isinstance(result.metadata, dict):
+                        # Extract from metadata if result carries it there
+                        packing_info = {}
+                        for key in ('packing_efficiency', 'token_count', 'buffer_size', 'token_budget'):
+                            if key in result.metadata:
+                                packing_info[key] = result.metadata[key]
+                        if packing_info:
+                            self._last_packing_stats = packing_info
+
+                    # Check trigger
+                    should_checkpoint, reason = self.trigger.should_checkpoint(len(result.sequence_ids))
+                    if should_checkpoint:
+                        self._write_checkpoint(reason)
+                        self.trigger.reset()
+
                 batch_idx += 1
 
             # Flush collator buffer (handles last <buffer_size sequences)
@@ -560,7 +624,17 @@ class AsyncInferenceRunner:
                     result = self.process_batch(batch)
                     yield result
 
+            # Final checkpoint (after loop completion)
+            if self._checkpointing_enabled and self._ckpt_embeddings:
+                self._write_checkpoint("final")
+
         finally:
+            # Wait for all async checkpoint writes to complete
+            if self._checkpointing_enabled:
+                self.writer.wait_all(timeout=300)
+                self.writer.shutdown()
+                logger.info("All checkpoint writes completed")
+
             # Synchronize streams before stopping
             self.stream_processor.synchronize()
             stats = self.monitor.stop_monitoring()
@@ -579,6 +653,57 @@ class AsyncInferenceRunner:
                     f"max_wait={dl_stats.get('max_wait_time_ms', 0):.1f}ms, "
                     f"packing_efficiency={dl_stats.get('packing_efficiency', 0):.2%}"
                 )
+
+    def _write_checkpoint(self, reason: str) -> None:
+        """Write checkpoint to disk asynchronously.
+
+        Args:
+            reason: Trigger reason (e.g., "sequence_threshold", "time_threshold", "final")
+        """
+        # Return early if no accumulated data
+        if not self._ckpt_embeddings:
+            return
+
+        # Concatenate accumulated embeddings
+        embeddings = np.concatenate(self._ckpt_embeddings, axis=0)
+
+        # Build checkpoint path
+        checkpoint_path = self.shard_checkpoint_dir / f"batch_{self._ckpt_batch_idx:05d}.pt"
+
+        # Determine GPU device from model
+        device = next(self.model.parameters()).device
+
+        # Build metadata dict
+        metadata = {
+            'batch_idx': self._ckpt_batch_idx,
+            'num_sequences': len(self._ckpt_ids),
+            'timestamp': datetime.utcnow().isoformat(),
+            'trigger_reason': reason,
+            'model_dtype': str(next(self.model.parameters()).dtype),
+            'packing_enabled': not bool(os.environ.get("VIRNUCPRO_DISABLE_PACKING", "")),
+            'gpu_memory_allocated_bytes': torch.cuda.memory_allocated(device) if device.type == 'cuda' else 0,
+            'gpu_memory_peak_bytes': torch.cuda.max_memory_allocated(device) if device.type == 'cuda' else 0,
+            'input_fingerprint': self._input_fingerprint,
+            'model_config_hash': self._model_config_hash,
+            'packing_stats': self._last_packing_stats.copy() if self._last_packing_stats else {}
+        }
+
+        # Submit async write
+        self.writer.write_checkpoint_async(
+            checkpoint_path,
+            embeddings,
+            self._ckpt_ids,
+            metadata
+        )
+
+        logger.info(
+            f"Checkpoint {self._ckpt_batch_idx} queued: {len(self._ckpt_ids)} sequences, reason={reason}"
+        )
+
+        # Increment batch index and reset accumulators
+        self._ckpt_batch_idx += 1
+        self._ckpt_embeddings = []
+        self._ckpt_ids = []
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get inference statistics."""
