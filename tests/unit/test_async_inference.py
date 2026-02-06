@@ -9,6 +9,7 @@ Tests cover:
 import pytest
 import torch
 import numpy as np
+import logging
 from unittest.mock import Mock, MagicMock, patch
 from pathlib import Path
 from typing import Dict, Any, List
@@ -558,15 +559,16 @@ class TestCheckpointDirectoryStructure:
         if runner.writer.executor is not None:
             try:
                 runner.writer.executor.shutdown(wait=True)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug(f"Executor shutdown raised: {e}")
 
         assert runner.shard_checkpoint_dir is not None
         expected_ckpt = runner.shard_checkpoint_dir / "batch_00000.pt"
         assert expected_ckpt.exists(), f"Checkpoint should exist at {expected_ckpt}"
 
-        checkpoint_data = torch.load(expected_ckpt)
+        checkpoint_data = torch.load(expected_ckpt, weights_only=False, map_location='cpu')
         assert len(checkpoint_data["embeddings"]) == 10
+        assert str(checkpoint_data["embeddings"].dtype) == 'float32'
         assert checkpoint_data["sequence_ids"] == ["seq_0", "seq_1", "seq_2"]
 
         double_nested = checkpoint_base / "shard_0" / "shard_0" / "batch_00000.pt"
@@ -592,10 +594,10 @@ class TestCheckpointDirectoryStructure:
         runner = AsyncInferenceRunner(mock_model, device, checkpoint_dir=checkpoint_base, rank=0)
 
         mock_model.parameters.assert_called_once()
-        _ = mock_param1.dtype
-        _ = mock_param1.numel()
-        _ = mock_param2.dtype
-        _ = mock_param2.numel()
+        assert mock_param1.dtype == torch.float32
+        assert mock_param1.numel() == 1000
+        assert mock_param2.dtype == torch.float16
+        assert mock_param2.numel() == 2000
 
     def test_checkpoint_dir_relative_path(self, tmp_path, monkeypatch):
         """Verify checkpoint_dir works with relative paths converted to absolute."""
