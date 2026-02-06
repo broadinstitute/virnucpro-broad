@@ -554,13 +554,20 @@ class TestCheckpointDirectoryStructure:
         runner._ckpt_batch_idx = 0
 
         runner._write_checkpoint("test_trigger")
-
         assert runner.writer is not None
-        runner.writer.executor.shutdown(wait=True)
+        if runner.writer.executor is not None:
+            try:
+                runner.writer.executor.shutdown(wait=True)
+            except Exception:
+                pass
 
         assert runner.shard_checkpoint_dir is not None
         expected_ckpt = runner.shard_checkpoint_dir / "batch_00000.pt"
         assert expected_ckpt.exists(), f"Checkpoint should exist at {expected_ckpt}"
+
+        checkpoint_data = torch.load(expected_ckpt)
+        assert len(checkpoint_data["embeddings"]) == 10
+        assert checkpoint_data["sequence_ids"] == ["seq_0", "seq_1", "seq_2"]
 
         double_nested = checkpoint_base / "shard_0" / "shard_0" / "batch_00000.pt"
         assert not double_nested.exists(), f"Double-nested checkpoint found at {double_nested}"
@@ -585,10 +592,13 @@ class TestCheckpointDirectoryStructure:
         runner = AsyncInferenceRunner(mock_model, device, checkpoint_dir=checkpoint_base, rank=0)
 
         mock_model.parameters.assert_called_once()
+        _ = mock_param1.dtype
+        _ = mock_param1.numel()
+        _ = mock_param2.dtype
+        _ = mock_param2.numel()
 
-    def test_checkpoint_dir_relative_path(self, tmp_path):
+    def test_checkpoint_dir_relative_path(self, tmp_path, monkeypatch):
         """Verify checkpoint_dir works with relative paths converted to absolute."""
-        import os
         from virnucpro.pipeline.async_inference import AsyncInferenceRunner
 
         mock_model = Mock()
@@ -597,13 +607,9 @@ class TestCheckpointDirectoryStructure:
         mock_param.numel.return_value = 1000000
         mock_model.parameters.return_value = [mock_param]
 
-        original_cwd = Path.cwd()
-        try:
-            os.chdir(tmp_path)
-            rel_path = Path("relative_checkpoints")
-            runner = AsyncInferenceRunner(mock_model, torch.device("cuda:0"), checkpoint_dir=rel_path, rank=0)
-            assert runner.shard_checkpoint_dir is not None
-            assert runner.shard_checkpoint_dir.name == "shard_0"
-            assert (tmp_path / "relative_checkpoints" / "shard_0").exists()
-        finally:
-            os.chdir(original_cwd)
+        monkeypatch.chdir(tmp_path)
+        rel_path = Path("relative_checkpoints")
+        runner = AsyncInferenceRunner(mock_model, torch.device("cuda:0"), checkpoint_dir=rel_path, rank=0)
+        assert runner.shard_checkpoint_dir is not None
+        assert runner.shard_checkpoint_dir.name == "shard_0"
+        assert (tmp_path / "relative_checkpoints" / "shard_0").exists()
