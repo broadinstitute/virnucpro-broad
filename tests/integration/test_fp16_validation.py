@@ -212,9 +212,14 @@ class TestFP16Equivalence:
             f"Min similarity {result['min_similarity']:.6f} <= 0.99"
 
     def test_packed_fp16_vs_fp32_unpacked(self, esm_model_fp16, esm_model_fp32):
-        """Validate FP16 packed maintains FP32-level quality (cosine similarity >0.99)."""
+        """Validate FP16 packed maintains FP32-level quality (cosine similarity >0.99).
+
+        Note: This test requires script mode execution (not notebook environments)
+        for proper tensor handling and CUDA stream synchronization.
+        """
         model_fp16, batch_converter = esm_model_fp16
         model_fp32, _ = esm_model_fp32
+        device = model_fp16.device
 
         sequences = [
             ("seq1", "MKTAYIAKQRQISFV"),
@@ -224,7 +229,7 @@ class TestFP16Equivalence:
         ]
 
         labels, strs, tokens = batch_converter(sequences)
-        tokens = tokens.to("cuda:0")
+        tokens = tokens.to(device)
 
         with torch.no_grad():
             out_fp32 = model_fp32(tokens, repr_layers=[36])
@@ -241,7 +246,7 @@ class TestFP16Equivalence:
             input_ids_list.append(seq_tokens[:end_idx])
 
         input_ids = torch.cat(input_ids_list)
-        cu_seqlens = torch.zeros(len(sequences) + 1, dtype=torch.int32, device="cuda:0")
+        cu_seqlens = torch.zeros(len(sequences) + 1, dtype=torch.int32, device=device)
         cu_seqlens[0] = 0
         for i, ids in enumerate(input_ids_list):
             cu_seqlens[i + 1] = cu_seqlens[i] + len(ids)
@@ -290,8 +295,13 @@ class TestFP16PackedEquivalence:
     """
 
     def test_packed_inference_fp16_correctness(self, esm_model_fp16):
-        """Verify FP16 forward_packed matches FP16 standard forward (validates packing implementation)."""
+        """Verify FP16 forward_packed matches FP16 standard forward (validates packing implementation).
+
+        Note: This test requires script mode execution (not notebook environments)
+        for proper tensor handling and CUDA stream synchronization.
+        """
         model_fp16, batch_converter = esm_model_fp16
+        device = model_fp16.device
 
         # Create sequences
         sequences = [
@@ -302,7 +312,7 @@ class TestFP16PackedEquivalence:
 
         # Tokenize
         labels, strs, tokens = batch_converter(sequences)
-        tokens = tokens.to("cuda:0")
+        tokens = tokens.to(device)
 
         # === Standard forward (unpacked) ===
         with torch.no_grad():
@@ -326,7 +336,7 @@ class TestFP16PackedEquivalence:
         input_ids = torch.cat(input_ids_list)
 
         # Create cu_seqlens
-        cu_seqlens = torch.zeros(len(sequences) + 1, dtype=torch.int32, device="cuda:0")
+        cu_seqlens = torch.zeros(len(sequences) + 1, dtype=torch.int32, device=device)
         cu_seqlens[0] = 0
         for i, ids in enumerate(input_ids_list):
             cu_seqlens[i + 1] = cu_seqlens[i] + len(ids)
@@ -367,8 +377,13 @@ class TestFP16PackedEquivalence:
         assert min_sim > 0.95, f"Packed vs unpacked min similarity {min_sim:.4f} < 0.95"
 
     def test_packed_long_sequences_fp16(self, esm_model_fp16):
-        """Test forward_packed with sequences >400aa (stresses RoPE and FlashAttention with FP16)."""
+        """Test forward_packed with sequences >400aa (stresses RoPE and FlashAttention with FP16).
+
+        Note: This test requires script mode execution (not notebook environments)
+        for proper tensor handling and CUDA stream synchronization.
+        """
         model_fp16, batch_converter = esm_model_fp16
+        device = model_fp16.device
 
         # Long sequences
         sequences = [
@@ -378,7 +393,7 @@ class TestFP16PackedEquivalence:
 
         # Tokenize and run standard forward
         labels, strs, tokens = batch_converter(sequences)
-        tokens = tokens.to("cuda:0")
+        tokens = tokens.to(device)
 
         with torch.no_grad():
             out_unpacked = model_fp16(tokens, repr_layers=[36])
@@ -396,7 +411,7 @@ class TestFP16PackedEquivalence:
             input_ids_list.append(seq_tokens[:end_idx])
 
         input_ids = torch.cat(input_ids_list)
-        cu_seqlens = torch.zeros(len(sequences) + 1, dtype=torch.int32, device="cuda:0")
+        cu_seqlens = torch.zeros(len(sequences) + 1, dtype=torch.int32, device=device)
         cu_seqlens[0] = 0
         for i, ids in enumerate(input_ids_list):
             cu_seqlens[i + 1] = cu_seqlens[i] + len(ids)
@@ -431,8 +446,13 @@ class TestFP16PackedEquivalence:
         assert mean_sim > 0.99, f"Long packed similarity {mean_sim:.4f} < 0.99"
 
     def test_packed_boundary_effects_fp16(self, esm_model_fp16):
-        """Test cu_seqlens boundaries don't cause precision issues at sequence transitions."""
+        """Test cu_seqlens boundaries don't cause precision issues at sequence transitions.
+
+        Note: This test requires script mode execution (not notebook environments)
+        for proper tensor handling and CUDA stream synchronization.
+        """
         model_fp16, batch_converter = esm_model_fp16
+        device = model_fp16.device
 
         # Multiple short sequences to test many boundaries
         sequences = [
@@ -445,7 +465,7 @@ class TestFP16PackedEquivalence:
 
         # Tokenize and run standard forward
         labels, strs, tokens = batch_converter(sequences)
-        tokens = tokens.to("cuda:0")
+        tokens = tokens.to(device)
 
         with torch.no_grad():
             out_unpacked = model_fp16(tokens, repr_layers=[36])
@@ -463,7 +483,7 @@ class TestFP16PackedEquivalence:
             input_ids_list.append(seq_tokens[:end_idx])
 
         input_ids = torch.cat(input_ids_list)
-        cu_seqlens = torch.zeros(len(sequences) + 1, dtype=torch.int32, device="cuda:0")
+        cu_seqlens = torch.zeros(len(sequences) + 1, dtype=torch.int32, device=device)
         cu_seqlens[0] = 0
         for i, ids in enumerate(input_ids_list):
             cu_seqlens[i + 1] = cu_seqlens[i] + len(ids)
@@ -515,8 +535,13 @@ class TestFP16NumericalStability:
     """Test FP16 numerical stability (NaN/Inf detection)."""
 
     def test_no_nan_in_fp16_embeddings(self, esm_model_fp16):
-        """Run 10 sequences through FP16 model, verify no NaN in output."""
+        """Run 10 sequences through FP16 model, verify no NaN in output.
+
+        Note: This test requires script mode execution (not notebook environments)
+        for proper tensor handling and CUDA stream synchronization.
+        """
         model_fp16, batch_converter = esm_model_fp16
+        device = model_fp16.device
 
         sequences = [
             (f"seq{i}", "MKTAYIAKVLSPADKTNV" * (i + 1))
@@ -524,7 +549,7 @@ class TestFP16NumericalStability:
         ]
 
         labels, strs, tokens = batch_converter(sequences)
-        tokens = tokens.to("cuda:0")
+        tokens = tokens.to(device)
 
         with torch.no_grad():
             out_fp16 = model_fp16(tokens, repr_layers=[36])
@@ -540,8 +565,13 @@ class TestFP16NumericalStability:
         assert not has_nan, "FP16 embeddings contain NaN values"
 
     def test_no_inf_in_fp16_embeddings(self, esm_model_fp16):
-        """Run 10 sequences through FP16 model, verify no Inf in output."""
+        """Run 10 sequences through FP16 model, verify no Inf in output.
+
+        Note: This test requires script mode execution (not notebook environments)
+        for proper tensor handling and CUDA stream synchronization.
+        """
         model_fp16, batch_converter = esm_model_fp16
+        device = model_fp16.device
 
         sequences = [
             (f"seq{i}", "VLSPADKTNVKAAWGKVG" * (i + 1))
@@ -549,7 +579,7 @@ class TestFP16NumericalStability:
         ]
 
         labels, strs, tokens = batch_converter(sequences)
-        tokens = tokens.to("cuda:0")
+        tokens = tokens.to(device)
 
         with torch.no_grad():
             out_fp16 = model_fp16(tokens, repr_layers=[36])
@@ -565,8 +595,13 @@ class TestFP16NumericalStability:
         assert not has_inf, "FP16 embeddings contain Inf values"
 
     def test_fp16_embedding_magnitude_reasonable(self, esm_model_fp16):
-        """Verify embedding L2 norms are finite and within reasonable range (e.g., 1-1000)."""
+        """Verify embedding L2 norms are finite and within reasonable range (e.g., 1-1000).
+
+        Note: This test requires script mode execution (not notebook environments)
+        for proper tensor handling and CUDA stream synchronization.
+        """
         model_fp16, batch_converter = esm_model_fp16
+        device = model_fp16.device
 
         sequences = [
             ("mag1", "MKTAYIAK"),
@@ -577,7 +612,7 @@ class TestFP16NumericalStability:
         ]
 
         labels, strs, tokens = batch_converter(sequences)
-        tokens = tokens.to("cuda:0")
+        tokens = tokens.to(device)
 
         with torch.no_grad():
             out_fp16 = model_fp16(tokens, repr_layers=[36])
@@ -610,9 +645,14 @@ class TestFP16StatisticalValidation:
     """Validate embedding distributions match statistically (beyond cosine similarity)."""
 
     def test_mean_std_similar(self, esm_model_fp16, esm_model_fp32):
-        """Compare mean and std of FP16 vs FP32 embeddings with realistic thresholds for ESM-2."""
+        """Compare mean and std of FP16 vs FP32 embeddings with realistic thresholds for ESM-2.
+
+        Note: This test requires script mode execution (not notebook environments)
+        for proper tensor handling and CUDA stream synchronization.
+        """
         model_fp16, batch_converter = esm_model_fp16
         model_fp32, _ = esm_model_fp32
+        device = model_fp16.device
 
         # Run inference on 10 sequences (mix of short/medium/long)
         sequences = [
@@ -629,7 +669,7 @@ class TestFP16StatisticalValidation:
         ]
 
         labels, strs, tokens = batch_converter(sequences)
-        tokens = tokens.to("cuda:0")
+        tokens = tokens.to(device)
 
         with torch.no_grad():
             out_fp32 = model_fp32(tokens, repr_layers=[36])
@@ -659,9 +699,14 @@ class TestFP16StatisticalValidation:
         print(f"  Std: FP32={fp32_std:.6f}, FP16={fp16_std:.6f}, rel_diff={std_rel_diff:.4f}")
 
     def test_l2_norm_distribution_similar(self, esm_model_fp16, esm_model_fp32):
-        """Compare L2 norm distributions. Mean norm relative difference should be <5%."""
+        """Compare L2 norm distributions. Mean norm relative difference should be <5%.
+
+        Note: This test requires script mode execution (not notebook environments)
+        for proper tensor handling and CUDA stream synchronization.
+        """
         model_fp16, batch_converter = esm_model_fp16
         model_fp32, _ = esm_model_fp32
+        device = model_fp16.device
 
         sequences = [
             (f"norm{i}", "MKTAYIAKVLSPADKTNV" * (i + 1))
@@ -669,7 +714,7 @@ class TestFP16StatisticalValidation:
         ]
 
         labels, strs, tokens = batch_converter(sequences)
-        tokens = tokens.to("cuda:0")
+        tokens = tokens.to(device)
 
         with torch.no_grad():
             out_fp32 = model_fp32(tokens, repr_layers=[36])
@@ -704,9 +749,14 @@ class TestFP16StatisticalValidation:
         assert rel_diff < 0.05, f"L2 norm mean relative diff {rel_diff:.4f} exceeds 5%"
 
     def test_outlier_count_similar(self, esm_model_fp16, esm_model_fp32):
-        """Count Z-score >3 outliers in both. Outlier count difference should be <10% of total elements."""
+        """Count Z-score >3 outliers in both. Outlier count difference should be <10% of total elements.
+
+        Note: This test requires script mode execution (not notebook environments)
+        for proper tensor handling and CUDA stream synchronization.
+        """
         model_fp16, batch_converter = esm_model_fp16
         model_fp32, _ = esm_model_fp32
+        device = model_fp16.device
 
         sequences = [
             (f"outlier{i}", "VLSPADKTNVKAAWGKVG" * (i + 1))
@@ -714,7 +764,7 @@ class TestFP16StatisticalValidation:
         ]
 
         labels, strs, tokens = batch_converter(sequences)
-        tokens = tokens.to("cuda:0")
+        tokens = tokens.to(device)
 
         with torch.no_grad():
             out_fp32 = model_fp32(tokens, repr_layers=[36])
