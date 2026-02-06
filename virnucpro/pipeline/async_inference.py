@@ -9,17 +9,32 @@ This module implements the async DataLoader architecture where:
 This is the single-GPU foundation. Multi-GPU coordination is Phase 7.
 """
 
+from __future__ import annotations
+
 import torch
 import time
 import logging
-from typing import Optional, List, Dict, Any, Callable, Iterator
+import os
+import hashlib
+from typing import Optional, List, Dict, Any, Callable, Iterator, TYPE_CHECKING
 from pathlib import Path
 from dataclasses import dataclass
+from datetime import datetime
 
+import numpy as np
 from torch.utils.data import DataLoader
 
 from virnucpro.cuda.stream_manager import StreamProcessor
 from virnucpro.utils.gpu_monitor import NvitopMonitor
+from virnucpro.pipeline.checkpoint_writer import (
+    CheckpointTrigger,
+    AsyncCheckpointWriter,
+    validate_checkpoint_pt,
+    resume_from_checkpoints
+)
+
+if TYPE_CHECKING:
+    from virnucpro.pipeline.checkpoint_manifest import CheckpointManifest
 
 logger = logging.getLogger('virnucpro.pipeline.async_inference')
 
@@ -98,6 +113,13 @@ class AsyncInferenceRunner:
         enable_streams: bool = True,
         monitor_interval: float = 1.0,
         log_file: Optional[Path] = None,
+        checkpoint_dir: Optional[Path] = None,
+        rank: int = 0,
+        checkpoint_seq_threshold: int = 10000,
+        checkpoint_time_threshold: float = 300.0,
+        manifest: Optional['CheckpointManifest'] = None,
+        input_fingerprint: str = "",
+        model_config_hash: str = "",
     ):
         """
         Initialize async inference runner.
@@ -108,6 +130,13 @@ class AsyncInferenceRunner:
             enable_streams: Use CUDA streams for I/O overlap (default: True)
             monitor_interval: GPU sampling interval in seconds (default: 1.0)
             log_file: Path for GPU metrics log (default: auto-generated)
+            checkpoint_dir: Directory for checkpoint files (None = checkpointing disabled)
+            rank: Shard rank for per-GPU isolation (default: 0)
+            checkpoint_seq_threshold: Sequence count trigger (default: 10000)
+            checkpoint_time_threshold: Time trigger in seconds (default: 300.0)
+            manifest: Optional CheckpointManifest for multi-GPU coordination
+            input_fingerprint: SHA256 of input data for cross-run validation
+            model_config_hash: Hash of model architecture/weights for compatibility checks
         """
         self.model = model
         self.device = device
@@ -132,10 +161,73 @@ class AsyncInferenceRunner:
         self._batch_count = 0
         self._total_sequences = 0
 
+        # Checkpointing setup
+        self.checkpoint_dir = checkpoint_dir
+        self.rank = rank
+        self.manifest = manifest
+
+        if checkpoint_dir is not None:
+            # Create shard-specific directory
+            self.shard_checkpoint_dir = checkpoint_dir / f"shard_{rank}"
+            self.shard_checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+            # Initialize checkpoint trigger
+            self.trigger = CheckpointTrigger(
+                seq_threshold=checkpoint_seq_threshold,
+                time_threshold_sec=checkpoint_time_threshold
+            )
+
+            # Initialize async checkpoint writer with manifest integration
+            self.writer = AsyncCheckpointWriter(
+                max_workers=1,
+                manifest=manifest,
+                rank=rank
+            )
+
+            # Initialize accumulator state
+            self._ckpt_embeddings: List[np.ndarray] = []
+            self._ckpt_ids: List[str] = []
+            self._ckpt_batch_idx: int = 0
+            self._last_packing_stats: Dict[str, Any] = {}
+
+            # Store metadata for checkpoints
+            self._input_fingerprint = input_fingerprint
+            self._model_config_hash = model_config_hash or self._compute_model_config_hash()
+
+            logger.info(
+                f"Checkpointing enabled: shard {rank}, "
+                f"seq_threshold={checkpoint_seq_threshold}, "
+                f"time_threshold={checkpoint_time_threshold}s"
+            )
+        else:
+            self.trigger = None
+            self.writer = None
+            self.shard_checkpoint_dir = None
+
         logger.info(
             f"AsyncInferenceRunner initialized on {device} "
             f"(streams={'enabled' if enable_streams else 'disabled'})"
         )
+
+    @property
+    def _checkpointing_enabled(self) -> bool:
+        """Check if checkpointing is enabled."""
+        return self.checkpoint_dir is not None
+
+    def _compute_model_config_hash(self) -> str:
+        """Compute lightweight model config hash from dtype + parameter count.
+
+        Returns:
+            SHA256 hex digest truncated to 16 chars
+        """
+        # Get model dtype and total parameter count
+        model_dtype = str(next(self.model.parameters()).dtype)
+        param_count = sum(p.numel() for p in self.model.parameters())
+
+        # Compute hash of dtype + param_count
+        fingerprint = f"{model_dtype}_{param_count}"
+        hash_obj = hashlib.sha256(fingerprint.encode('utf-8'))
+        return hash_obj.hexdigest()[:16]
 
     def _validate_pinned_memory(self, batch: Dict[str, Any]) -> None:
         """
