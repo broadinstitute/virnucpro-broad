@@ -397,8 +397,9 @@ def gpu_worker(
             result_status = {
                 'rank': rank,
                 'status': 'failed',
-                'error': error_str,  # Backward compatibility: error contains message
-                'error_type': 'cuda_oom',  # New: categorized error type
+                'error': 'cuda_oom',  # Backward compatibility: error is category code
+                'error_message': error_str,  # Full error message for diagnostics
+                'error_type': 'cuda_oom',
                 'retry_recommended': True,
                 'reduce_batch_size': True,
             }
@@ -411,8 +412,9 @@ def gpu_worker(
             result_status = {
                 'rank': rank,
                 'status': 'failed',
-                'error': error_str,  # Backward compatibility: error contains message
-                'error_type': 'cuda_runtime',  # New: categorized error type
+                'error': 'cuda_runtime',  # Backward compatibility: error is category code
+                'error_message': error_str,  # Full error message for diagnostics
+                'error_type': 'cuda_runtime',
                 'retry_recommended': True,
                 'circuit_breaker': True,  # Trigger circuit breaker after 2 attempts
             }
@@ -422,7 +424,8 @@ def gpu_worker(
             result_status = {
                 'rank': rank,
                 'status': 'failed',
-                'error': error_str,  # Backward compatibility: error contains message
+                'error': 'generic_error',  # Backward compatibility: error is category code
+                'error_message': error_str,  # Full error message for diagnostics
                 'retry_recommended': True,
             }
         results_queue.put(result_status)
@@ -437,7 +440,8 @@ def gpu_worker(
         result_status = {
             'rank': rank,
             'status': 'failed',
-            'error': str(e),  # Backward compatibility: error contains message
+            'error': 'generic_error',  # Backward compatibility: error is category code
+            'error_message': str(e),  # Full error message for diagnostics
         }
         results_queue.put(result_status)
         sys.exit(1)
