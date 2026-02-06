@@ -14,6 +14,7 @@ The function supports partial failure - if some workers fail but others succeed,
 it returns results from successful workers with warnings about failures.
 """
 
+import dataclasses
 import logging
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional, Set
@@ -71,9 +72,32 @@ def run_multi_gpu_inference(
         >>> fasta_files = [Path("sequences.fasta")]
         >>> output_dir = Path("output")
         >>> model_config = {'model_type': 'esm2', 'model_name': 'esm2_t36_3B_UR50D'}
+
+        Basic usage with default settings:
+        >>> output_path, failed = run_multi_gpu_inference(
+        ...     fasta_files, output_dir, model_config
+        ... )
+
+        Checkpointing enabled (resumable on failure):
         >>> runtime_config = RuntimeConfig(enable_checkpointing=True)
         >>> output_path, failed = run_multi_gpu_inference(
         ...     fasta_files, output_dir, model_config, runtime_config=runtime_config
+        ... )
+
+        Custom timeout and retry settings:
+        >>> runtime_config = RuntimeConfig(
+        ...     enable_checkpointing=True,
+        ...     timeout_per_attempt=7200.0,  # 2 hours per attempt
+        ...     max_retries_transient=5,     # More retries for transient errors
+        ...     checkpoint_dir=Path("checkpoints")
+        ... )
+        >>> output_path, failed = run_multi_gpu_inference(
+        ...     fasta_files, output_dir, model_config, runtime_config=runtime_config
+        ... )
+
+        If some workers fail, partial results are still returned:
+        >>> output_path, failed = run_multi_gpu_inference(
+        ...     fasta_files, output_dir, model_config, world_size=4
         ... )
         >>> if failed:
         ...     print(f"Warning: {len(failed)} workers failed")
@@ -89,8 +113,11 @@ def run_multi_gpu_inference(
     # Backward compatibility: if timeout provided, use it
     if timeout is not None:
         logger.warning(
-            "timeout parameter is deprecated, use runtime_config.timeout_per_attempt instead"
+            "timeout parameter is deprecated, use runtime_config.timeout_per_attempt instead. "
+            "The timeout parameter will be removed in a future version."
         )
+        # Create a copy to avoid mutating the caller's object
+        runtime_config = dataclasses.replace(runtime_config)
         runtime_config.timeout_per_attempt = timeout
 
     # Set checkpoint_dir default if not provided

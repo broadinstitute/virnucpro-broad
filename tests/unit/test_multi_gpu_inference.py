@@ -9,11 +9,13 @@ from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch, call
 import tempfile
 import json
+import logging
 
 from virnucpro.pipeline.multi_gpu_inference import (
     run_multi_gpu_inference,
     run_esm2_multi_gpu
 )
+from virnucpro.pipeline.runtime_config import RuntimeConfig
 
 
 @pytest.fixture
@@ -77,7 +79,7 @@ class TestOrchestrationFlow:
 
         # Mock coordinator behavior
         mock_coordinator = MagicMock()
-        mock_coordinator.wait_for_completion.return_value = {0: True, 1: True}
+        mock_coordinator.monitor_workers_async.return_value = {0: True, 1: True}
         mock_coordinator_cls.return_value = mock_coordinator
 
         # Create dummy shard files
@@ -131,7 +133,7 @@ class TestOrchestrationFlow:
 
         # Mock coordinator behavior
         mock_coordinator = MagicMock()
-        mock_coordinator.wait_for_completion.return_value = {0: True, 1: True}
+        mock_coordinator.monitor_workers_async.return_value = {0: True, 1: True}
         mock_coordinator_cls.return_value = mock_coordinator
 
         # Create dummy shard files
@@ -156,18 +158,21 @@ class TestOrchestrationFlow:
         args = mock_coordinator.spawn_workers.call_args[0]
         # First arg should be a callable (the mock replaces the actual function)
         assert callable(args[0])
-        # Check worker args: (index_path, output_dir, model_config)
+        # Check worker args: (index_path, output_dir, model_config_with_checkpointing)
         worker_args = args[1]
         assert worker_args[0] == temp_output_dir / "sequence_index.json"
         assert worker_args[1] == temp_output_dir
-        assert worker_args[2] == model_config
+        # model_config is extended with checkpointing params
+        assert worker_args[2]['model_type'] == 'esm2'
+        assert 'enable_checkpointing' in worker_args[2]
+        assert 'checkpoint_dir' in worker_args[2]
 
     @patch('virnucpro.pipeline.multi_gpu_inference.aggregate_shards')
     @patch('virnucpro.pipeline.multi_gpu_inference.GPUProcessCoordinator')
     @patch('virnucpro.pipeline.multi_gpu_inference.load_sequence_index')
     @patch('virnucpro.pipeline.multi_gpu_inference.create_sequence_index')
     @patch('virnucpro.pipeline.multi_gpu_inference.torch.cuda.device_count')
-    def test_waits_for_completion(
+    def test_monitor_workers_async_receives_timeout(
         self,
         mock_device_count,
         mock_create_index,
@@ -178,13 +183,13 @@ class TestOrchestrationFlow:
         temp_output_dir,
         mock_index_data
     ):
-        """Verify wait_for_completion called."""
+        """Verify monitor_workers_async called with runtime_config containing timeout."""
         mock_device_count.return_value = 2
         mock_load_index.return_value = mock_index_data
 
         # Mock coordinator behavior
         mock_coordinator = MagicMock()
-        mock_coordinator.wait_for_completion.return_value = {0: True, 1: True}
+        mock_coordinator.monitor_workers_async.return_value = {0: True, 1: True}
         mock_coordinator_cls.return_value = mock_coordinator
 
         # Create dummy shard files
@@ -206,8 +211,10 @@ class TestOrchestrationFlow:
             timeout=timeout
         )
 
-        # Verify wait_for_completion called with timeout
-        mock_coordinator.wait_for_completion.assert_called_once_with(timeout=timeout)
+        # Verify monitor_workers_async called with runtime_config containing timeout
+        mock_coordinator.monitor_workers_async.assert_called_once()
+        call_kwargs = mock_coordinator.monitor_workers_async.call_args[1]
+        assert call_kwargs['runtime_config'].timeout_per_attempt == timeout
 
     @patch('virnucpro.pipeline.multi_gpu_inference.aggregate_shards')
     @patch('virnucpro.pipeline.multi_gpu_inference.get_worker_indices')
@@ -238,7 +245,7 @@ class TestOrchestrationFlow:
 
         # Mock coordinator behavior - workers 0,2 succeed, 1,3 fail
         mock_coordinator = MagicMock()
-        mock_coordinator.wait_for_completion.return_value = {
+        mock_coordinator.monitor_workers_async.return_value = {
             0: True, 1: False, 2: True, 3: False
         }
         mock_coordinator_cls.return_value = mock_coordinator
@@ -290,7 +297,7 @@ class TestOrchestrationFlow:
 
         # Mock coordinator behavior
         mock_coordinator = MagicMock()
-        mock_coordinator.wait_for_completion.return_value = {0: True, 1: True}
+        mock_coordinator.monitor_workers_async.return_value = {0: True, 1: True}
         mock_coordinator_cls.return_value = mock_coordinator
 
         # Create dummy shard files
@@ -347,7 +354,7 @@ class TestPartialFailureHandling:
 
         # Mock coordinator - worker 1 fails
         mock_coordinator = MagicMock()
-        mock_coordinator.wait_for_completion.return_value = {
+        mock_coordinator.monitor_workers_async.return_value = {
             0: True, 1: False, 2: True
         }
         mock_coordinator_cls.return_value = mock_coordinator
@@ -403,7 +410,7 @@ class TestPartialFailureHandling:
 
         # Mock coordinator - workers 1,3 fail
         mock_coordinator = MagicMock()
-        mock_coordinator.wait_for_completion.return_value = {
+        mock_coordinator.monitor_workers_async.return_value = {
             0: True, 1: False, 2: True, 3: False
         }
         mock_coordinator_cls.return_value = mock_coordinator
@@ -461,7 +468,7 @@ class TestPartialFailureHandling:
 
         # Mock coordinator - worker 1 fails
         mock_coordinator = MagicMock()
-        mock_coordinator.wait_for_completion.return_value = {
+        mock_coordinator.monitor_workers_async.return_value = {
             0: True, 1: False
         }
         mock_coordinator_cls.return_value = mock_coordinator
@@ -509,7 +516,7 @@ class TestPartialFailureHandling:
 
         # Mock coordinator - all workers fail
         mock_coordinator = MagicMock()
-        mock_coordinator.wait_for_completion.return_value = {
+        mock_coordinator.monitor_workers_async.return_value = {
             0: False, 1: False
         }
         mock_coordinator_cls.return_value = mock_coordinator
@@ -550,7 +557,7 @@ class TestWorldSizeDetection:
 
         # Mock coordinator
         mock_coordinator = MagicMock()
-        mock_coordinator.wait_for_completion.return_value = {
+        mock_coordinator.monitor_workers_async.return_value = {
             0: True, 1: True, 2: True, 3: True
         }
         mock_coordinator_cls.return_value = mock_coordinator
@@ -598,7 +605,7 @@ class TestWorldSizeDetection:
 
         # Mock coordinator
         mock_coordinator = MagicMock()
-        mock_coordinator.wait_for_completion.return_value = {0: True, 1: True}
+        mock_coordinator.monitor_workers_async.return_value = {0: True, 1: True}
         mock_coordinator_cls.return_value = mock_coordinator
 
         # Create dummy shards
@@ -698,3 +705,299 @@ class TestConvenienceFunction:
         # Verify custom model name used
         model_config = mock_run_inference.call_args[0][2]
         assert model_config['model_name'] == custom_model
+
+
+class TestRuntimeConfigWiring:
+    """Test RuntimeConfig initialization and wiring."""
+
+    @patch('virnucpro.pipeline.multi_gpu_inference.aggregate_shards')
+    @patch('virnucpro.pipeline.multi_gpu_inference.GPUProcessCoordinator')
+    @patch('virnucpro.pipeline.multi_gpu_inference.load_sequence_index')
+    @patch('virnucpro.pipeline.multi_gpu_inference.create_sequence_index')
+    @patch('virnucpro.pipeline.multi_gpu_inference.torch.cuda.device_count')
+    def test_runtime_config_none_creates_default(
+        self,
+        mock_device_count,
+        mock_create_index,
+        mock_load_index,
+        mock_coordinator_cls,
+        mock_aggregate,
+        mock_fasta_files,
+        temp_output_dir,
+        mock_index_data
+    ):
+        """When runtime_config is None, a default RuntimeConfig is created."""
+        mock_device_count.return_value = 2
+        mock_load_index.return_value = mock_index_data
+
+        mock_coordinator = MagicMock()
+        mock_coordinator.monitor_workers_async.return_value = {0: True, 1: True}
+        mock_coordinator_cls.return_value = mock_coordinator
+
+        temp_output_dir.mkdir(parents=True, exist_ok=True)
+        (temp_output_dir / "shard_0.h5").touch()
+        (temp_output_dir / "shard_1.h5").touch()
+
+        expected_path = temp_output_dir / "embeddings.h5"
+        mock_aggregate.return_value = expected_path
+
+        model_config = {'model_type': 'esm2'}
+
+        result_path, failed = run_multi_gpu_inference(
+            mock_fasta_files,
+            temp_output_dir,
+            model_config,
+            runtime_config=None
+        )
+
+        # Verify coordinator was called
+        assert mock_coordinator_cls.called
+
+    @patch('virnucpro.pipeline.multi_gpu_inference.aggregate_shards')
+    @patch('virnucpro.pipeline.multi_gpu_inference.GPUProcessCoordinator')
+    @patch('virnucpro.pipeline.multi_gpu_inference.load_sequence_index')
+    @patch('virnucpro.pipeline.multi_gpu_inference.create_sequence_index')
+    @patch('virnucpro.pipeline.multi_gpu_inference.torch.cuda.device_count')
+    def test_runtime_config_passed_through(
+        self,
+        mock_device_count,
+        mock_create_index,
+        mock_load_index,
+        mock_coordinator_cls,
+        mock_aggregate,
+        mock_fasta_files,
+        temp_output_dir,
+        mock_index_data
+    ):
+        """Custom RuntimeConfig is passed to coordinator."""
+        mock_device_count.return_value = 2
+        mock_load_index.return_value = mock_index_data
+
+        mock_coordinator = MagicMock()
+        mock_coordinator.monitor_workers_async.return_value = {0: True, 1: True}
+        mock_coordinator_cls.return_value = mock_coordinator
+
+        temp_output_dir.mkdir(parents=True, exist_ok=True)
+        (temp_output_dir / "shard_0.h5").touch()
+        (temp_output_dir / "shard_1.h5").touch()
+
+        expected_path = temp_output_dir / "embeddings.h5"
+        mock_aggregate.return_value = expected_path
+
+        model_config = {'model_type': 'esm2'}
+        custom_config = RuntimeConfig(
+            enable_checkpointing=True,
+            max_retries_transient=5,
+            timeout_per_attempt=7200.0
+        )
+
+        run_multi_gpu_inference(
+            mock_fasta_files,
+            temp_output_dir,
+            model_config,
+            runtime_config=custom_config
+        )
+
+        # Verify monitor_workers_async was called with the custom config
+        mock_coordinator.monitor_workers_async.assert_called_once()
+        call_kwargs = mock_coordinator.monitor_workers_async.call_args[1]
+        assert call_kwargs['runtime_config'] is custom_config
+
+    @patch('virnucpro.pipeline.multi_gpu_inference.aggregate_shards')
+    @patch('virnucpro.pipeline.multi_gpu_inference.GPUProcessCoordinator')
+    @patch('virnucpro.pipeline.multi_gpu_inference.load_sequence_index')
+    @patch('virnucpro.pipeline.multi_gpu_inference.create_sequence_index')
+    @patch('virnucpro.pipeline.multi_gpu_inference.torch.cuda.device_count')
+    def test_caller_runtime_config_not_mutated(
+        self,
+        mock_device_count,
+        mock_create_index,
+        mock_load_index,
+        mock_coordinator_cls,
+        mock_aggregate,
+        mock_fasta_files,
+        temp_output_dir,
+        mock_index_data
+    ):
+        """Passing timeout does not mutate the caller's RuntimeConfig object."""
+        mock_device_count.return_value = 2
+        mock_load_index.return_value = mock_index_data
+
+        mock_coordinator = MagicMock()
+        mock_coordinator.monitor_workers_async.return_value = {0: True, 1: True}
+        mock_coordinator_cls.return_value = mock_coordinator
+
+        temp_output_dir.mkdir(parents=True, exist_ok=True)
+        (temp_output_dir / "shard_0.h5").touch()
+        (temp_output_dir / "shard_1.h5").touch()
+
+        expected_path = temp_output_dir / "embeddings.h5"
+        mock_aggregate.return_value = expected_path
+
+        model_config = {'model_type': 'esm2'}
+
+        # Create a config with a specific timeout
+        original_timeout = 3600.0
+        caller_config = RuntimeConfig(timeout_per_attempt=original_timeout)
+
+        # Store original timeout
+        original_value = caller_config.timeout_per_attempt
+
+        # Call with deprecated timeout parameter
+        run_multi_gpu_inference(
+            mock_fasta_files,
+            temp_output_dir,
+            model_config,
+            timeout=7200.0,
+            runtime_config=caller_config
+        )
+
+        # Verify the caller's object was NOT mutated
+        assert caller_config.timeout_per_attempt == original_value
+
+
+class TestDeprecatedTimeoutParameter:
+    """Test backward compatibility with deprecated timeout parameter."""
+
+    @patch('virnucpro.pipeline.multi_gpu_inference.aggregate_shards')
+    @patch('virnucpro.pipeline.multi_gpu_inference.GPUProcessCoordinator')
+    @patch('virnucpro.pipeline.multi_gpu_inference.load_sequence_index')
+    @patch('virnucpro.pipeline.multi_gpu_inference.create_sequence_index')
+    @patch('virnucpro.pipeline.multi_gpu_inference.torch.cuda.device_count')
+    def test_timeout_deprecated_warning_logged(
+        self,
+        mock_device_count,
+        mock_create_index,
+        mock_load_index,
+        mock_coordinator_cls,
+        mock_aggregate,
+        mock_fasta_files,
+        temp_output_dir,
+        mock_index_data,
+        caplog
+    ):
+        """Using timeout parameter logs a deprecation warning."""
+        mock_device_count.return_value = 2
+        mock_load_index.return_value = mock_index_data
+
+        mock_coordinator = MagicMock()
+        mock_coordinator.monitor_workers_async.return_value = {0: True, 1: True}
+        mock_coordinator_cls.return_value = mock_coordinator
+
+        temp_output_dir.mkdir(parents=True, exist_ok=True)
+        (temp_output_dir / "shard_0.h5").touch()
+        (temp_output_dir / "shard_1.h5").touch()
+
+        expected_path = temp_output_dir / "embeddings.h5"
+        mock_aggregate.return_value = expected_path
+
+        model_config = {'model_type': 'esm2'}
+
+        with caplog.at_level(logging.WARNING):
+            run_multi_gpu_inference(
+                mock_fasta_files,
+                temp_output_dir,
+                model_config,
+                timeout=600.0
+            )
+
+        # Verify deprecation warning was logged
+        assert any("timeout parameter is deprecated" in record.message
+                   for record in caplog.records)
+
+    @patch('virnucpro.pipeline.multi_gpu_inference.aggregate_shards')
+    @patch('virnucpro.pipeline.multi_gpu_inference.GPUProcessCoordinator')
+    @patch('virnucpro.pipeline.multi_gpu_inference.load_sequence_index')
+    @patch('virnucpro.pipeline.multi_gpu_inference.create_sequence_index')
+    @patch('virnucpro.pipeline.multi_gpu_inference.torch.cuda.device_count')
+    def test_timeout_value_applied_to_config(
+        self,
+        mock_device_count,
+        mock_create_index,
+        mock_load_index,
+        mock_coordinator_cls,
+        mock_aggregate,
+        mock_fasta_files,
+        temp_output_dir,
+        mock_index_data
+    ):
+        """Timeout value is correctly applied to timeout_per_attempt."""
+        mock_device_count.return_value = 2
+        mock_load_index.return_value = mock_index_data
+
+        mock_coordinator = MagicMock()
+        mock_coordinator.monitor_workers_async.return_value = {0: True, 1: True}
+        mock_coordinator_cls.return_value = mock_coordinator
+
+        temp_output_dir.mkdir(parents=True, exist_ok=True)
+        (temp_output_dir / "shard_0.h5").touch()
+        (temp_output_dir / "shard_1.h5").touch()
+
+        expected_path = temp_output_dir / "embeddings.h5"
+        mock_aggregate.return_value = expected_path
+
+        model_config = {'model_type': 'esm2'}
+        custom_timeout = 7200.0
+
+        run_multi_gpu_inference(
+            mock_fasta_files,
+            temp_output_dir,
+            model_config,
+            timeout=custom_timeout
+        )
+
+        # Verify monitor_workers_async was called with the timeout applied
+        mock_coordinator.monitor_workers_async.assert_called_once()
+        call_kwargs = mock_coordinator.monitor_workers_async.call_args[1]
+        assert call_kwargs['runtime_config'].timeout_per_attempt == custom_timeout
+
+    @patch('virnucpro.pipeline.multi_gpu_inference.aggregate_shards')
+    @patch('virnucpro.pipeline.multi_gpu_inference.GPUProcessCoordinator')
+    @patch('virnucpro.pipeline.multi_gpu_inference.load_sequence_index')
+    @patch('virnucpro.pipeline.multi_gpu_inference.create_sequence_index')
+    @patch('virnucpro.pipeline.multi_gpu_inference.torch.cuda.device_count')
+    def test_timeout_overrides_runtime_config_timeout(
+        self,
+        mock_device_count,
+        mock_create_index,
+        mock_load_index,
+        mock_coordinator_cls,
+        mock_aggregate,
+        mock_fasta_files,
+        temp_output_dir,
+        mock_index_data
+    ):
+        """When both timeout and runtime_config.timeout_per_attempt are provided,
+        the deprecated timeout parameter takes precedence."""
+        mock_device_count.return_value = 2
+        mock_load_index.return_value = mock_index_data
+
+        mock_coordinator = MagicMock()
+        mock_coordinator.monitor_workers_async.return_value = {0: True, 1: True}
+        mock_coordinator_cls.return_value = mock_coordinator
+
+        temp_output_dir.mkdir(parents=True, exist_ok=True)
+        (temp_output_dir / "shard_0.h5").touch()
+        (temp_output_dir / "shard_1.h5").touch()
+
+        expected_path = temp_output_dir / "embeddings.h5"
+        mock_aggregate.return_value = expected_path
+
+        model_config = {'model_type': 'esm2'}
+        config_timeout = 3600.0
+        deprecated_timeout = 7200.0
+
+        caller_config = RuntimeConfig(timeout_per_attempt=config_timeout)
+
+        run_multi_gpu_inference(
+            mock_fasta_files,
+            temp_output_dir,
+            model_config,
+            timeout=deprecated_timeout,
+            runtime_config=caller_config
+        )
+
+        # Verify the deprecated timeout took precedence
+        mock_coordinator.monitor_workers_async.assert_called_once()
+        call_kwargs = mock_coordinator.monitor_workers_async.call_args[1]
+        assert call_kwargs['runtime_config'].timeout_per_attempt == deprecated_timeout
