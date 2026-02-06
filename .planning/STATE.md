@@ -163,6 +163,9 @@ Recent decisions affecting current work:
 - **time.monotonic() for telemetry (10.1-03)**: Wall-clock timing unaffected by system clock adjustments - accurate timing even with NTP changes
 - **torch.save for feature files (10.1-03)**: Feature files are plain dicts, not checkpoints - use torch.save directly instead of atomic_save which expects data/version/status keys
 - **5s threshold for 1K sequences (10.1-03)**: Generous regression test threshold (5× expected) catches O(n²) bugs without false positives from I/O variance
+- **Checkpoint format detection via .done files (10.1-04)**: Check for .done markers without shard_* dirs to detect v1.0 format - simple filesystem inspection is reliable and fast
+- **world_size validation guards CPU systems (10.1-04)**: Check actual_gpu_count > 0 to avoid failing on CPU-only systems where GPU detection may return mock values
+- **Best-effort cleanup preserves errors (10.1-04)**: Catch OSError during partial file cleanup to avoid masking original exception - cleanup is helpful but shouldn't hide real error
 
 ### Pending Todos
 
