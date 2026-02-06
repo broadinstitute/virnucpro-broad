@@ -3,34 +3,46 @@
 This module provides the worker function spawned by GPUProcessCoordinator
 for distributed multi-GPU inference. Each worker:
 1. Sets up per-worker logging
-2. Loads sequence index and gets assigned indices
-3. Loads model (ESM-2 or DNABERT-S)
-4. Creates IndexBasedDataset and DataLoader
-5. Runs AsyncInferenceRunner
-6. Saves shard HDF5 file
-7. Reports completion to parent
+2. Loads checkpoint manifest and resumes from existing checkpoints
+3. Filters sequence index to skip already-processed sequences
+4. Loads model (ESM-2 or DNABERT-S)
+5. Creates IndexBasedDataset and DataLoader
+6. Runs AsyncInferenceRunner with checkpointing enabled
+7. Assembles final shard from resumed + new embeddings
+8. Saves shard HDF5 file
+9. Reports completion to parent
 
 The worker runs independently on a single GPU (mapped to cuda:0 via
 CUDA_VISIBLE_DEVICES) and saves results to shard_{rank}.h5 for later
 aggregation by the parent process.
+
+Checkpointing support:
+- Per-shard isolation via checkpoint_dir/shard_{rank}/ subdirectories
+- Resume from existing .pt checkpoints before inference
+- Index filtering prevents duplicate processing of resumed sequences
+- SIGTERM handler saves emergency checkpoint on spot preemption
+- Differentiated error handling: OOM, CUDA runtime, generic errors
 """
 
 import sys
+import signal
 import logging
+import hashlib
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Set
 from multiprocessing import Queue
 
 import torch
 import h5py
 
 from virnucpro.pipeline.worker_logging import setup_worker_logging
-from virnucpro.data.shard_index import get_worker_indices
+from virnucpro.data.shard_index import get_worker_indices, load_sequence_index
 from virnucpro.data.sequence_dataset import IndexBasedDataset
 from virnucpro.data.collators import VarlenCollator
 from virnucpro.data.dataloader_utils import create_async_dataloader
 from virnucpro.pipeline.async_inference import AsyncInferenceRunner
 from virnucpro.utils.precision import should_use_fp16
+from virnucpro.pipeline.checkpoint_writer import resume_from_checkpoints
 
 
 def gpu_worker(
@@ -70,6 +82,11 @@ def gpu_worker(
             - 'token_budget': Max tokens per batch (default: None for auto)
             - 'enable_fp16': Use FP16 precision (default: True)
                 Note: VIRNUCPRO_DISABLE_FP16 env var overrides this for safety-critical rollback
+            - 'enable_checkpointing': Enable checkpoint support (default: True)
+            - 'force_restart': Ignore existing checkpoints (default: False)
+            - 'checkpoint_dir': Base checkpoint directory (default: output_dir/checkpoints)
+            - 'checkpoint_seq_threshold': Sequences before checkpoint (default: 10000)
+            - 'checkpoint_time_threshold': Seconds before checkpoint (default: 300.0)
 
     Note:
         CUDA_VISIBLE_DEVICES already set by parent process.
@@ -85,12 +102,32 @@ def gpu_worker(
             'rank': int,
             'status': 'complete',
             'shard_path': str,
-            'num_sequences': int
+            'num_sequences': int,
+            'checkpointing_enabled': bool,
+            'resumed_sequences': int
         }
-        Failure: {
+        Failure (OOM): {
             'rank': int,
             'status': 'failed',
-            'error': str
+            'error': 'cuda_oom',
+            'error_message': str,
+            'retry_recommended': True,
+            'reduce_batch_size': True
+        }
+        Failure (CUDA runtime): {
+            'rank': int,
+            'status': 'failed',
+            'error': 'cuda_runtime',
+            'error_message': str,
+            'retry_recommended': True,
+            'circuit_breaker': True
+        }
+        Failure (Generic): {
+            'rank': int,
+            'status': 'failed',
+            'error': str,
+            'error_message': str,
+            'retry_recommended': bool
         }
     """
     # Step 1: Setup logging FIRST (before any other operations)
@@ -100,18 +137,93 @@ def gpu_worker(
     logger.info(f"Worker {rank}/{world_size} starting")
     logger.info(f"Log file: {log_file}")
 
+    # Reference to runner for SIGTERM handler (set later)
+    runner = None
+
     try:
         # Step 2: Initialize CUDA
         device = torch.device('cuda:0')  # Always 0 due to CUDA_VISIBLE_DEVICES
         torch.cuda.set_device(device)
         logger.info(f"CUDA device: {torch.cuda.get_device_name(0)}")
 
-        # Step 3: Load sequence index and get assigned indices
+        # Step 3: Extract checkpoint configuration
+        enable_checkpointing = model_config.get('enable_checkpointing', True)
+        force_restart = model_config.get('force_restart', False)
+        checkpoint_base_dir = Path(model_config.get('checkpoint_dir', output_dir / "checkpoints"))
+        checkpoint_seq_threshold = model_config.get('checkpoint_seq_threshold', 10000)
+        checkpoint_time_threshold = model_config.get('checkpoint_time_threshold', 300.0)
+
+        # Per-shard checkpoint isolation (prevents cross-GPU conflicts)
+        checkpoint_dir = checkpoint_base_dir / f"shard_{rank}"
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+        logger.info(
+            f"Rank {rank}: Checkpointing enabled={enable_checkpointing}, "
+            f"dir={checkpoint_dir}, force_restart={force_restart}"
+        )
+
+        # Step 4: Load manifest (if checkpointing enabled)
+        manifest = None
+        if enable_checkpointing:
+            from virnucpro.pipeline.checkpoint_manifest import CheckpointManifest
+            manifest_path = checkpoint_base_dir / "manifest.json"
+            try:
+                manifest = CheckpointManifest.load(manifest_path)
+                logger.info(f"Rank {rank}: Loaded checkpoint manifest from {manifest_path}")
+            except FileNotFoundError:
+                # First run or fresh start - coordinator will create manifest
+                logger.info(f"Rank {rank}: No existing manifest, will create on first checkpoint")
+
+        # Step 5: Resume from checkpoints (before loading index)
+        resumed_ids: Set[str] = set()
+        resumed_embeddings = None
+        if enable_checkpointing and not force_restart:
+            logger.info(f"Rank {rank}: Checking for existing checkpoints in {checkpoint_dir}")
+            resumed_ids_list, resumed_embs, resume_batch_idx, corrupted_ids = resume_from_checkpoints(
+                checkpoint_dir, rank, force_restart
+            )
+
+            if corrupted_ids:
+                logger.warning(
+                    f"Rank {rank}: Checkpoint corruption detected - {len(corrupted_ids)} sequences "
+                    f"need reprocessing (from batches after corruption point)"
+                )
+                # Corrupted sequences will be reprocessed (not in resumed_ids)
+
+            if resumed_ids_list:
+                resumed_ids = set(resumed_ids_list)
+                resumed_embeddings = resumed_embs  # numpy array
+                logger.info(
+                    f"Rank {rank}: Resuming from {resume_batch_idx} checkpoints, "
+                    f"{len(resumed_ids)} sequences already processed"
+                )
+
+        # Step 6: Load sequence index and filter out already-processed sequences
         logger.info(f"Loading index: {index_path}")
         indices = get_worker_indices(index_path, rank, world_size)
-        logger.info(f"Assigned {len(indices)} sequences")
 
-        # Step 4: Load model
+        # Filter out already-processed sequences (prevents duplicates)
+        if resumed_ids:
+            original_count = len(indices)
+            # Load full index to access sequence metadata
+            index_data = load_sequence_index(index_path)
+            sequences = index_data['sequences']
+
+            # Create filtered indices containing only unprocessed sequences
+            filtered_indices = [
+                i for i in indices
+                if sequences[i]['sequence_id'] not in resumed_ids
+            ]
+
+            logger.info(
+                f"Rank {rank}: Filtered index from {original_count} to {len(filtered_indices)} sequences "
+                f"({len(resumed_ids)} already processed)"
+            )
+            indices = filtered_indices
+        else:
+            logger.info(f"Assigned {len(indices)} sequences")
+
+        # Step 7: Load model
         model_type = model_config['model_type']
         logger.info(f"Loading model: {model_type}")
 
@@ -152,7 +264,7 @@ def gpu_worker(
         else:
             raise ValueError(f"Unsupported model type: {model_type}")
 
-        # Step 5: Create dataset and dataloader
+        # Step 8: Create dataset and dataloader
         logger.info("Creating dataset and dataloader")
         dataset = IndexBasedDataset(index_path, indices)
         collator = VarlenCollator(batch_converter)
@@ -166,41 +278,61 @@ def gpu_worker(
             f"token_budget={model_config.get('token_budget', 'auto')}"
         )
 
-        # Step 6: Run async inference
+        # Step 9: Compute input fingerprint for cross-run validation
+        input_fingerprint = hashlib.sha256(str(index_path).encode()).hexdigest()[:16]
+
+        # Step 10: Create AsyncInferenceRunner with checkpoint configuration
         logger.info("Starting inference")
-        runner = AsyncInferenceRunner(model, device)
+        runner = AsyncInferenceRunner(
+            model, device,
+            checkpoint_dir=checkpoint_dir if enable_checkpointing else None,
+            rank=rank,
+            checkpoint_seq_threshold=checkpoint_seq_threshold,
+            checkpoint_time_threshold=checkpoint_time_threshold,
+            manifest=manifest,
+            input_fingerprint=input_fingerprint,
+        )
+
+        # Step 11: Register SIGTERM handler for spot preemption
+        if enable_checkpointing:
+            def sigterm_handler(signum, frame):
+                logger.warning(f"Rank {rank}: SIGTERM received (spot preemption), saving emergency checkpoint")
+                if runner and runner._checkpointing_enabled:
+                    # Trigger emergency checkpoint
+                    runner._write_checkpoint(reason="emergency_sigterm")
+                    runner.writer.wait_all(timeout=30)
+                sys.exit(143)  # Standard SIGTERM exit code
+
+            signal.signal(signal.SIGTERM, sigterm_handler)
+            logger.info(f"Rank {rank}: SIGTERM handler registered for spot instance support")
+
+        # Step 12: Run async inference
         all_embeddings = []
         all_ids = []
 
         batch_idx = 0
-        try:
-            for result in runner.run(dataloader):
-                batch_idx += 1
-                all_embeddings.append(result.embeddings)
-                all_ids.extend(result.sequence_ids)
-        except RuntimeError as e:
-            if "Numerical instability" in str(e):
-                # Log which sequences failed for debugging
-                logger.error(
-                    f"Rank {rank}: NaN/Inf detected in batch {batch_idx}. "
-                    f"Error: {e}"
-                )
-                # Report failure to orchestrator
-                results_queue.put({
-                    "rank": rank,
-                    "status": "numerical_instability",
-                    "failed_batch": batch_idx,
-                    "error": str(e)
-                })
-                # Fail this worker - orchestrator handles partial results (Phase 7 pattern)
-                sys.exit(1)
-            else:
-                # Re-raise unexpected errors
-                raise
+        for result in runner.run(dataloader):
+            # Skip resumed data marker (batch_idx == -1)
+            if result.batch_idx == -1:
+                logger.info(f"Rank {rank}: Yielded resumed data ({len(result.sequence_ids)} sequences)")
+                continue
 
-        logger.info(f"Inference complete: {len(all_ids)} sequences")
+            batch_idx += 1
+            all_embeddings.append(result.embeddings)
+            all_ids.extend(result.sequence_ids)
 
-        # Step 7: Save shard HDF5
+        logger.info(f"Inference complete: {len(all_ids)} new sequences")
+
+        # Step 13: Assemble final shard from resumed + new embeddings
+        if resumed_embeddings is not None:
+            logger.info(f"Rank {rank}: Merging {len(resumed_ids)} resumed + {len(all_ids)} new sequences")
+            # Resumed embeddings are numpy, new are torch tensors
+            all_embeddings.insert(0, torch.from_numpy(resumed_embeddings))
+            all_ids = list(resumed_ids) + all_ids
+
+        logger.info(f"Final shard: {len(all_ids)} total sequences")
+
+        # Step 14: Save shard HDF5
         shard_path = output_dir / f"shard_{rank}.h5"
         logger.info(f"Saving shard: {shard_path}")
 
@@ -219,22 +351,76 @@ def gpu_worker(
 
         logger.info(f"Shard saved: {shard_path} ({len(all_ids)} sequences)")
 
-        # Step 8: Report success
+        # Step 15: Report success
         result_status = {
             'rank': rank,
             'status': 'complete',
             'shard_path': str(shard_path),
-            'num_sequences': len(all_ids)
+            'num_sequences': len(all_ids),
+            'checkpointing_enabled': enable_checkpointing,
+            'resumed_sequences': len(resumed_ids) if resumed_ids else 0,
         }
         results_queue.put(result_status)
         logger.info(f"Worker {rank} completed successfully")
 
-    except Exception as e:
-        logger.exception(f"Worker {rank} failed: {e}")
+    except torch.cuda.OutOfMemoryError as e:
+        # OOM: Reduce batch size and retry (not implemented here, needs DataLoader config)
+        logger.error(
+            f"Rank {rank}: CUDA OOM error - {e}\n"
+            f"GPU memory: {torch.cuda.memory_allocated(device) / 1e9:.2f}GB allocated, "
+            f"{torch.cuda.max_memory_allocated(device) / 1e9:.2f}GB peak"
+        )
         result_status = {
             'rank': rank,
             'status': 'failed',
-            'error': str(e)
+            'error': 'cuda_oom',
+            'error_message': str(e),
+            'retry_recommended': True,
+            'reduce_batch_size': True,
+        }
+        results_queue.put(result_status)
+        sys.exit(1)
+
+    except RuntimeError as e:
+        if 'CUDA' in str(e) or 'assert' in str(e).lower():
+            # CUDA error or assertion - likely poison input
+            logger.error(
+                f"Rank {rank}: CUDA runtime error (possible poison input) - {e}\n"
+                f"Last batch info: {len(all_ids)} sequences processed so far"
+            )
+            result_status = {
+                'rank': rank,
+                'status': 'failed',
+                'error': 'cuda_runtime',
+                'error_message': str(e),
+                'retry_recommended': True,
+                'circuit_breaker': True,  # Trigger circuit breaker after 2 attempts
+            }
+        else:
+            # Generic runtime error
+            logger.error(f"Rank {rank}: Runtime error - {e}", exc_info=True)
+            result_status = {
+                'rank': rank,
+                'status': 'failed',
+                'error': 'runtime',
+                'error_message': str(e),
+                'retry_recommended': True,
+            }
+        results_queue.put(result_status)
+        sys.exit(1)
+
+    except Exception as e:
+        # Unexpected error - full diagnostics
+        logger.error(
+            f"Rank {rank}: Unexpected error during inference",
+            exc_info=True
+        )
+        result_status = {
+            'rank': rank,
+            'status': 'failed',
+            'error': 'unexpected',
+            'error_message': str(e),
+            'retry_recommended': False,
         }
         results_queue.put(result_status)
         sys.exit(1)
