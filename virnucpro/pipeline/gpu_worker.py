@@ -158,12 +158,9 @@ def gpu_worker(
             f"base_dir={checkpoint_base_dir}, force_restart={force_restart}"
         )
 
-        # Per-shard checkpoint isolation (prevents cross-GPU conflicts)
-        if enable_checkpointing:
-            checkpoint_dir = checkpoint_base_dir / f"shard_{rank}"
-            checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        else:
-            checkpoint_dir = None
+        # Pass base checkpoint directory to AsyncInferenceRunner
+        # AsyncInferenceRunner will create shard-specific subdirectory (shard_{rank})
+        checkpoint_dir = checkpoint_base_dir if enable_checkpointing else None
 
         # Step 4: Load manifest (if checkpointing enabled)
         manifest = None
