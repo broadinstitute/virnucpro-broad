@@ -94,12 +94,15 @@ def get_checkpoint_details(checkpoint_dir: Path):
         # Count sequences from checkpoint metadata
         total_seqs = 0
         for ckpt_file in sorted(checkpoints):
+            done_marker = ckpt_file.parent / f"{ckpt_file.name}.done"
+            if not done_marker.exists():
+                print(f"WARNING: Checkpoint {ckpt_file} missing .done marker - may be incomplete")
             try:
                 import torch
                 data = torch.load(ckpt_file, map_location='cpu')
                 total_seqs += len(data['sequence_ids'])
-            except:
-                pass
+            except Exception as e:
+                print(f"WARNING: Failed to load checkpoint {ckpt_file}: {e}")
 
         details[f"shard_{shard_num}"] = {
             'checkpoints': len(checkpoints),
@@ -128,6 +131,36 @@ def verify_output(output_path: Path, expected_count: int):
     }
 
 
+def verify_checkpoint_integrity(checkpoint_dir: Path, expected_hidden_dim: int = 128):
+    """Spot-check checkpoint data integrity."""
+    import torch
+    checkpoint_files = list(checkpoint_dir.glob("shard_*/batch_*.pt"))
+    if not checkpoint_files:
+        print("  ⚠ No checkpoint files to verify")
+        return True
+
+    sample_ckpt = checkpoint_files[0]
+    try:
+        data = torch.load(sample_ckpt, map_location='cpu')
+        if 'embeddings' in data:
+            shape = data['embeddings'].shape
+            if len(shape) == 2 and shape[1] == expected_hidden_dim:
+                print(f"  ✓ Checkpoint integrity: embeddings shape {shape}")
+                return True
+            else:
+                print(f"  ⚠ Unexpected embeddings shape: {shape} (expected [*, {expected_hidden_dim}])")
+                return False
+        elif 'sequence_embeddings' in data:
+            print(f"  ✓ Checkpoint integrity: found sequence_embeddings")
+            return True
+        else:
+            print(f"  ⚠ No embeddings found in checkpoint")
+            return False
+    except Exception as e:
+        print(f"  ⚠ Checkpoint integrity check failed: {e}")
+        return False
+
+
 def main():
     mp.set_start_method('spawn', force=True)
 
@@ -144,8 +177,8 @@ def main():
             sys.exit(1)
         num_gpus = min(torch.cuda.device_count(), 2)
         print(f"✓ Using {num_gpus} GPU(s)")
-    except ImportError:
-        print("ERROR: PyTorch not available")
+    except Exception as e:
+        print(f"ERROR: CUDA validation failed: {e}")
         sys.exit(1)
 
     # Setup test environment
@@ -211,8 +244,8 @@ def main():
                 else:
                     print("Process completed before we could kill it")
                     print("(500 sequences processed too quickly - may need more sequences)")
-            except:
-                pass
+            except Exception as e:
+                print(f"WARNING: Could not get result from queue: {e}")
             break
 
     if checkpoint_count == 0:
@@ -250,6 +283,9 @@ def main():
 
     print(f"  Total checkpointed: {total_checkpointed_seqs}/{num_sequences} sequences")
     print(f"  Phase 1 duration: {elapsed_phase1:.1f}s")
+
+    print("\nCheckpoint data integrity verification:")
+    verify_checkpoint_integrity(checkpoint_dir)
 
     # ========================================================================
     # PHASE 2: Resume from checkpoints
@@ -387,6 +423,9 @@ def main():
         print("  • All sequences processed exactly once")
         print("  • No data loss, no duplicates")
         print()
+        import shutil
+        shutil.rmtree(test_dir)
+        print(f"Cleaned up: {test_dir}")
         exit_code = 0
     else:
         print(f"FAILURE: {checks_passed}/{total_checks} checks passed")
@@ -394,8 +433,7 @@ def main():
         exit_code = 1
 
     print()
-    print(f"Test artifacts: {test_dir}")
-    print("(Preserved for inspection)")
+    print(f"Preserved for debugging: {test_dir}")
 
     sys.exit(exit_code)
 

@@ -66,13 +66,44 @@ def count_checkpointed_sequences(checkpoint_dir: Path):
     for shard_dir in checkpoint_dir.glob("shard_*"):
         for ckpt_file in shard_dir.glob("batch_*.pt"):
             if not (ckpt_file.parent / f"{ckpt_file.name}.done").exists():
+                print(f"WARNING: Checkpoint {ckpt_file} missing .done marker - may be incomplete")
                 continue  # Skip checkpoints without .done markers
             try:
                 data = torch.load(ckpt_file, map_location='cpu', weights_only=False)
                 total += len(data.get('sequence_ids', []))
-            except:
-                pass
+            except Exception as e:
+                print(f"WARNING: Failed to load checkpoint {ckpt_file}: {e}")
     return total
+
+
+def verify_checkpoint_integrity(checkpoint_dir: Path, expected_hidden_dim: int = 128):
+    """Spot-check checkpoint data integrity."""
+    import torch
+    checkpoint_files = list(checkpoint_dir.glob("shard_*/batch_*.pt"))
+    if not checkpoint_files:
+        print("  ⚠ No checkpoint files to verify")
+        return True
+
+    sample_ckpt = checkpoint_files[0]
+    try:
+        data = torch.load(sample_ckpt, map_location='cpu')
+        if 'embeddings' in data:
+            shape = data['embeddings'].shape
+            if len(shape) == 2 and shape[1] == expected_hidden_dim:
+                print(f"  ✓ Checkpoint integrity: embeddings shape {shape}")
+                return True
+            else:
+                print(f"  ⚠ Unexpected embeddings shape: {shape} (expected [*, {expected_hidden_dim}])")
+                return False
+        elif 'sequence_embeddings' in data:
+            print(f"  ✓ Checkpoint integrity: found sequence_embeddings")
+            return True
+        else:
+            print(f"  ⚠ No embeddings found in checkpoint")
+            return False
+    except Exception as e:
+        print(f"  ⚠ Checkpoint integrity check failed: {e}")
+        return False
 
 
 def main():
@@ -90,8 +121,8 @@ def main():
             print("ERROR: No CUDA GPUs available")
             sys.exit(1)
         num_gpus = min(torch.cuda.device_count(), 2)
-    except ImportError:
-        print("ERROR: PyTorch not available")
+    except Exception as e:
+        print(f"ERROR: CUDA validation failed: {e}")
         sys.exit(1)
 
     # Setup
@@ -159,6 +190,9 @@ def main():
     # Count what was checkpointed
     checkpointed = count_checkpointed_sequences(checkpoint_dir)
     print(f"\nCheckpointed: {checkpointed}/{num_sequences} sequences ({checkpointed/num_sequences*100:.1f}%)")
+
+    print("\nCheckpoint data integrity verification:")
+    verify_checkpoint_integrity(checkpoint_dir)
 
     if checkpointed == 0:
         print("ERROR: No sequences checkpointed")
@@ -262,14 +296,15 @@ def main():
         print(f"  • Resume completed processing remaining sequences")
         print(f"  • Final output: {actual} sequences (expected {num_sequences})")
         print(f"  • No duplicates: {unique} unique sequences")
+        import shutil
+        shutil.rmtree(test_dir)
+        print(f"\nCleaned up: {test_dir}")
         exit_code = 0
     else:
         print(f"FAILURE: {checks}/3 checks passed")
         print("=" * 80)
+        print(f"\nPreserved for debugging: {test_dir}")
         exit_code = 1
-
-    print(f"\nTest directory: {test_dir}")
-    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
