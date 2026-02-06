@@ -42,6 +42,48 @@ class TestShouldUseFP16:
 
         assert result is False, "should_use_fp16() should return False when VIRNUCPRO_DISABLE_FP16=true"
 
+    def test_should_use_fp16_disabled_true_uppercase(self):
+        """Set VIRNUCPRO_DISABLE_FP16=TRUE (uppercase), verify returns False."""
+        with patch.dict(os.environ, {'VIRNUCPRO_DISABLE_FP16': 'TRUE'}):
+            result = should_use_fp16()
+
+        assert result is False, "should_use_fp16() should return False when VIRNUCPRO_DISABLE_FP16=TRUE"
+
+    def test_should_use_fp16_disabled_true_mixed_case(self):
+        """Set VIRNUCPRO_DISABLE_FP16=True (mixed case), verify returns False."""
+        with patch.dict(os.environ, {'VIRNUCPRO_DISABLE_FP16': 'True'}):
+            result = should_use_fp16()
+
+        assert result is False, "should_use_fp16() should return False when VIRNUCPRO_DISABLE_FP16=True"
+
+    def test_should_use_fp16_disabled_yes(self):
+        """Set VIRNUCPRO_DISABLE_FP16=yes, verify returns False."""
+        with patch.dict(os.environ, {'VIRNUCPRO_DISABLE_FP16': 'yes'}):
+            result = should_use_fp16()
+
+        assert result is False, "should_use_fp16() should return False when VIRNUCPRO_DISABLE_FP16=yes"
+
+    def test_should_use_fp16_disabled_yes_uppercase(self):
+        """Set VIRNUCPRO_DISABLE_FP16=YES (uppercase), verify returns False."""
+        with patch.dict(os.environ, {'VIRNUCPRO_DISABLE_FP16': 'YES'}):
+            result = should_use_fp16()
+
+        assert result is False, "should_use_fp16() should return False when VIRNUCPRO_DISABLE_FP16=YES"
+
+    def test_should_use_fp16_disabled_with_whitespace(self):
+        """Set VIRNUCPRO_DISABLE_FP16= 1  (with spaces), verify returns False."""
+        with patch.dict(os.environ, {'VIRNUCPRO_DISABLE_FP16': ' 1 '}):
+            result = should_use_fp16()
+
+        assert result is False, "should_use_fp16() should return False when VIRNUCPRO_DISABLE_FP16=' 1 '"
+
+    def test_should_use_fp16_disabled_with_whitespace_true(self):
+        """Set VIRNUCPRO_DISABLE_FP16= true  (with spaces), verify returns False."""
+        with patch.dict(os.environ, {'VIRNUCPRO_DISABLE_FP16': ' true '}):
+            result = should_use_fp16()
+
+        assert result is False, "should_use_fp16() should return False when VIRNUCPRO_DISABLE_FP16=' true '"
+
 
 class TestCheckNumericalStability:
     """Test check_numerical_stability() NaN/Inf detection."""

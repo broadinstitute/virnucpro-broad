@@ -33,7 +33,7 @@ def should_use_fp16() -> bool:
         # Diagnostic mode (FP32 for troubleshooting)
         $ VIRNUCPRO_DISABLE_FP16=1 python -m virnucpro predict input.fasta
     """
-    disable = os.getenv("VIRNUCPRO_DISABLE_FP16", "").lower() in ("1", "true", "yes")
+    disable = os.getenv("VIRNUCPRO_DISABLE_FP16", "").strip().lower() in ("1", "true", "yes")
     if disable:
         logger.warning(
             "FP16 precision DISABLED via VIRNUCPRO_DISABLE_FP16. "
