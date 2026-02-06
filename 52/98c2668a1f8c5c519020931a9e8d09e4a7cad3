@@ -1,0 +1,24 @@
+tests/benchmarks/test_fp16_throughput.py
+  f48f37ba302edf3f 127-131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "5298c2668a1f8c5c519020931a9e8d09e4a7cad3",
+  "prompts": {
+    "f48f37ba302edf3f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a0ed9c92-a5ae-40a2-bd92-52b51e3d1994",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 6,
+      "total_deletions": 4,
+      "accepted_lines": 5,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/d6fbf716715bb40db5da77bd95e4e3a8d234a3bf94ed704fa327b48408bb2c6f"
+    }
+  }
+}
