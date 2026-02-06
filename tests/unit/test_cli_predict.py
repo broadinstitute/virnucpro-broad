@@ -21,10 +21,9 @@ except ImportError as e:
     RUNTIME_CONFIG_IMPORT_ERROR = str(e)
 
 if 'esm' not in sys.modules:
-    if not RUNTIME_CONFIG_IMPORTED:
-        sys.modules['esm'] = MagicMock()
-    else:
+    if RUNTIME_CONFIG_IMPORTED:
         raise ImportError("esm module required but not available")
+    sys.modules['esm'] = MagicMock()
 
 
 @pytest.fixture
