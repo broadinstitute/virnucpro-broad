@@ -153,14 +153,17 @@ def gpu_worker(
         checkpoint_seq_threshold = model_config.get('checkpoint_seq_threshold', 10000)
         checkpoint_time_threshold = model_config.get('checkpoint_time_threshold', 300.0)
 
-        # Per-shard checkpoint isolation (prevents cross-GPU conflicts)
-        checkpoint_dir = checkpoint_base_dir / f"shard_{rank}"
-        checkpoint_dir.mkdir(parents=True, exist_ok=True)
-
         logger.info(
             f"Rank {rank}: Checkpointing enabled={enable_checkpointing}, "
-            f"dir={checkpoint_dir}, force_restart={force_restart}"
+            f"base_dir={checkpoint_base_dir}, force_restart={force_restart}"
         )
+
+        # Per-shard checkpoint isolation (prevents cross-GPU conflicts)
+        if enable_checkpointing:
+            checkpoint_dir = checkpoint_base_dir / f"shard_{rank}"
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            checkpoint_dir = None
 
         # Step 4: Load manifest (if checkpointing enabled)
         manifest = None
@@ -188,13 +191,13 @@ def gpu_worker(
                     f"Rank {rank}: Checkpoint corruption detected - {len(corrupted_ids)} sequences "
                     f"need reprocessing (from batches after corruption point)"
                 )
-                # Corrupted sequences will be reprocessed (not in resumed_ids)
+                resumed_ids.update(corrupted_ids)
 
             if resumed_ids_list:
-                resumed_ids = set(resumed_ids_list)
+                resumed_ids.update(resumed_ids_list)
                 resumed_embeddings = resumed_embs  # numpy array
                 logger.info(
-                    f"Rank {rank}: Resuming from {resume_batch_idx} checkpoints, "
+                    f"Rank {rank}: Resuming from {len(resumed_ids_list)} checkpoints, "
                     f"{len(resumed_ids)} sequences already processed"
                 )
 
@@ -222,6 +225,9 @@ def gpu_worker(
             indices = filtered_indices
         else:
             logger.info(f"Assigned {len(indices)} sequences")
+
+        if not indices:
+            logger.warning(f"Rank {rank}: All sequences already processed, creating empty shard")
 
         # Step 7: Load model
         model_type = model_config['model_type']
@@ -293,15 +299,14 @@ def gpu_worker(
             input_fingerprint=input_fingerprint,
         )
 
-        # Step 11: Register SIGTERM handler for spot preemption
+        # Step 11: Register SIGTERM handler for spot preemption (after runner creation to avoid race)
         if enable_checkpointing:
             def sigterm_handler(signum, frame):
                 logger.warning(f"Rank {rank}: SIGTERM received (spot preemption), saving emergency checkpoint")
                 if runner and runner._checkpointing_enabled:
-                    # Trigger emergency checkpoint
                     runner._write_checkpoint(reason="emergency_sigterm")
                     runner.writer.wait_all(timeout=30)
-                sys.exit(143)  # Standard SIGTERM exit code
+                sys.exit(143)
 
             signal.signal(signal.SIGTERM, sigterm_handler)
             logger.info(f"Rank {rank}: SIGTERM handler registered for spot instance support")
