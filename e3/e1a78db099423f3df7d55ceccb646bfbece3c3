@@ -1,0 +1,28 @@
+.planning/ROADMAP.md
+  7e45c47f3a6392bb 250
+.planning/STATE.md
+  7e45c47f3a6392bb 14-16,18,41,44-45
+.planning/phases/10.1-cli-integration-for-v2-0-architecture/10.1-VERIFICATION.md
+  7e45c47f3a6392bb 4-7,14-16,31,33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "e3e1a78db099423f3df7d55ceccb646bfbece3c3",
+  "prompts": {
+    "7e45c47f3a6392bb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "422db091-069f-40aa-9fcf-83272c2622f6",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 17,
+      "total_deletions": 24,
+      "accepted_lines": 17,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/4cf4d54d6975c25fb5de75a6f2d4517abb30d7630d25b478f0fdac3925c11947"
+    }
+  }
+}
