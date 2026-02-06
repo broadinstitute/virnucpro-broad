@@ -11,9 +11,12 @@ import multiprocessing
 import os
 import queue
 import signal
-import sys
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple, Set
+from typing import Callable, Dict, List, Optional, Tuple, Set, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from virnucpro.pipeline.runtime_config import RuntimeConfig
+    from virnucpro.pipeline.checkpoint_manifest import CheckpointManifest
 
 logger = logging.getLogger('virnucpro.pipeline.gpu_coordinator')
 
@@ -78,10 +81,18 @@ class GPUProcessCoordinator:
 
         # SIGTERM coordination (Issue 6)
         self.shutdown_requested = False
-        signal.signal(signal.SIGTERM, self._sigterm_handler)
-        signal.signal(signal.SIGINT, self._sigterm_handler)
 
         logger.info(f"GPUProcessCoordinator initialized: {world_size} workers")
+
+    def setup_signal_handlers(self) -> None:
+        """Register signal handlers for graceful shutdown.
+
+        Called after confirming this is the coordinator process,
+        not a forked child process.
+        """
+        signal.signal(signal.SIGTERM, self._sigterm_handler)
+        signal.signal(signal.SIGINT, self._sigterm_handler)
+        logger.info("Signal handlers registered for graceful shutdown")
 
     def spawn_workers(
         self,
@@ -198,14 +209,25 @@ class GPUProcessCoordinator:
 
         # Signal all workers to checkpoint and exit
         # Workers will catch their own SIGTERM (propagated by OS) and save emergency checkpoint
-        # Coordinator waits for checkpoint completion
-        logger.info("Waiting 30s for workers to save emergency checkpoints...")
-        import time
-        time.sleep(30)
+        # Spawn a thread to wait for checkpoints to avoid blocking signal handling
+        import threading
+        wait_thread = threading.Thread(
+            target=self._wait_for_worker_checkpoints,
+            daemon=True
+        )
+        wait_thread.start()
+        wait_thread.join(timeout=30)
 
         # Terminate remaining workers
         self.terminate_all()
-        sys.exit(143)  # Standard SIGTERM exit code
+        os._exit(143)  # Standard SIGTERM exit code
+
+    def _wait_for_worker_checkpoints(self) -> None:
+        """Wait for workers to save emergency checkpoints (runs in separate thread)."""
+        import time
+        logger.info("Waiting for workers to save emergency checkpoints...")
+        time.sleep(30)
+        logger.info("Checkpoint wait period complete")
 
     def _classify_error(self, status: dict) -> str:
         """Classify error type from worker status for appropriate retry policy.
@@ -269,7 +291,7 @@ class GPUProcessCoordinator:
                 f"Rank {rank}: Checkpoint/marker mismatch "
                 f"({len(checkpoints)} .pt files, {len(done_markers)} .done markers)"
             )
-            # Allow resume - worker will detect and handle corrupted checkpoints
+            return False
 
         return True
 
@@ -457,8 +479,15 @@ class GPUProcessCoordinator:
                 f"Rank {rank}: OOM retry in {delay:.1f}s "
                 f"(will signal batch size reduction)"
             )
+        elif error_type == "poison_input":
+            # Immediate retry - circuit breaker will catch persistent failures
+            delay = 1.0
+            logger.warning(
+                f"Rank {rank}: Poison input retry in {delay:.1f}s "
+                f"(circuit breaker will track failures)"
+            )
         else:
-            # Transient/poison: standard exponential backoff
+            # Transient: standard exponential backoff
             delay = min(1.0 * (2 ** retry_count), 60.0)
             logger.info(f"Rank {rank}: Retry in {delay:.1f}s")
 
@@ -509,22 +538,32 @@ class GPUProcessCoordinator:
     def _get_worker_status(self, rank: int) -> dict:
         """Get worker status from results queue.
 
+        First polls the results queue for in-progress status updates,
+        then falls back to exitcode check for terminated workers.
+
         Returns:
             Status dict with 'status', 'error', 'error_message', 'batch_idx', etc.
         """
         # Poll results_queue for this rank's status
-        # This requires the queue to be checked periodically
-        # Implementation depends on existing collect_results pattern
+        while not self.results_queue.empty():
+            try:
+                item = self.results_queue.get_nowait()
+                # Check if this message is for our rank
+                if item.get('rank') == rank:
+                    return item
+            except queue.Empty:
+                break
 
-        # Simplified: check exitcode if available
+        # Fallback: check exitcode if worker has terminated
         worker = self.workers.get(rank)
         if worker:
-            exitcode = worker.exitcode
-            if exitcode == 0:
-                return {'status': 'complete', 'rank': rank}
-            elif exitcode == 143:
-                return {'status': 'failed', 'error': 'sigterm', 'exitcode': 143, 'rank': rank}
-            else:
-                return {'status': 'failed', 'error': 'unknown', 'exitcode': exitcode, 'rank': rank}
+            if not worker.is_alive():
+                exitcode = worker.exitcode
+                if exitcode == 0:
+                    return {'status': 'complete', 'rank': rank}
+                elif exitcode == 143:
+                    return {'status': 'failed', 'error': 'sigterm', 'exitcode': 143, 'rank': rank}
+                else:
+                    return {'status': 'failed', 'error': 'unknown', 'exitcode': exitcode, 'rank': rank}
 
         return {'status': 'unknown', 'rank': rank}
