@@ -167,12 +167,12 @@ def gpu_worker(
         if enable_checkpointing:
             from virnucpro.pipeline.checkpoint_manifest import CheckpointManifest
             manifest_path = checkpoint_base_dir / "manifest.json"
-            try:
-                manifest = CheckpointManifest.load(manifest_path)
-                logger.info(f"Rank {rank}: Loaded checkpoint manifest from {manifest_path}")
-            except FileNotFoundError:
+            if manifest_path.exists():
+                manifest = CheckpointManifest(manifest_path)
+                logger.info(f"Rank {rank}: Using checkpoint manifest at {manifest_path}")
+            else:
                 # First run or fresh start - coordinator will create manifest
-                logger.info(f"Rank {rank}: No existing manifest, will create on first checkpoint")
+                logger.info(f"Rank {rank}: No existing manifest, checkpointing without manifest coordination")
 
         # Step 5: Resume from checkpoints (before loading index)
         resumed_ids: Set[str] = set()
@@ -363,26 +363,44 @@ def gpu_worker(
         results_queue.put(result_status)
         logger.info(f"Worker {rank} completed successfully")
 
-    except torch.cuda.OutOfMemoryError as e:
-        # OOM: Reduce batch size and retry (not implemented here, needs DataLoader config)
-        logger.error(
-            f"Rank {rank}: CUDA OOM error - {e}\n"
-            f"GPU memory: {torch.cuda.memory_allocated(device) / 1e9:.2f}GB allocated, "
-            f"{torch.cuda.max_memory_allocated(device) / 1e9:.2f}GB peak"
-        )
-        result_status = {
-            'rank': rank,
-            'status': 'failed',
-            'error': 'cuda_oom',
-            'error_message': str(e),
-            'retry_recommended': True,
-            'reduce_batch_size': True,
-        }
-        results_queue.put(result_status)
-        sys.exit(1)
-
     except RuntimeError as e:
-        if 'CUDA' in str(e) or 'assert' in str(e).lower():
+        error_str = str(e)
+
+        # Check for numerical instability first (Phase 8 FP16 validation)
+        if "Numerical instability" in error_str:
+            # Log which sequences failed for debugging
+            logger.error(
+                f"Rank {rank}: NaN/Inf detected in batch {batch_idx}. "
+                f"Error: {e}"
+            )
+            # Report failure to orchestrator
+            result_status = {
+                "rank": rank,
+                "status": "numerical_instability",
+                "failed_batch": batch_idx,
+                "error": error_str
+            }
+        # Check for OOM (OutOfMemoryError is a RuntimeError subclass)
+        elif 'out of memory' in error_str.lower() or 'oom' in error_str.lower():
+            # OOM: Reduce batch size and retry
+            try:
+                mem_allocated = torch.cuda.memory_allocated(device) / 1e9
+                mem_peak = torch.cuda.max_memory_allocated(device) / 1e9
+                mem_info = f"GPU memory: {mem_allocated:.2f}GB allocated, {mem_peak:.2f}GB peak"
+            except (AttributeError, TypeError):
+                # CUDA mocked or unavailable
+                mem_info = "GPU memory info unavailable"
+
+            logger.error(f"Rank {rank}: CUDA OOM error - {e}\n{mem_info}")
+            result_status = {
+                'rank': rank,
+                'status': 'failed',
+                'error': error_str,  # Backward compatibility: error contains message
+                'error_type': 'cuda_oom',  # New: categorized error type
+                'retry_recommended': True,
+                'reduce_batch_size': True,
+            }
+        elif 'CUDA' in error_str or 'assert' in error_str.lower():
             # CUDA error or assertion - likely poison input
             logger.error(
                 f"Rank {rank}: CUDA runtime error (possible poison input) - {e}\n"
@@ -391,8 +409,8 @@ def gpu_worker(
             result_status = {
                 'rank': rank,
                 'status': 'failed',
-                'error': 'cuda_runtime',
-                'error_message': str(e),
+                'error': error_str,  # Backward compatibility: error contains message
+                'error_type': 'cuda_runtime',  # New: categorized error type
                 'retry_recommended': True,
                 'circuit_breaker': True,  # Trigger circuit breaker after 2 attempts
             }
@@ -402,8 +420,7 @@ def gpu_worker(
             result_status = {
                 'rank': rank,
                 'status': 'failed',
-                'error': 'runtime',
-                'error_message': str(e),
+                'error': error_str,  # Backward compatibility: error contains message
                 'retry_recommended': True,
             }
         results_queue.put(result_status)
@@ -418,9 +435,7 @@ def gpu_worker(
         result_status = {
             'rank': rank,
             'status': 'failed',
-            'error': 'unexpected',
-            'error_message': str(e),
-            'retry_recommended': False,
+            'error': str(e),  # Backward compatibility: error contains message
         }
         results_queue.put(result_status)
         sys.exit(1)

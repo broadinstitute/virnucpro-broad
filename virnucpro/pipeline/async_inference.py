@@ -104,6 +104,9 @@ class AsyncInferenceRunner:
         model: Model with forward() method (e.g., ESM2WithFlashAttention)
         stream_processor: CUDA stream orchestrator for async ops
         monitor: GPU utilization and DataLoader metrics tracker
+        checkpoint_dir: Base directory for checkpoint files (None if disabled)
+        shard_checkpoint_dir: Shard-specific checkpoint directory (checkpoint_dir/shard_{rank})
+        rank: Shard rank for per-GPU isolation
     """
 
     def __init__(
@@ -130,13 +133,17 @@ class AsyncInferenceRunner:
             enable_streams: Use CUDA streams for I/O overlap (default: True)
             monitor_interval: GPU sampling interval in seconds (default: 1.0)
             log_file: Path for GPU metrics log (default: auto-generated)
-            checkpoint_dir: Directory for checkpoint files (None = checkpointing disabled)
+            checkpoint_dir: Path for checkpoint files (None = checkpointing disabled)
             rank: Shard rank for per-GPU isolation (default: 0)
             checkpoint_seq_threshold: Sequence count trigger (default: 10000)
             checkpoint_time_threshold: Time trigger in seconds (default: 300.0)
             manifest: Optional CheckpointManifest for multi-GPU coordination
             input_fingerprint: SHA256 of input data for cross-run validation
             model_config_hash: Hash of model architecture/weights for compatibility checks
+
+        Note:
+            When checkpoint_dir is provided, shard-specific checkpoints will be
+            written to checkpoint_dir/shard_{rank}/
         """
         self.model = model
         self.device = device
@@ -166,7 +173,10 @@ class AsyncInferenceRunner:
         self.rank = rank
         self.manifest = manifest
 
-        if checkpoint_dir is not None:
+        if rank < 0:
+            raise ValueError(f"rank must be non-negative, got {rank}")
+
+        if checkpoint_dir is not None and manifest is None:
             # Create shard-specific directory
             self.shard_checkpoint_dir = checkpoint_dir / f"shard_{rank}"
             self.shard_checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -192,6 +202,9 @@ class AsyncInferenceRunner:
 
             # Store metadata for checkpoints
             self._input_fingerprint = input_fingerprint
+            # Note: _input_fingerprint and _model_config_hash will be validated
+            # on resume to ensure checkpoint compatibility with current run.
+            # Validation logic to be implemented in future commit.
             self._model_config_hash = model_config_hash or self._compute_model_config_hash()
 
             logger.info(
@@ -220,9 +233,11 @@ class AsyncInferenceRunner:
         Returns:
             SHA256 hex digest truncated to 16 chars
         """
-        # Get model dtype and total parameter count
-        model_dtype = str(next(self.model.parameters()).dtype)
-        param_count = sum(p.numel() for p in self.model.parameters())
+        params = list(self.model.parameters())
+        if not params:
+            raise ValueError("Model has no parameters to compute config hash")
+        model_dtype = str(params[0].dtype)
+        param_count = sum(p.numel() for p in params)
 
         # Compute hash of dtype + param_count
         fingerprint = f"{model_dtype}_{param_count}"
