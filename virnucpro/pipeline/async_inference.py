@@ -176,8 +176,8 @@ class AsyncInferenceRunner:
         self.rank = rank
         self.manifest = manifest
 
-        if checkpoint_dir is not None and manifest is None:
-            # Create shard-specific directory
+        if checkpoint_dir is not None:
+            # Create shard-specific directory (always, regardless of manifest)
             self.shard_checkpoint_dir = checkpoint_dir / f"shard_{rank}"
             self.shard_checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -216,6 +216,12 @@ class AsyncInferenceRunner:
             self.trigger = None
             self.writer = None
             self.shard_checkpoint_dir = None
+            self._ckpt_embeddings = []
+            self._ckpt_ids = []
+            self._ckpt_batch_idx = 0
+            self._last_packing_stats = {}
+            self._input_fingerprint = input_fingerprint
+            self._model_config_hash = model_config_hash or self._compute_model_config_hash()
 
         logger.info(
             f"AsyncInferenceRunner initialized on {device} "
@@ -497,7 +503,7 @@ class AsyncInferenceRunner:
             if corrupted_sequence_ids:
                 logger.warning(
                     f"Checkpoint corruption detected: {len(corrupted_sequence_ids)} sequences need reprocessing "
-                    f"(from batches after corruption point)"
+                    f"(from batches after corruption point)\n"
                 )
                 logger.debug(f"Corrupted sequence IDs (first 10): {corrupted_sequence_ids[:10]}")
 
@@ -514,7 +520,8 @@ class AsyncInferenceRunner:
                 )
 
                 # Yield resumed data as InferenceResult (batch_idx=-1 as marker)
-                resumed_embeddings_tensor = torch.from_numpy(resumed_embs).float()
+                model_dtype = next(self.model.parameters()).dtype
+                resumed_embeddings_tensor = torch.from_numpy(resumed_embs).to(model_dtype)
                 yield InferenceResult(
                     sequence_ids=resumed_ids,
                     embeddings=resumed_embeddings_tensor,
@@ -625,9 +632,13 @@ class AsyncInferenceRunner:
 
                     # Check trigger
                     should_checkpoint, reason = self.trigger.should_checkpoint(len(result.sequence_ids))
-                    if should_checkpoint:
-                        self._write_checkpoint(reason)
-                        self.trigger.reset()
+                    if should_checkpoint and reason:
+                        try:
+                            self._write_checkpoint(reason)
+                        except Exception as e:
+                            logger.error(f"Checkpoint write failed: {e}. Continuing without checkpoint.")
+                        else:
+                            self.trigger.reset()
 
                 batch_idx += 1
 
@@ -641,14 +652,20 @@ class AsyncInferenceRunner:
 
             # Final checkpoint (after loop completion)
             if self._checkpointing_enabled and self._ckpt_embeddings:
-                self._write_checkpoint("final")
+                try:
+                    self._write_checkpoint("final")
+                except Exception as e:
+                    logger.error(f"Final checkpoint write failed: {e}. Data may be lost.")
 
         finally:
             # Wait for all async checkpoint writes to complete
-            if self._checkpointing_enabled:
-                self.writer.wait_all(timeout=300)
-                self.writer.shutdown()
-                logger.info("All checkpoint writes completed")
+            if self._checkpointing_enabled and self.writer is not None:
+                try:
+                    self.writer.wait_all(timeout=300)
+                    self.writer.shutdown()
+                    logger.info("All checkpoint writes completed")
+                except Exception as e:
+                    logger.error(f"Error during checkpoint writer shutdown: {e}")
 
             # Synchronize streams before stopping
             self.stream_processor.synchronize()
@@ -688,6 +705,11 @@ class AsyncInferenceRunner:
         # Determine GPU device from model
         device = next(self.model.parameters()).device
 
+        # Synchronize CUDA before capturing memory metrics
+        if device.type == 'cuda':
+            torch.cuda.synchronize(device)
+            torch.cuda.reset_peak_memory_stats(device)
+
         # Build metadata dict
         metadata = {
             'batch_idx': self._ckpt_batch_idx,
@@ -715,10 +737,10 @@ class AsyncInferenceRunner:
             f"Checkpoint {self._ckpt_batch_idx} queued: {len(self._ckpt_ids)} sequences, reason={reason}"
         )
 
-        # Increment batch index and reset accumulators
-        self._ckpt_batch_idx += 1
-        self._ckpt_embeddings = []
+        # Reset accumulators before increment to avoid data loss on error
         self._ckpt_ids = []
+        self._ckpt_embeddings = []
+        self._ckpt_batch_idx += 1
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get inference statistics."""
