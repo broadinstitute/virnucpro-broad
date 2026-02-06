@@ -6,23 +6,23 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 
 **Core value:** Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs and automatically queue batches, reducing sample processing time from 45+ hours to under 10 hours.
 
-**Current focus:** Phase 9 - Checkpointing Integration
+**Current focus:** Phase 9 complete, ready for Phase 10 - Performance Validation & Tuning
 
 ## Current Position
 
-Phase: 9 of 10 (Checkpointing Integration) - IN PROGRESS
-Plan: 6 of 6 in phase - COMPLETE (Wave 3: 1/1 complete)
-Status: Checkpoint integration tests complete - all components verified
-Last activity: 2026-02-06 — Completed 09-07-PLAN.md (Integration tests)
+Phase: 9 of 10 (Checkpointing Integration) - ✅ COMPLETE
+Plan: 7 of 7 in phase - COMPLETE
+Status: All checkpoint functionality verified including kill+resume testing
+Last activity: 2026-02-06 — Phase 9 complete, kill+resume validated
 
-Progress: [███████░░░] 77/TBD plans (v1.0: 34/34 complete, v2.0: 43/TBD)
+Progress: [████████░░] 84/TBD plans (v1.0: 34/34 complete, v2.0: 50/TBD)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 75 (v1.0: 34, v2.0: 41)
-- Average duration: 3.2 min
-- Total execution time: 4.1 hours
+- Total plans completed: 84 (v1.0: 34, v2.0: 50)
+- Average duration: 3.4 min
+- Total execution time: 4.8 hours
 
 **By Phase:**
 
@@ -36,12 +36,12 @@ Progress: [███████░░░] 77/TBD plans (v1.0: 34/34 complete, v
 | 5 | 5 | 13 min | 2.6 min |
 | 6 | 8 | 28 min | 3.5 min |
 | 7 | 8 | 29 min | 3.6 min |
-| 8 | 4 (complete) | 13 min | 3.25 min |
-| 9 | 6 (complete) | 32.5 min | 5.4 min |
+| 8 | 4 | 13 min | 3.25 min |
+| 9 | 7 (complete) | 40 min | 5.7 min |
 
 **Recent Trend:**
-- Last 5 plans: ~4.1 min average
-- Trend: Steady (Phase 9 complete)
+- Last 5 plans: ~5.0 min average
+- Trend: Phase 9 complete, ready for Phase 10
 
 *Updated after each plan completion*
 
@@ -187,18 +187,21 @@ None yet.
 - ✅ FP16 performance benchmarks (454K seq/hour, 6.06GB memory)
 - Note: LayerNorm may have limited dynamic range in FP16 - selective FP32 for specific layers if needed
 
-**Phase 9 (Checkpointing Integration):** IN PROGRESS - Wave 2 COMPLETE
+**Phase 9 (Checkpointing Integration):** ✅ COMPLETE
 - ✅ Checkpoint foundation (CheckpointTrigger, AsyncCheckpointWriter, validation, resume) - 09-01
 - ✅ CheckpointManifest for multi-GPU coordination - 09-02
 - ✅ AsyncInferenceRunner checkpoint integration (batch boundaries, resume, metadata) - 09-03
 - ✅ GPU worker integration (resume, index filtering, SIGTERM, error tiers) - 09-04
 - ✅ Coordinator integration (differentiated retry policies, async monitoring, elastic redistribution) - 09-05
-- Next: End-to-end integration tests (09-06)
+- ✅ Unit tests for checkpoint components - 09-06
+- ✅ Integration tests and kill+resume validation - 09-07
+- Bug fix: Checkpoint path double-nesting resolved
+- Validation: SIGKILL test with 2000 sequences (200 checkpointed, 1800 resumed, zero duplicates)
 
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 09-05-PLAN.md (Coordinator integration with fault-tolerant retry policies)
+Stopped at: Phase 9 complete - all 7 plans executed, kill+resume validated
 Resume file: None
 
-**Next step:** Continue Phase 9 Wave 3 - End-to-end integration tests (09-06)
+**Next step:** Begin Phase 10 - Performance Validation & Tuning

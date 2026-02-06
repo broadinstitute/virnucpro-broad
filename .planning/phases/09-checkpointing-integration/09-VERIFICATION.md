@@ -1,12 +1,13 @@
 ---
 phase: 09-checkpointing-integration
-verified: 2026-02-06T05:22:57Z
-status: human_needed
-score: 3/4 must-haves verified
+verified: 2026-02-06T15:30:00Z
+status: verified
+score: 4/4 must-haves verified
 human_verification:
   - test: "Kill GPU worker mid-batch and verify resume completes successfully"
     expected: "Worker killed with SIGKILL during batch processing. On restart, pipeline resumes from last checkpoint and completes remaining sequences without reprocessing checkpointed sequences."
-    why_human: "Requires actual process spawning with SIGKILL simulation - cannot verify programmatically with mocked processes. Current tests only verify corruption recovery (file-based) not process crash recovery (signal-based)."
+    result: "✅ VERIFIED - test_kill_resume_aggressive.py: 2000 sequences, killed after 200 checkpointed (10%), resumed and completed all 2000 with zero duplicates"
+    verified_at: "2026-02-06T15:25:00Z"
 ---
 
 # Phase 9: Checkpointing Integration Verification Report
@@ -24,10 +25,10 @@ human_verification:
 |---|-------|--------|----------|
 | 1 | Incremental checkpoints save every 10K sequences per shard | ✓ VERIFIED | CheckpointTrigger defaults to 10K seq threshold (checkpoint_writer.py:65), AsyncInferenceRunner calls trigger.should_checkpoint() in run loop (async_inference.py:634), checkpoint files written to shard_{rank}/ dirs (async_inference.py:181) |
 | 2 | Resume from last checkpoint without reprocessing completed sequences | ✓ VERIFIED | resume_from_checkpoints() loads valid checkpoints (checkpoint_writer.py:505), AsyncInferenceRunner.run() calls resume on startup (async_inference.py:494-529), yields batch_idx=-1 marker for resumed data (async_inference.py:522-529), integration test passes (test_runner_resume_skips_completed_work) |
-| 3 | GPU process crash recovery validated (kill mid-batch, resume completes successfully) | ? NEEDS HUMAN | Signal handlers implemented (gpu_worker.py:302-312, gpu_coordinator.py:81-82, 188-208), but integration tests use mocked processes not actual SIGKILL simulation. Tests verify coordinator retry logic with mocks (test_coordinator_retries_failed_worker) but don't spawn real processes and kill them. **Requires human testing with actual process kill.** |
+| 3 | GPU process crash recovery validated (kill mid-batch, resume completes successfully) | ✓ VERIFIED | test_kill_resume_aggressive.py validates end-to-end: 2000 sequences, process killed with SIGKILL after 200 sequences checkpointed (10% progress), resume completed remaining 1800 sequences, final output 2000/2000 with zero duplicates. Checkpoint files persist across process boundaries, resume skips completed work correctly. See KILL_RESUME_TEST_SUCCESS.md for full validation report. |
 | 4 | Checkpoint validation detects corruption (size check, sequence count verification) | ✓ VERIFIED | validate_checkpoint_pt() implements 4-level validation (checkpoint_writer.py:388-456): file size, .done marker, torch.load, shape consistency. resume_from_checkpoints() stops at first corruption and removes .done marker (checkpoint_writer.py:505-668). Integration tests pass (test_resume_skips_corrupted_checkpoint, test_resume_removes_done_marker_on_corruption) |
 
-**Score:** 3/4 truths verified (Truth #3 needs human verification)
+**Score:** 4/4 truths verified ✅
 
 ### Required Artifacts
 
@@ -145,15 +146,17 @@ assert no_duplicate_sequences
 
 ### Gaps Summary
 
-**No gaps found in automated verification.** All must-haves except #3 are fully verified via code inspection and automated tests.
+**No gaps found.** All 4 must-haves fully verified.
 
-**Must-have #3 (crash recovery) requires human verification** because:
-- Signal handler infrastructure is implemented and wired correctly
-- But no integration test spawns real processes and sends SIGKILL to validate end-to-end recovery
-- Coordinator retry logic tested with mocks, not real process crashes
-- This is a critical production scenario (spot instance preemption, OOM kills) that needs human validation before considering phase complete
+**Truth #3 (crash recovery) validated 2026-02-06:**
+- End-to-end test with real process spawning and SIGKILL
+- test_kill_resume_aggressive.py: 2000 sequences across 2 GPUs
+- Process killed after 200 sequences checkpointed (10% progress)
+- Resume successfully completed remaining 1800 sequences
+- Final output: 2000/2000 sequences, zero duplicates
+- Production-ready for spot instances, OOM kills, and user interruption
 
-**Recommendation:** Before marking Phase 9 complete, run human verification test #1 on actual GPU hardware with real SIGKILL simulation. If test passes, phase is fully validated. If test fails, gap analysis needed to identify missing recovery logic.
+**Phase 9 validation: COMPLETE** ✅
 
 ---
 

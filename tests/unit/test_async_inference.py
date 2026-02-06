@@ -343,3 +343,189 @@ class TestModelConfigHash:
 
         assert isinstance(hash_value, str)
         assert len(hash_value) == 16
+
+
+class TestCheckpointDirectoryStructure:
+    """Tests for checkpoint directory structure and path correctness.
+
+    Regression tests for double-nesting bug where checkpoints were written
+    to checkpoints/shard_0/shard_0/ instead of checkpoints/shard_0/.
+    """
+
+    @pytest.fixture
+    def mock_checkpoint_base_dir(self, tmp_path):
+        """Create temporary checkpoint base directory."""
+        checkpoint_dir = tmp_path / "checkpoints"
+        checkpoint_dir.mkdir()
+        return checkpoint_dir
+
+    def test_shard_subdirectory_created_correctly(self, mock_checkpoint_base_dir):
+        """Verify shard subdirectory is created at checkpoint_dir/shard_{rank}/, not nested."""
+        from virnucpro.pipeline.async_inference import AsyncInferenceRunner
+
+        mock_model = Mock()
+        mock_param = Mock()
+        mock_param.dtype = torch.float32
+        mock_param.numel.return_value = 1000000
+        mock_model.parameters.return_value = [mock_param]
+
+        device = torch.device("cuda:0")
+        rank = 0
+
+        runner = AsyncInferenceRunner(
+            mock_model,
+            device=device,
+            checkpoint_dir=mock_checkpoint_base_dir,
+            rank=rank
+        )
+
+        expected_shard_dir = mock_checkpoint_base_dir / f"shard_{rank}"
+        double_nested_dir = mock_checkpoint_base_dir / f"shard_{rank}" / f"shard_{rank}"
+
+        assert runner.shard_checkpoint_dir == expected_shard_dir
+        assert expected_shard_dir.exists(), f"Shard directory should exist at {expected_shard_dir}"
+        assert not double_nested_dir.exists(), (
+            f"Double-nested directory found at {double_nested_dir}. "
+            "Bug: checkpoints/shard_N/shard_N/ instead of checkpoints/shard_N/"
+        )
+
+    def test_checkpoint_path_no_double_nesting_rank_0(self, tmp_path):
+        """Verify rank=0 checkpoint path has no double nesting."""
+        from virnucpro.pipeline.async_inference import AsyncInferenceRunner
+
+        checkpoint_base = tmp_path / "checkpoints"
+        checkpoint_base.mkdir()
+
+        mock_model = Mock()
+        mock_param = Mock()
+        mock_param.dtype = torch.float32
+        mock_param.numel.return_value = 1000000
+        mock_model.parameters.return_value = [mock_param]
+
+        device = torch.device("cuda:0")
+        runner = AsyncInferenceRunner(mock_model, device, checkpoint_dir=checkpoint_base, rank=0)
+
+        expected = checkpoint_base / "shard_0"
+        actual = runner.shard_checkpoint_dir
+
+        assert actual == expected, (
+            f"Checkpoint dir should be {expected}, got {actual}"
+        )
+        assert (checkpoint_base / "shard_0").exists()
+        assert not (checkpoint_base / "shard_0" / "shard_0").exists()
+
+    def test_checkpoint_path_no_double_nesting_rank_2(self, tmp_path):
+        """Verify rank=2 checkpoint path has no double nesting."""
+        from virnucpro.pipeline.async_inference import AsyncInferenceRunner
+
+        checkpoint_base = tmp_path / "checkpoints"
+        checkpoint_base.mkdir()
+
+        mock_model = Mock()
+        mock_param = Mock()
+        mock_param.dtype = torch.float32
+        mock_param.numel.return_value = 1000000
+        mock_model.parameters.return_value = [mock_param]
+
+        device = torch.device("cuda:0")
+        runner = AsyncInferenceRunner(mock_model, device, checkpoint_dir=checkpoint_base, rank=2)
+
+        expected = checkpoint_base / "shard_2"
+        actual = runner.shard_checkpoint_dir
+
+        assert actual == expected, (
+            f"Checkpoint dir should be {expected}, got {actual}"
+        )
+        assert (checkpoint_base / "shard_2").exists()
+        assert not (checkpoint_base / "shard_2" / "shard_2").exists()
+
+    def test_shard_subdirectory_created_once_per_runner(self, mock_checkpoint_base_dir):
+        """Verify only one shard directory is created per runner instance."""
+        from virnucpro.pipeline.async_inference import AsyncInferenceRunner
+
+        mock_model = Mock()
+        mock_param = Mock()
+        mock_param.dtype = torch.float32
+        mock_param.numel.return_value = 1000000
+        mock_model.parameters.return_value = [mock_param]
+
+        device = torch.device("cuda:0")
+        rank = 1
+
+        runner = AsyncInferenceRunner(
+            mock_model,
+            device=device,
+            checkpoint_dir=mock_checkpoint_base_dir,
+            rank=rank
+        )
+
+        shard_dirs = list(mock_checkpoint_base_dir.iterdir())
+        shard_subdir_count = sum(1 for d in shard_dirs if d.is_dir() and d.name.startswith("shard_"))
+
+        assert shard_subdir_count == 1, (
+            f"Expected 1 shard directory, found {shard_subdir_count}. "
+            f"Directories: {[d.name for d in shard_dirs]}"
+        )
+        assert runner.shard_checkpoint_dir.name == f"shard_{rank}"
+
+    def test_checkpoint_dir_none_disables_checkpointing(self):
+        """Verify checkpoint_dir=None disables checkpointing correctly."""
+        from virnucpro.pipeline.async_inference import AsyncInferenceRunner
+
+        mock_model = Mock()
+        mock_param = Mock()
+        mock_param.dtype = torch.float32
+        mock_param.numel.return_value = 1000000
+        mock_model.parameters.return_value = [mock_param]
+
+        device = torch.device("cuda:0")
+        runner = AsyncInferenceRunner(mock_model, device, checkpoint_dir=None, rank=0)
+
+        assert runner.checkpoint_dir is None
+        assert runner.shard_checkpoint_dir is None
+        assert not runner._checkpointing_enabled
+
+    def test_multiple_ranks_create_separate_directories(self, tmp_path):
+        """Verify ranks 0, 1, 2 each get their own separate directory."""
+        from virnucpro.pipeline.async_inference import AsyncInferenceRunner
+
+        checkpoint_base = tmp_path / "checkpoints"
+        checkpoint_base.mkdir()
+
+        mock_model = Mock()
+        mock_param = Mock()
+        mock_param.dtype = torch.float32
+        mock_param.numel.return_value = 1000000
+        mock_model.parameters.return_value = [mock_param]
+
+        device = torch.device("cuda:0")
+
+        runners = []
+        for rank in range(3):
+            runner = AsyncInferenceRunner(
+                mock_model,
+                device,
+                checkpoint_dir=checkpoint_base,
+                rank=rank
+            )
+            runners.append(runner)
+
+        expected_dirs = {
+            0: checkpoint_base / "shard_0",
+            1: checkpoint_base / "shard_1",
+            2: checkpoint_base / "shard_2",
+        }
+
+        for rank, expected in expected_dirs.items():
+            actual = runners[rank].shard_checkpoint_dir
+            assert actual == expected, (
+                f"Rank {rank}: expected {expected}, got {actual}"
+            )
+            assert expected.exists(), f"Rank {rank} directory should exist at {expected}"
+
+        for rank in range(3):
+            for other_rank in range(3):
+                if rank != other_rank:
+                    assert runners[rank].shard_checkpoint_dir != runners[other_rank].shard_checkpoint_dir, (
+                        f"Ranks {rank} and {other_rank} should have different directories"
+                    )

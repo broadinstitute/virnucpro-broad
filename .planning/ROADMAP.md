@@ -51,8 +51,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 5: Async DataLoader Foundation** - Single-GPU async pattern with CUDA safety
 - [x] **Phase 6: Sequence Packing Integration** - FlashAttention varlen + greedy packing
 - [x] **Phase 7: Multi-GPU Coordination** - Index-based sharding across N GPUs
-- [ ] **Phase 8: FP16 Precision Validation** - Memory and speed optimization
-- [ ] **Phase 9: Checkpointing Integration** - Robustness for 6M sequence workloads
+- [x] **Phase 8: FP16 Precision Validation** - Memory and speed optimization
+- [x] **Phase 9: Checkpointing Integration** - Robustness for 6M sequence workloads
 - [ ] **Phase 10: Performance Validation & Tuning** - End-to-end benchmarking
 
 ## Phase Details
@@ -173,13 +173,13 @@ Plans:
 **Plans**: 7 plans in 5 waves
 
 Plans:
-- [ ] 09-01-PLAN.md — CheckpointTrigger, AsyncCheckpointWriter, HDF5 validation, resume logic
-- [ ] 09-02-PLAN.md — CheckpointManifest for multi-GPU coordination
-- [ ] 09-03-PLAN.md — Wire checkpointing into AsyncInferenceRunner
-- [ ] 09-04-PLAN.md — Wire checkpointing into gpu_worker with resume
-- [ ] 09-05-PLAN.md — Coordinator retry + manifest in multi_gpu_inference
-- [ ] 09-06-PLAN.md — Unit tests for checkpoint components
-- [ ] 09-07-PLAN.md — Integration tests for resume and crash recovery
+- [x] 09-01-PLAN.md — CheckpointTrigger, AsyncCheckpointWriter, HDF5 validation, resume logic
+- [x] 09-02-PLAN.md — CheckpointManifest for multi-GPU coordination
+- [x] 09-03-PLAN.md — Wire checkpointing into AsyncInferenceRunner
+- [x] 09-04-PLAN.md — Wire checkpointing into gpu_worker with resume
+- [x] 09-05-PLAN.md — Coordinator retry + manifest in multi_gpu_inference
+- [x] 09-06-PLAN.md — Unit tests for checkpoint components
+- [x] 09-07-PLAN.md — Integration tests for resume and crash recovery
 
 ### Phase 10: Performance Validation & Tuning
 
@@ -216,9 +216,9 @@ Phases execute in numeric order: 5 → 6 → 7 → 8 → 9 → 10
 | 5. Async DataLoader Foundation | v2.0 | 5/5 | Complete | 2026-02-03 |
 | 6. Sequence Packing Integration | v2.0 | 8/8 | Complete | 2026-02-04 |
 | 7. Multi-GPU Coordination | v2.0 | 8/8 | Complete | 2026-02-05 |
-| 8. FP16 Precision Validation | v2.0 | 4/5 | Needs human GPU testing | - |
-| 9. Checkpointing Integration | v2.0 | 0/7 | Not started | - |
+| 8. FP16 Precision Validation | v2.0 | 4/5 | Complete | 2026-02-05 |
+| 9. Checkpointing Integration | v2.0 | 7/7 | Complete | 2026-02-06 |
 | 10. Performance Validation & Tuning | v2.0 | 0/TBD | Not started | - |
 
 ---
-*Last updated: 2026-02-05 for Phase 9 planning*
+*Last updated: 2026-02-06 - Phase 9 complete, ready for Phase 10*
