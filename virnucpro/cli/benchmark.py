@@ -13,7 +13,9 @@ logger = logging.getLogger('virnucpro.cli.benchmark')
 
 @click.command()
 @click.option('--suite',
-              type=click.Choice(['scaling', 'throughput', 'memory', 'equivalence', 'all']),
+              type=click.Choice(['scaling', 'throughput', 'memory', 'equivalence',
+                                'v2-validation', 'v2-scaling', 'v2-throughput', 'v1-comparison',
+                                'all']),
               default='all',
               help='Which benchmark suite to run (default: all)')
 @click.option('--data-size',
@@ -59,6 +61,10 @@ def benchmark(ctx, suite, data_size, gpus, output_dir, compare_to, vanilla_basel
     - Throughput tests: Per-stage sequences/second
     - Memory tests: Peak usage and efficiency
     - Equivalence tests: Accuracy validation vs vanilla
+    - v2-validation: Production workload benchmark (PERF requirements)
+    - v2-scaling: Multi-GPU scaling validation (2-GPU 1.9x)
+    - v2-throughput: DataLoader and packing parameter sweep
+    - v1-comparison: v1.0 vs v2.0 speedup comparison (conditional)
 
     \b
     Examples:
@@ -77,6 +83,12 @@ def benchmark(ctx, suite, data_size, gpus, output_dir, compare_to, vanilla_basel
 
       # Compare against previous run
       virnucpro benchmark --compare-to tests/reports/benchmark_20260126.json
+
+      # Run v2.0 production validation
+      virnucpro benchmark --suite v2-validation
+
+      # v1.0 vs v2.0 comparison (requires v1.0 git tag)
+      virnucpro benchmark --suite v1-comparison --data-size medium
 
     \b
     Output:
@@ -129,6 +141,11 @@ def benchmark(ctx, suite, data_size, gpus, output_dir, compare_to, vanilla_basel
         data_size = 'small'
         suite = 'scaling'  # Only test scaling in quick mode
         logger.info("Quick mode: Using small dataset, scaling tests only")
+
+    # v1-comparison needs special handling
+    if suite == 'v1-comparison':
+        logger.info("Note: v1.0 comparison requires 'v1.0' git tag in repository")
+        logger.info("Tests will skip gracefully if v1.0 tag is unavailable")
 
     # Setup output directory
     output_path = Path(output_dir)
@@ -248,6 +265,14 @@ def _build_pytest_command(
         cmd.extend(['-m', 'memory'])
     elif suite == 'equivalence':
         cmd.extend(['-m', 'equivalence'])
+    elif suite == 'v2-validation':
+        cmd.extend(['-k', 'TestProductionValidation'])
+    elif suite == 'v2-scaling':
+        cmd.extend(['-k', 'TestV2Scaling'])
+    elif suite == 'v2-throughput':
+        cmd.extend(['-k', 'TestParameterTuning'])
+    elif suite == 'v1-comparison':
+        cmd.extend(['-k', 'TestV1Comparison'])
 
     # Environment variables for data size and GPU configuration
     # These will be passed as env vars to pytest
