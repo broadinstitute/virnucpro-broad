@@ -37,6 +37,11 @@ class TestStreamSynchronization:
         model = Mock()
         model.eval = Mock(return_value=model)
 
+        mock_param = Mock()
+        mock_param.dtype = torch.float32
+        mock_param.numel.return_value = 1000000
+        model.parameters.return_value = [mock_param]
+
         def mock_forward_packed(input_ids, cu_seqlens, max_seqlen, repr_layers):
             """Return deterministic representations based on input shape."""
             total_tokens = input_ids.shape[0]
@@ -177,6 +182,10 @@ class TestEmbeddingExtraction:
         from virnucpro.pipeline.async_inference import AsyncInferenceRunner
 
         mock_model = Mock()
+        mock_param = Mock()
+        mock_param.dtype = torch.float32
+        mock_param.numel.return_value = 1000000
+        mock_model.parameters.return_value = [mock_param]
         device = torch.device("cuda:0")
         return AsyncInferenceRunner(mock_model, device=device)
 
@@ -278,6 +287,10 @@ class TestRankValidation:
         from virnucpro.pipeline.async_inference import AsyncInferenceRunner
 
         mock_model = Mock()
+        mock_param = Mock()
+        mock_param.dtype = torch.float32
+        mock_param.numel.return_value = 1000000
+        mock_model.parameters.return_value = iter([mock_param])
         device = torch.device("cuda:0")
 
         runner = AsyncInferenceRunner(mock_model, device=device, rank=0)
@@ -288,6 +301,10 @@ class TestRankValidation:
         from virnucpro.pipeline.async_inference import AsyncInferenceRunner
 
         mock_model = Mock()
+        mock_param = Mock()
+        mock_param.dtype = torch.float32
+        mock_param.numel.return_value = 1000000
+        mock_model.parameters.return_value = iter([mock_param])
         device = torch.device("cuda:0")
 
         runner = AsyncInferenceRunner(mock_model, device=device, rank=2)
@@ -303,12 +320,10 @@ class TestModelConfigHash:
 
         mock_model = Mock()
         mock_model.parameters.return_value = iter([])
-
         device = torch.device("cuda:0")
-        runner = AsyncInferenceRunner(mock_model, device=device)
 
         with pytest.raises(ValueError, match="Model has no parameters"):
-            runner._compute_model_config_hash()
+            AsyncInferenceRunner(mock_model, device=device)
 
     def test_model_with_parameters_returns_hash(self):
         """Verify hash is computed correctly for models with parameters."""
@@ -319,7 +334,7 @@ class TestModelConfigHash:
         mock_param.numel.return_value = 1000000
 
         mock_model = Mock()
-        mock_model.parameters.return_value = iter([mock_param])
+        mock_model.parameters.return_value = [mock_param]
 
         device = torch.device("cuda:0")
         runner = AsyncInferenceRunner(mock_model, device=device)
