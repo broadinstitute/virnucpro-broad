@@ -170,10 +170,16 @@ Plans:
   3. GPU process crash recovery validated (kill mid-batch, resume completes successfully)
   4. Checkpoint validation detects corruption (size check, sequence count verification)
 
-**Plans**: TBD
+**Plans**: 7 plans in 5 waves
 
 Plans:
-- [ ] TBD during phase planning
+- [ ] 09-01-PLAN.md — CheckpointTrigger, AsyncCheckpointWriter, HDF5 validation, resume logic
+- [ ] 09-02-PLAN.md — CheckpointManifest for multi-GPU coordination
+- [ ] 09-03-PLAN.md — Wire checkpointing into AsyncInferenceRunner
+- [ ] 09-04-PLAN.md — Wire checkpointing into gpu_worker with resume
+- [ ] 09-05-PLAN.md — Coordinator retry + manifest in multi_gpu_inference
+- [ ] 09-06-PLAN.md — Unit tests for checkpoint components
+- [ ] 09-07-PLAN.md — Integration tests for resume and crash recovery
 
 ### Phase 10: Performance Validation & Tuning
 
@@ -211,8 +217,8 @@ Phases execute in numeric order: 5 → 6 → 7 → 8 → 9 → 10
 | 6. Sequence Packing Integration | v2.0 | 8/8 | Complete | 2026-02-04 |
 | 7. Multi-GPU Coordination | v2.0 | 8/8 | Complete | 2026-02-05 |
 | 8. FP16 Precision Validation | v2.0 | 4/5 | Needs human GPU testing | - |
-| 9. Checkpointing Integration | v2.0 | 0/TBD | Not started | - |
+| 9. Checkpointing Integration | v2.0 | 0/7 | Not started | - |
 | 10. Performance Validation & Tuning | v2.0 | 0/TBD | Not started | - |
 
 ---
-*Last updated: 2026-02-05 for Phase 7 completion and Phase 8 test fixes*
+*Last updated: 2026-02-05 for Phase 9 planning*
