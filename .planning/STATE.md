@@ -11,11 +11,11 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 9 of 10 (Checkpointing Integration) - IN PROGRESS
-Plan: 3 of 6 in phase - COMPLETE (Wave 2: 1/3)
-Status: AsyncInferenceRunner checkpoint integration complete
-Last activity: 2026-02-06 — Completed 09-03-PLAN.md (AsyncInferenceRunner checkpoint integration)
+Plan: 4 of 6 in phase - COMPLETE (Wave 2: 2/3)
+Status: GPU worker checkpoint integration complete
+Last activity: 2026-02-06 — Completed 09-04-PLAN.md (GPU worker checkpoint integration)
 
-Progress: [███████░░░] 74/TBD plans (v1.0: 34/34 complete, v2.0: 40/TBD)
+Progress: [███████░░░] 75/TBD plans (v1.0: 34/34 complete, v2.0: 41/TBD)
 
 ## Performance Metrics
 
@@ -37,10 +37,10 @@ Progress: [███████░░░] 74/TBD plans (v1.0: 34/34 complete, v
 | 6 | 8 | 28 min | 3.5 min |
 | 7 | 8 | 29 min | 3.6 min |
 | 8 | 4 (complete) | 13 min | 3.25 min |
-| 9 | 3 | 11 min | 3.5 min |
+| 9 | 4 | 18 min | 4.5 min |
 
 **Recent Trend:**
-- Last 5 plans: ~3.1 min average
+- Last 5 plans: ~3.8 min average
 - Trend: Steady (Phase 9 Wave 2 in progress)
 
 *Updated after each plan completion*
@@ -133,6 +133,10 @@ Recent decisions affecting current work:
 - **CPU transfer before accumulation (09-03)**: Transfer embeddings to CPU via .cpu().numpy() before accumulation - prevents CUDA memory growth from accumulating GPU tensors
 - **Resumed data as InferenceResult (09-03)**: Yield resumed data as normal InferenceResult with batch_idx=-1 marker - seamless pipeline integration without special downstream handling
 - **Packing stats in checkpoint metadata (09-03)**: Capture packing efficiency from batch result and include in checkpoint metadata - enables post-mortem debugging
+- **Resume with index filtering (09-04)**: gpu_worker resumes from checkpoints BEFORE creating dataset, filters index to skip processed sequences - prevents duplicates, clean separation (resume happens once at start, not intermixed)
+- **Per-shard checkpoint isolation (09-04)**: checkpoint_dir = checkpoint_base_dir / f"shard_{rank}" prevents cross-GPU conflicts when multiple workers checkpoint simultaneously
+- **SIGTERM handler for spot preemption (09-04)**: signal.signal(SIGTERM, sigterm_handler) saves emergency checkpoint when spot instance receives termination signal (30s timeout, exit code 143)
+- **Differentiated error handling (09-04)**: Categorize errors (cuda_oom, cuda_runtime, generic) via error_type field while maintaining backward compatibility (error field contains message) - enables targeted retry strategies
 
 ### Pending Todos
 
@@ -177,12 +181,13 @@ None yet.
 - ✅ Checkpoint foundation (CheckpointTrigger, AsyncCheckpointWriter, validation, resume) - 09-01
 - ✅ CheckpointManifest for multi-GPU coordination - 09-02
 - ✅ AsyncInferenceRunner checkpoint integration (batch boundaries, resume, metadata) - 09-03
-- Next: GPU worker integration (09-04)
+- ✅ GPU worker integration (resume, index filtering, SIGTERM, error tiers) - 09-04
+- Next: Coordinator integration (09-05)
 
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 09-03-PLAN.md (AsyncInferenceRunner checkpoint integration)
+Stopped at: Completed 09-04-PLAN.md (GPU worker checkpoint integration)
 Resume file: None
 
-**Next step:** Continue Phase 9 Wave 2 - GPU worker integration (09-04)
+**Next step:** Continue Phase 9 Wave 2 - Coordinator integration (09-05)
