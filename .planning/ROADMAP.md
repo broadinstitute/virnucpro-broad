@@ -220,11 +220,13 @@ Plans:
   3. Breaking changes documented in migration guide
   4. CLI integration tests verify v2.0 API usage
 
-**Plans**: 2 plans in 1 wave
+**Plans**: 2 plans in 1 wave (+ 2 gap closure plans)
 
 Plans:
-- [ ] 10.1-01-PLAN.md — Update predict command to route --parallel to v2.0 API with CLI tests
-- [ ] 10.1-02-PLAN.md — Benchmark CLI Phase 10 suites and migration guide
+- [x] 10.1-01-PLAN.md — Update predict command to route --parallel to v2.0 API with CLI tests
+- [x] 10.1-02-PLAN.md — Benchmark CLI Phase 10 suites and migration guide
+- [ ] 10.1-03-PLAN.md — Performance telemetry and regression tests (gap closure)
+- [ ] 10.1-04-PLAN.md — Validation and cleanup improvements (gap closure)
 
 **Details:**
 Discovered during Phase 10 planning: Phases 5-9 built v2.0 async architecture but didn't update CLI. Users running `python -m virnucpro predict --parallel` still get v1.0 multi-worker-per-GPU code. Phase 10 Plan 05 (v1.0 vs v2.0 comparison) would accidentally compare v1.0 to v1.0. Must wire v2.0 API before executing Phase 10 benchmarks.

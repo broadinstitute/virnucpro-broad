@@ -11,9 +11,9 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 10.1 (CLI Integration for v2.0 Architecture) - INSERTED AFTER PHASE 10
-Plan: 2 of 2 in phase - Phase complete
-Status: Complete (verified)
-Last activity: 2026-02-06 — Phase 10.1 complete, ready for Phase 10
+Plan: 2 of 4 in phase (2 gap closure plans pending)
+Status: Gaps found (6 gaps affecting Phase 10 benchmarks)
+Last activity: 2026-02-06 — Core functionality complete, gap closure planning needed
 
 Progress: [████████░░] 86/89+ plans (v1.0: 34/34 complete, v2.0: 52/55+)
 
@@ -211,13 +211,18 @@ None yet.
 - Bug fix: Checkpoint path double-nesting resolved
 - Validation: SIGKILL test with 2000 sequences (200 checkpointed, 1800 resumed, zero duplicates)
 
-**Phase 10.1 (CLI Integration for v2.0 Architecture):** In Progress
-- ✅ Plan 01: v2.0 routing for ESM-2 in predict CLI (hybrid architecture)
-  - --parallel routes ESM-2 to v2.0 async architecture, DNABERT-S stays v1.0
-  - --v1-fallback flag for backward compatibility
-  - RuntimeConfig constructed from CLI flags (--resume, --force-resume)
-  - HDF5-to-PT streaming adapter for merge stage compatibility
-  - 7 CLI integration tests (CPU-only with mocking)
+**Phase 10.1 (CLI Integration for v2.0 Architecture):** Gaps Found
+- ✅ Core functionality complete (Plans 01-02)
+  - CLI routes ESM-2 to v2.0, DNABERT-S stays v1.0 (hybrid architecture)
+  - All 8/8 CLI integration tests passing
+  - Benchmark CLI exposes Phase 10 suites
+  - Migration guide documents hybrid approach
+- ⚠️ 6 gaps affecting Phase 10 benchmarks:
+  - **High priority:** HDF5→PT conversion overhead (30-60s), no v1.0 telemetry, no regression test
+  - **Medium priority:** Checkpoint compatibility, world size validation, temp file cleanup
+- 📋 Gap closure needed before Phase 10:
+  - Plan 10.1-03: Performance telemetry and regression tests
+  - Plan 10.1-04: Validation and cleanup improvements
 
 ## Session Continuity
 
