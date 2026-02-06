@@ -12,7 +12,8 @@ import os
 import queue
 import signal
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple, Set, TYPE_CHECKING
+from typing import Callable, Dict, List, Optional, Tuple, Set
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from virnucpro.pipeline.runtime_config import RuntimeConfig
@@ -79,10 +80,15 @@ class GPUProcessCoordinator:
         # Elastic redistribution tracking (Issue 5)
         self.redistributed_work: Dict[int, int] = {}  # failed_rank -> new_rank
 
+        # Queue item cache for _get_worker_status (Issue 2: prevent discarding other ranks' status)
+        self._status_cache: Dict[int, dict] = {}  # rank -> status dict
+
         # SIGTERM coordination (Issue 6)
         self.shutdown_requested = False
 
         logger.info(f"GPUProcessCoordinator initialized: {world_size} workers")
+
+        self.setup_signal_handlers()
 
     def setup_signal_handlers(self) -> None:
         """Register signal handlers for graceful shutdown.
@@ -220,14 +226,21 @@ class GPUProcessCoordinator:
 
         # Terminate remaining workers
         self.terminate_all()
-        os._exit(143)  # Standard SIGTERM exit code
+        # os._exit() bypasses Python cleanup - workers have checkpointed, safe to exit immediately
+        os._exit(143)
 
     def _wait_for_worker_checkpoints(self) -> None:
-        """Wait for workers to save emergency checkpoints (runs in separate thread)."""
-        import time
-        logger.info("Waiting for workers to save emergency checkpoints...")
-        time.sleep(30)
-        logger.info("Checkpoint wait period complete")
+        """Wait for workers to save emergency checkpoints (runs in separate thread).
+
+        Issue 3: Wrapped in try/except to log errors from thread context.
+        """
+        try:
+            import time
+            logger.info("Waiting for workers to save emergency checkpoints...")
+            time.sleep(30)
+            logger.info("Checkpoint wait period complete")
+        except Exception as e:
+            logger.error(f"Error during checkpoint wait: {e}")
 
     def _classify_error(self, status: dict) -> str:
         """Classify error type from worker status for appropriate retry policy.
@@ -538,18 +551,26 @@ class GPUProcessCoordinator:
     def _get_worker_status(self, rank: int) -> dict:
         """Get worker status from results queue.
 
-        First polls the results queue for in-progress status updates,
-        then falls back to exitcode check for terminated workers.
+        First checks cached status for this rank, then polls the results queue
+        for new status updates, caching any items for other ranks.
+        Falls back to exitcode check for terminated workers.
 
         Returns:
             Status dict with 'status', 'error', 'error_message', 'batch_idx', etc.
         """
-        # Poll results_queue for this rank's status
+        # Check cache first (Issue 2: preserve other ranks' status)
+        if rank in self._status_cache:
+            return self._status_cache.pop(rank)
+
+        # Poll results_queue for this rank's status, cache others
         while not self.results_queue.empty():
             try:
                 item = self.results_queue.get_nowait()
-                # Check if this message is for our rank
-                if item.get('rank') == rank:
+                item_rank = item.get('rank')
+                # Cache for later retrieval by appropriate rank
+                if item_rank != rank:
+                    self._status_cache[item_rank] = item
+                else:
                     return item
             except queue.Empty:
                 break
@@ -559,11 +580,12 @@ class GPUProcessCoordinator:
         if worker:
             if not worker.is_alive():
                 exitcode = worker.exitcode
-                if exitcode == 0:
-                    return {'status': 'complete', 'rank': rank}
-                elif exitcode == 143:
-                    return {'status': 'failed', 'error': 'sigterm', 'exitcode': 143, 'rank': rank}
-                else:
-                    return {'status': 'failed', 'error': 'unknown', 'exitcode': exitcode, 'rank': rank}
+                if exitcode is not None:
+                    if exitcode == 0:
+                        return {'status': 'complete', 'rank': rank}
+                    elif exitcode == 143:
+                        return {'status': 'failed', 'error': 'sigterm', 'exitcode': 143, 'rank': rank}
+                    else:
+                        return {'status': 'failed', 'error': 'unknown', 'exitcode': exitcode, 'rank': rank}
 
         return {'status': 'unknown', 'rank': rank}
