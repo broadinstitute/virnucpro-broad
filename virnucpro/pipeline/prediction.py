@@ -7,7 +7,7 @@ import time
 import os
 import torch
 
-from virnucpro.core.checkpoint import CheckpointManager, PipelineStage, atomic_save, has_done_marker, remove_done_marker
+from virnucpro.core.checkpoint import CheckpointManager, PipelineStage, has_done_marker, remove_done_marker
 from virnucpro.core.checkpoint_validation import CheckpointError, CHECKPOINT_EXIT_CODE, load_failed_checkpoints
 from virnucpro.core.config import Config
 from virnucpro.pipeline.parallel import detect_cuda_devices
@@ -82,7 +82,7 @@ def _stream_h5_to_pt_files(
         # Save with matching name: output_0_DNABERT_S.pt -> output_0_ESM.pt
         esm_filename = nuc_feat_path.name.replace('_DNABERT_S.pt', '_ESM.pt')
         esm_path = output_dir / esm_filename
-        atomic_save(esm_features, esm_path)
+        torch.save(esm_features, esm_path)
         pt_files.append(esm_path)
 
     return pt_files
