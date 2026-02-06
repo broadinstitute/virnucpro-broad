@@ -333,3 +333,139 @@ class TestWorkerArguments:
         assert len(results) == 4
         for result in results:
             assert result['world_size'] == 4
+
+
+class TestGPUCoordinatorFaultTolerance:
+    """Test GPUProcessCoordinator fault tolerance (requires Plan 09-05 implementation).
+
+    NOTE: These tests are placeholders for fault tolerance features to be implemented
+    in Plan 09-05. They are currently skipped with pytest.skip() markers.
+    """
+
+    @pytest.mark.skip(reason="Requires Plan 09-05: fault tolerance implementation")
+    def test_classify_error_spot_preemption_exitcode(self):
+        """Test error classification for spot preemption via exit code."""
+        # This test will verify _classify_error returns "spot_preemption"
+        # when status dict has exitcode=143
+        pass
+
+    @pytest.mark.skip(reason="Requires Plan 09-05: fault tolerance implementation")
+    def test_classify_error_spot_preemption_message(self):
+        """Test error classification for spot preemption via error message."""
+        # This test will verify _classify_error returns "spot_preemption"
+        # when error_message contains "Received SIGTERM"
+        pass
+
+    @pytest.mark.skip(reason="Requires Plan 09-05: fault tolerance implementation")
+    def test_classify_error_oom(self):
+        """Test error classification for OOM errors."""
+        # This test will verify _classify_error returns "oom"
+        # when error="cuda_oom" or message contains "CUDA out of memory"
+        pass
+
+    @pytest.mark.skip(reason="Requires Plan 09-05: fault tolerance implementation")
+    def test_classify_error_poison_input(self):
+        """Test error classification for poison inputs."""
+        # This test will verify _classify_error returns "poison_input"
+        # when error="cuda_runtime" or circuit_breaker=True
+        pass
+
+    @pytest.mark.skip(reason="Requires Plan 09-05: fault tolerance implementation")
+    def test_classify_error_transient_fallback(self):
+        """Test error classification falls back to transient."""
+        # This test will verify _classify_error returns "transient"
+        # for generic/unknown errors
+        pass
+
+    @pytest.mark.skip(reason="Requires Plan 09-05: fault tolerance implementation")
+    def test_should_retry_spot_preemption_infinite(self):
+        """Test spot preemption allows infinite retries."""
+        # This test will verify _should_retry_worker returns (True, message)
+        # for error_type="spot_preemption" regardless of retry_count
+        pass
+
+    @pytest.mark.skip(reason="Requires Plan 09-05: fault tolerance implementation")
+    def test_should_retry_poison_input_circuit_breaker(self):
+        """Test circuit breaker triggers after 2 same-batch failures."""
+        # This test will verify:
+        # - First failure: returns (True, retry message)
+        # - Second failure on same batch: returns (False, circuit breaker message)
+        # - (batch_idx, rank) added to failed_batches set
+        pass
+
+    @pytest.mark.skip(reason="Requires Plan 09-05: fault tolerance implementation")
+    def test_should_retry_oom_exponential_backoff(self):
+        """Test OOM retry with exponential backoff (max 3 attempts)."""
+        # This test will verify _should_retry_worker:
+        # - retry_count < 3: returns (True, "attempt N/3")
+        # - retry_count >= 3: returns (False, "exhausted retries")
+        pass
+
+    @pytest.mark.skip(reason="Requires Plan 09-05: fault tolerance implementation")
+    def test_should_retry_transient_max_retries(self):
+        """Test transient errors respect max retries (3 attempts)."""
+        # Similar to OOM test but with error_type="transient"
+        pass
+
+    @pytest.mark.skip(reason="Requires Plan 09-05: fault tolerance implementation")
+    def test_validate_checkpoint_dir_removes_orphaned_tmp_files(self):
+        """Test checkpoint validation removes .tmp files."""
+        # This test will verify _validate_checkpoint_dir:
+        # - Removes .tmp files
+        # - Preserves .pt files
+        # - Returns True
+        pass
+
+    @pytest.mark.skip(reason="Requires Plan 09-05: fault tolerance implementation")
+    def test_validate_checkpoint_dir_done_marker_mismatch_warning(self):
+        """Test validation warns on .done marker mismatch."""
+        # This test will verify _validate_checkpoint_dir:
+        # - Logs warning when .pt files != .done markers
+        # - Still returns True (allows resume)
+        pass
+
+    @pytest.mark.skip(reason="Requires Plan 09-05: fault tolerance implementation")
+    def test_validate_checkpoint_dir_fresh_start(self):
+        """Test validation succeeds for non-existent shard directory."""
+        # This test will verify _validate_checkpoint_dir returns True
+        # when shard directory doesn't exist (fresh start)
+        pass
+
+    @pytest.mark.skip(reason="Requires Plan 09-05: fault tolerance implementation")
+    def test_retry_worker_spot_preemption_delay(self):
+        """Test retry delay for spot preemption."""
+        # This test will verify _retry_worker calls time.sleep
+        # with runtime_config.spot_retry_poll_interval (60s default)
+        pass
+
+    @pytest.mark.skip(reason="Requires Plan 09-05: fault tolerance implementation")
+    def test_retry_worker_oom_exponential_backoff(self):
+        """Test exponential backoff for OOM retries."""
+        # This test will verify _retry_worker sleep duration:
+        # - retry_count=0: sleep(1.0)
+        # - retry_count=2: sleep(4.0)
+        # - retry_count=10: sleep(60.0) - capped at max
+        pass
+
+    @pytest.mark.skip(reason="Requires Plan 09-05: fault tolerance implementation")
+    def test_retry_worker_validates_checkpoint_before_respawn(self):
+        """Test worker not respawned if checkpoint validation fails."""
+        # This test will verify _retry_worker:
+        # - Calls _validate_checkpoint_dir
+        # - If validation returns False, worker is NOT respawned
+        pass
+
+    @pytest.mark.skip(reason="Requires Plan 09-05: fault tolerance implementation")
+    def test_sigterm_handler_sets_shutdown_flag(self):
+        """Test SIGTERM handler sets shutdown flag."""
+        # This test will verify _sigterm_handler:
+        # - Sets self.shutdown_requested = True
+        pass
+
+    @pytest.mark.skip(reason="Requires Plan 09-05: fault tolerance implementation")
+    def test_sigterm_handler_waits_for_checkpoints(self):
+        """Test SIGTERM handler waits for worker checkpoints."""
+        # This test will verify _sigterm_handler:
+        # - Calls time.sleep(30) to wait for worker checkpoints
+        # - Calls terminate_all()
+        pass
