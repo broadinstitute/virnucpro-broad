@@ -11,18 +11,18 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 10.1 (CLI Integration for v2.0 Architecture) - INSERTED AFTER PHASE 10
-Plan: 2 of 4 in phase (2 gap closure plans pending)
-Status: Gaps found (6 gaps affecting Phase 10 benchmarks)
-Last activity: 2026-02-06 — Core functionality complete, gap closure planning needed
+Plan: 4 of 4 in phase (PHASE COMPLETE)
+Status: Complete - All gap closure complete, ready for Phase 10
+Last activity: 2026-02-06 — Completed 10.1-04-PLAN.md (validation & cleanup gaps)
 
-Progress: [████████░░] 86/89+ plans (v1.0: 34/34 complete, v2.0: 52/55+)
+Progress: [█████████░] 88/90 plans (v1.0: 34/34 complete, v2.0: 54/56)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 85 (v1.0: 34, v2.0: 51)
+- Total plans completed: 88 (v1.0: 34, v2.0: 54)
 - Average duration: 3.4 min
-- Total execution time: 4.9 hours
+- Total execution time: 5.0 hours
 
 **By Phase:**
 
@@ -38,11 +38,11 @@ Progress: [████████░░] 86/89+ plans (v1.0: 34/34 complete, v
 | 7 | 8 | 29 min | 3.6 min |
 | 8 | 4 | 13 min | 3.25 min |
 | 9 | 7 (complete) | 40 min | 5.7 min |
-| 10.1 | 2 (complete) | 6 min | 3.0 min |
+| 10.1 | 4 (complete) | 14 min | 3.5 min |
 
 **Recent Trend:**
 - Last 5 plans: ~3.4 min average
-- Trend: Phase 10.1 complete, ready for Phase 10
+- Trend: Phase 10.1 COMPLETE - ready for Phase 10 benchmarks
 
 *Updated after each plan completion*
 
@@ -160,6 +160,9 @@ Recent decisions affecting current work:
 - **Streaming HDF5-to-PT adapter (10.1-01)**: Use 10K chunk size to avoid loading entire HDF5 into memory - merge stage HDF5 refactor deferred to Phase 10.2
 - **CLI v2.0 routing (10.1-01)**: use_v2 = parallel and not v1_fallback determines architecture version - explicit world_size passed to run_multi_gpu_inference
 - **Fail-fast v2.0 worker failures (10.1-01)**: Raise RuntimeError if any v2.0 ESM-2 worker fails instead of mapping ranks to files - simpler for all-or-nothing benchmarks
+- **time.monotonic() for telemetry (10.1-03)**: Wall-clock timing unaffected by system clock adjustments - accurate timing even with NTP changes
+- **torch.save for feature files (10.1-03)**: Feature files are plain dicts, not checkpoints - use torch.save directly instead of atomic_save which expects data/version/status keys
+- **5s threshold for 1K sequences (10.1-03)**: Generous regression test threshold (5× expected) catches O(n²) bugs without false positives from I/O variance
 
 ### Pending Todos
 
@@ -211,23 +214,22 @@ None yet.
 - Bug fix: Checkpoint path double-nesting resolved
 - Validation: SIGKILL test with 2000 sequences (200 checkpointed, 1800 resumed, zero duplicates)
 
-**Phase 10.1 (CLI Integration for v2.0 Architecture):** Gaps Found
-- ✅ Core functionality complete (Plans 01-02)
+**Phase 10.1 (CLI Integration for v2.0 Architecture):** ✅ COMPLETE
+- ✅ Core functionality (Plans 01-02)
   - CLI routes ESM-2 to v2.0, DNABERT-S stays v1.0 (hybrid architecture)
   - All 8/8 CLI integration tests passing
   - Benchmark CLI exposes Phase 10 suites
   - Migration guide documents hybrid approach
-- ⚠️ 6 gaps affecting Phase 10 benchmarks:
-  - **High priority:** HDF5→PT conversion overhead (30-60s), no v1.0 telemetry, no regression test
-  - **Medium priority:** Checkpoint compatibility, world size validation, temp file cleanup
-- 📋 Gap closure needed before Phase 10:
-  - Plan 10.1-03: Performance telemetry and regression tests
-  - Plan 10.1-04: Validation and cleanup improvements
+- ✅ Gap closure complete (Plans 03-04)
+  - Gap 1-3: Telemetry timing for v1.0/v2.0, HDF5→PT regression test (Plan 03)
+  - Gap 4-6: v1.0 checkpoint detection, world_size validation, temp file cleanup (Plan 04)
+  - All 13 CLI tests passing (8 routing + 1 regression + 4 validation)
+- **Ready for Phase 10:** All gaps closed, benchmarks can proceed
 
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 10.1-01-PLAN.md execution (v2.0 routing for ESM-2)
+Stopped at: Completed 10.1-03-PLAN.md (telemetry timing & regression test with atomic_save bug fix)
 Resume file: None
 
-**Next step:** Execute Phase 10.1 Plan 02 (benchmark CLI) or continue with Phase 10.1 remaining plans
+**Next step:** Begin Phase 10 - Performance Benchmarks (v1.0 vs v2.0 comparison)
