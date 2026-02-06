@@ -37,6 +37,8 @@ from virnucpro.core.checkpoint import has_done_marker, remove_done_marker
 
 logger = logging.getLogger('virnucpro.pipeline.checkpoint_writer')
 
+BATCH_PATTERN = re.compile(r'^batch_(\d+)\.pt$')
+
 
 class CheckpointTrigger:
     """Adaptive checkpoint trigger based on sequence count OR time threshold.
@@ -71,6 +73,16 @@ class CheckpointTrigger:
             time_threshold_sec: Seconds elapsed before checkpoint (default: 300)
             emergency_override_sec: Force checkpoint after delay (default: 600)
         """
+        if seq_threshold <= 0:
+            raise ValueError(f"seq_threshold must be positive, got {seq_threshold}")
+        if time_threshold_sec <= 0:
+            raise ValueError(f"time_threshold_sec must be positive, got {time_threshold_sec}")
+        if emergency_override_sec <= time_threshold_sec:
+            raise ValueError(
+                f"emergency_override_sec ({emergency_override_sec}) must be > "
+                f"time_threshold_sec ({time_threshold_sec})"
+            )
+
         # Check for viral mode override (only applies to defaults)
         viral_mode = os.environ.get('VIRNUCPRO_VIRAL_CHECKPOINT_MODE', '').lower() == 'true'
         defaults_used = (
@@ -179,11 +191,22 @@ class AsyncCheckpointWriter:
         """
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.pending_futures: List[Future] = []
+        # Note: Uses unbounded queue. Caller is responsible for rate-limiting
+        # submissions to prevent memory exhaustion.
         self.lock = threading.Lock()
         self.manifest = manifest
         self.rank = rank
 
         logger.debug(f"AsyncCheckpointWriter initialized: max_workers={max_workers}")
+
+    def __del__(self):
+        self.shutdown()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.shutdown()
 
     def write_checkpoint_async(
         self,
@@ -208,7 +231,7 @@ class AsyncCheckpointWriter:
         """
         # CRITICAL: Transfer from GPU to CPU before background thread
         if isinstance(embeddings, torch.Tensor):
-            embeddings_copy = embeddings.cpu().numpy()
+            embeddings_copy = embeddings.to('cpu').numpy()
             logger.debug(f"Transferred embeddings from GPU to CPU: shape={embeddings_copy.shape}")
         elif isinstance(embeddings, np.ndarray):
             embeddings_copy = embeddings.copy()
@@ -270,7 +293,12 @@ class AsyncCheckpointWriter:
             torch.save(checkpoint_dict, temp_path)
 
             # Atomic rename
-            temp_path.replace(checkpoint_path)
+            try:
+                temp_path.replace(checkpoint_path)
+            except OSError:
+                if temp_path.exists():
+                    temp_path.unlink()
+                raise
 
             # Create .done marker (indicates successful write)
             done_marker = checkpoint_path.with_suffix(checkpoint_path.suffix + '.done')
@@ -312,23 +340,22 @@ class AsyncCheckpointWriter:
             RuntimeError: If any writes failed (aggregated error messages)
         """
         with self.lock:
-            futures_to_check = list(self.pending_futures)
+            futures_to_check = self.pending_futures
+            self.pending_futures = []
 
         errors = []
         for future in futures_to_check:
             try:
                 future.result(timeout=timeout)
             except Exception as e:
-                errors.append(str(e))
+                errors.append((type(e).__name__, str(e)))
                 logger.error(f"Async checkpoint write failed: {e}")
-
-        # Clear pending futures after checking all
-        with self.lock:
-            self.pending_futures.clear()
 
         # Raise aggregated errors if any writes failed
         if errors:
-            error_msg = f"{len(errors)} checkpoint write(s) failed:\n" + "\n".join(errors)
+            error_msg = f"{len(errors)} checkpoint write(s) failed:\n" + "\n".join(
+                f"{name}: {msg}" for name, msg in errors
+            )
             raise RuntimeError(error_msg)
 
         logger.debug(f"All pending checkpoint writes completed: {len(futures_to_check)} writes")
@@ -403,8 +430,17 @@ def validate_checkpoint_pt(checkpoint_path: Path) -> Tuple[bool, str]:
         embeddings = checkpoint['embeddings']
         sequence_ids = checkpoint['sequence_ids']
 
+        if not hasattr(embeddings, '__len__'):
+            return False, f"Embeddings do not support length: {type(embeddings)}"
+
+        if hasattr(embeddings, 'shape') and len(embeddings.shape) != 2:
+            return False, f"Embeddings must be 2D, got shape {embeddings.shape}"
+
         num_embeddings = len(embeddings)
         num_ids = len(sequence_ids)
+
+        if num_ids == 0:
+            return False, "Checkpoint has empty sequence_ids list"
 
         if num_embeddings != num_ids:
             return False, (
@@ -509,10 +545,8 @@ def resume_from_checkpoints(
         return [], None, 0, []
 
     # Sort by batch number using regex (Issue 8)
-    batch_pattern = re.compile(r'batch_(\d+)\.pt')
-
     def extract_batch_num(path: Path) -> int:
-        match = batch_pattern.search(path.name)
+        match = BATCH_PATTERN.search(path.name)
         if match:
             return int(match.group(1))
         else:
@@ -574,11 +608,9 @@ def resume_from_checkpoints(
                     logger.debug(
                         f"Collected {len(checkpoint['sequence_ids'])} IDs from corrupted batch {batch_num}"
                     )
-            except Exception:
-                logger.warning(
-                    f"Could not load sequence IDs from corrupted batch {batch_num}. "
-                    "Sequences from this batch are lost."
-                )
+            except Exception as e:
+                logger.error(f"Could not load sequence IDs from corrupted batch {batch_num}: {e}")
+                corrupted_sequence_ids.append(f"batch_{batch_num}_LOST")
 
             continue
 
