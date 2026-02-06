@@ -708,7 +708,10 @@ class TestConvenienceFunction:
 
 
 class TestRuntimeConfigWiring:
-    """Test RuntimeConfig initialization and wiring."""
+    """Test RuntimeConfig initialization and wiring.
+
+    Import: from virnucpro.pipeline.runtime_config import RuntimeConfig
+    """
 
     @patch('virnucpro.pipeline.multi_gpu_inference.aggregate_shards')
     @patch('virnucpro.pipeline.multi_gpu_inference.GPUProcessCoordinator')
@@ -752,6 +755,15 @@ class TestRuntimeConfigWiring:
 
         # Verify coordinator was called
         assert mock_coordinator_cls.called
+
+        # Verify monitor_workers_async was called with a valid RuntimeConfig with defaults
+        mock_coordinator.monitor_workers_async.assert_called_once()
+        call_kwargs = mock_coordinator.monitor_workers_async.call_args[1]
+        runtime_config_arg = call_kwargs['runtime_config']
+        assert isinstance(runtime_config_arg, RuntimeConfig)
+        assert runtime_config_arg.timeout_per_attempt == RuntimeConfig().timeout_per_attempt
+        assert runtime_config_arg.enable_checkpointing == RuntimeConfig().enable_checkpointing
+        assert runtime_config_arg.max_retries_transient == RuntimeConfig().max_retries_transient
 
     @patch('virnucpro.pipeline.multi_gpu_inference.aggregate_shards')
     @patch('virnucpro.pipeline.multi_gpu_inference.GPUProcessCoordinator')
@@ -899,6 +911,57 @@ class TestDeprecatedTimeoutParameter:
                 temp_output_dir,
                 model_config,
                 timeout=600.0
+            )
+
+        # Verify deprecation warning was logged
+        assert any("timeout parameter is deprecated" in record.message
+                   for record in caplog.records)
+
+    @patch('virnucpro.pipeline.multi_gpu_inference.aggregate_shards')
+    @patch('virnucpro.pipeline.multi_gpu_inference.GPUProcessCoordinator')
+    @patch('virnucpro.pipeline.multi_gpu_inference.load_sequence_index')
+    @patch('virnucpro.pipeline.multi_gpu_inference.create_sequence_index')
+    @patch('virnucpro.pipeline.multi_gpu_inference.torch.cuda.device_count')
+    def test_timeout_deprecated_warning_with_custom_config(
+        self,
+        mock_device_count,
+        mock_create_index,
+        mock_load_index,
+        mock_coordinator_cls,
+        mock_aggregate,
+        mock_fasta_files,
+        temp_output_dir,
+        mock_index_data,
+        caplog
+    ):
+        """Using timeout parameter with custom RuntimeConfig logs a deprecation warning."""
+        mock_device_count.return_value = 2
+        mock_load_index.return_value = mock_index_data
+
+        mock_coordinator = MagicMock()
+        mock_coordinator.monitor_workers_async.return_value = {0: True, 1: True}
+        mock_coordinator_cls.return_value = mock_coordinator
+
+        temp_output_dir.mkdir(parents=True, exist_ok=True)
+        (temp_output_dir / "shard_0.h5").touch()
+        (temp_output_dir / "shard_1.h5").touch()
+
+        expected_path = temp_output_dir / "embeddings.h5"
+        mock_aggregate.return_value = expected_path
+
+        model_config = {'model_type': 'esm2'}
+        custom_config = RuntimeConfig(
+            enable_checkpointing=True,
+            timeout_per_attempt=3600.0
+        )
+
+        with caplog.at_level(logging.WARNING):
+            run_multi_gpu_inference(
+                mock_fasta_files,
+                temp_output_dir,
+                model_config,
+                timeout=600.0,
+                runtime_config=custom_config
             )
 
         # Verify deprecation warning was logged

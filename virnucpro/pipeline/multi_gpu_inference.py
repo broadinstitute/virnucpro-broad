@@ -54,7 +54,9 @@ def run_multi_gpu_inference(
         output_dir: Directory for outputs (index, shards, logs, merged result)
         model_config: Model architecture configuration (NOT operational params)
         world_size: Number of GPUs (default: torch.cuda.device_count())
-        timeout: DEPRECATED - use runtime_config.timeout_per_attempt instead
+        timeout: DEPRECATED - use runtime_config.timeout_per_attempt instead.
+            If both timeout and runtime_config.timeout_per_attempt are provided,
+            timeout takes precedence (for backward compatibility).
         runtime_config: Runtime operational configuration (checkpointing, retries, etc.)
 
     Returns:
