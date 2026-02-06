@@ -7,8 +7,10 @@ Uses mocking to avoid GPU/model dependencies.
 
 import sys
 import pytest
-from pathlib import Path
+import click
+import logging
 from click.testing import CliRunner
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from virnucpro.cli.main import cli
@@ -462,3 +464,95 @@ def test_h5_to_pt_cleanup_on_failure(tmp_path):
     # Verify cleanup
     assert not any(f.exists() for f in partial_files), \
         "All partial .pt files should be cleaned up"
+
+
+def test_h5_to_pt_missing_sequence_handling(tmp_path, caplog):
+    """Test that missing sequences in HDF5 are logged as warnings.
+
+    Gap: _stream_h5_to_pt_files should handle cases where a sequence exists
+    in nucleotide feature files but is missing from v2.0 HDF5 output.
+    """
+    import h5py
+    import numpy as np
+    import torch
+    from virnucpro.pipeline.prediction import _stream_h5_to_pt_files
+
+    h5_path = tmp_path / "embeddings.h5"
+    embedding_dim = 2560
+
+    seq_ids = ["seq_0", "seq_2", "seq_4"]
+    embeddings = np.random.randn(len(seq_ids), embedding_dim).astype(np.float32)
+
+    with h5py.File(h5_path, 'w') as f:
+        f.create_dataset('sequence_ids', data=[s.encode() for s in seq_ids])
+        f.create_dataset('embeddings', data=embeddings)
+
+    nuc_dir = tmp_path / "nuc_features"
+    nuc_dir.mkdir()
+
+    nuc_data = {
+        "seq_0": torch.randn(embedding_dim),
+        "seq_1": torch.randn(embedding_dim),
+        "seq_2": torch.randn(embedding_dim),
+        "seq_3": torch.randn(embedding_dim),
+        "seq_4": torch.randn(embedding_dim),
+    }
+    nuc_path = nuc_dir / "output_0_DNABERT_S.pt"
+    torch.save(nuc_data, nuc_path)
+
+    output_dir = tmp_path / "esm_output"
+
+    with caplog.at_level(logging.WARNING):
+        pt_files = _stream_h5_to_pt_files(h5_path, output_dir, [nuc_path])
+
+    assert len(pt_files) == 1
+
+    pt_data = torch.load(pt_files[0], weights_only=False)
+    assert "seq_0" in pt_data
+    assert "seq_2" in pt_data
+    assert "seq_4" in pt_data
+    assert "seq_1" not in pt_data
+    assert "seq_3" not in pt_data
+
+    assert any("seq_1" in record.message for record in caplog.records), \
+        "Expected warning for missing seq_1"
+    assert any("seq_3" in record.message for record in caplog.records), \
+        "Expected warning for missing seq_3"
+
+
+def test_h5_to_pt_bytes_sequence_ids(tmp_path):
+    """Test that HDF5 sequence IDs stored as bytes are handled correctly.
+
+    HDF5 datasets may store strings as fixed-length bytes. This test verifies
+    the decode() call in _stream_h5_to_pt_files handles this correctly.
+    """
+    import h5py
+    import numpy as np
+    import torch
+    from virnucpro.pipeline.prediction import _stream_h5_to_pt_files
+
+    h5_path = tmp_path / "embeddings.h5"
+    embedding_dim = 2560
+
+    seq_ids = ["seq_0", "seq_1", "seq_2"]
+    embeddings = np.random.randn(len(seq_ids), embedding_dim).astype(np.float32)
+
+    with h5py.File(h5_path, 'w') as f:
+        f.create_dataset('sequence_ids', data=[s.encode() for s in seq_ids])
+        f.create_dataset('embeddings', data=embeddings)
+
+    nuc_dir = tmp_path / "nuc_features"
+    nuc_dir.mkdir()
+
+    nuc_data = {sid: torch.randn(embedding_dim) for sid in seq_ids}
+    nuc_path = nuc_dir / "output_0_DNABERT_S.pt"
+    torch.save(nuc_data, nuc_path)
+
+    output_dir = tmp_path / "esm_output"
+    pt_files = _stream_h5_to_pt_files(h5_path, output_dir, [nuc_path])
+
+    assert len(pt_files) == 1
+    pt_data = torch.load(pt_files[0], weights_only=False)
+    assert len(pt_data) == 3
+    for sid in seq_ids:
+        assert sid in pt_data

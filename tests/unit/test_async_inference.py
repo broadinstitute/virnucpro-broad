@@ -592,7 +592,7 @@ class TestCheckpointDirectoryStructure:
         mock_param2 = Mock()
         mock_param2.dtype = torch.float16
         mock_param2.numel.return_value = 2000
-        mock_model.parameters.return_value = [mock_param2]
+        mock_model.parameters.return_value = [mock_param1, mock_param2]
 
         device = torch.device("cuda:0")
         runner = AsyncInferenceRunner(mock_model, device, checkpoint_dir=checkpoint_base, rank=0)
