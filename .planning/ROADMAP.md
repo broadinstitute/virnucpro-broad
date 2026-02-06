@@ -150,11 +150,11 @@ Plans:
 **Plans**: 5 plans in 3 waves
 
 Plans:
-- [ ] 08-01-PLAN.md — FP16 model conversion with feature flag and FlashAttention alignment
-- [ ] 08-02-PLAN.md — NaN/Inf detection, gpu_worker FP16 passthrough (ESM-2 + DNABERT-S), and unit tests
-- [ ] 08-03-PLAN.md — FP16 vs FP32 equivalence integration tests (stratified validation)
-- [ ] 08-04-PLAN.md — FP16 vs FP32 (Phase 7 baseline) throughput benchmarking
-- [ ] 08-05-PLAN.md — Selective FP32 fallback for LayerNorm (PREC-03, conditional on 08-03 failure)
+- [x] 08-01-PLAN.md — FP16 model conversion with feature flag and FlashAttention alignment
+- [x] 08-02-PLAN.md — NaN/Inf detection, gpu_worker FP16 passthrough (ESM-2 + DNABERT-S), and unit tests
+- [x] 08-03-PLAN.md — FP16 vs FP32 equivalence integration tests (stratified validation)
+- [x] 08-04-PLAN.md — FP16 vs FP32 (Phase 7 baseline) throughput benchmarking
+- [ ] 08-05-PLAN.md — Selective FP32 fallback for LayerNorm (PREC-03, conditional on 08-03 failure - SKIPPED)
 
 ### Phase 9: Checkpointing Integration
 
@@ -209,8 +209,8 @@ Phases execute in numeric order: 5 → 6 → 7 → 8 → 9 → 10
 | 4.1. BFloat16 Precision Integration | v1.0 | 3/3 | Complete | 2026-02-02 |
 | 5. Async DataLoader Foundation | v2.0 | 5/5 | Complete | 2026-02-03 |
 | 6. Sequence Packing Integration | v2.0 | 8/8 | Complete | 2026-02-04 |
-| 7. Multi-GPU Coordination | v2.0 | 0/8 | Planned | - |
-| 8. FP16 Precision Validation | v2.0 | 0/5 | Planned | - |
+| 7. Multi-GPU Coordination | v2.0 | 8/8 | Complete | 2026-02-05 |
+| 8. FP16 Precision Validation | v2.0 | 4/5 | Needs human GPU testing | - |
 | 9. Checkpointing Integration | v2.0 | 0/TBD | Not started | - |
 | 10. Performance Validation & Tuning | v2.0 | 0/TBD | Not started | - |
 
