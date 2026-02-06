@@ -1,0 +1,51 @@
+virnucpro/pipeline/gpu_worker.py
+  73d5b4ecf77d33d1 170-173,175,367,369-384,386-401,403,412-413,423,438
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "482f4a335124c32b89f640cf17861ac43cab4f84",
+  "prompts": {
+    "094eb0febb50f8d2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ae31ecf-1e0a-48eb-9533-6c90812714fa",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 122,
+      "total_deletions": 5,
+      "accepted_lines": 161,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/30375eb30174e136bb0309954890b6796a9abd649c85f29c3b2f82ab0d9f632f"
+    },
+    "73d5b4ecf77d33d1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "29ac33fa-13c5-45c6-88f0-efcf023573c2",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 36,
+      "total_deletions": 21,
+      "accepted_lines": 233,
+      "overriden_lines": 0
+    },
+    "ccda82b2a99d2561": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "81bee629-634c-43bb-acb7-296216a2fc28",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 115,
+      "total_deletions": 113,
+      "accepted_lines": 0,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/8d9155497995ff94b8d89193ad8fc34ae819039da4867831d5797b2af2916a2c"
+    }
+  }
+}
