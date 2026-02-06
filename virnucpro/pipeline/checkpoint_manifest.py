@@ -104,6 +104,7 @@ class CheckpointManifest:
             fcntl.flock(fd, fcntl.LOCK_EX)
         except OSError as lock_err:
             os.close(fd)
+            os.unlink(self._lock_path)
             raise RuntimeError(f"Failed to acquire lock: {lock_err}")
         return fd
 
@@ -257,9 +258,14 @@ class CheckpointManifest:
             manifest = self._load_manifest()
 
             # Validate checkpoint file path is within expected directory
+            if ".." in checkpoint_file or "/" in checkpoint_file or "\\" in checkpoint_file:
+                raise ValueError(f"Invalid checkpoint file path (path traversal not allowed): {checkpoint_file}")
+
             checkpoint_dir = (self.manifest_path.parent / f"shard_{rank}").resolve()
             expected_path = checkpoint_dir / checkpoint_file
-            if not expected_path.resolve().is_relative_to(checkpoint_dir.resolve()):
+
+            resolved = expected_path.resolve()
+            if not resolved.is_relative_to(checkpoint_dir):
                 raise ValueError(f"Invalid checkpoint file path: {checkpoint_file}")
 
             # Validate checkpoint file exists
@@ -606,8 +612,13 @@ class CheckpointManifest:
             archive_dir: Directory to archive manifest to
 
         Raises:
-            ValueError: If any shards are not complete
+            ValueError: If any shards are not complete or archive_dir is invalid
         """
+        archive_dir = Path(archive_dir).resolve()
+        expected_base = self.manifest_path.parent.resolve()
+        if not archive_dir.is_relative_to(expected_base):
+            raise ValueError(f"Invalid archive directory: {archive_dir} is outside expected base {expected_base}")
+
         fd = self._acquire_file_lock()
         try:
             manifest = self._load_manifest()
@@ -624,7 +635,6 @@ class CheckpointManifest:
                 )
 
             # Create archive directory and copy manifest
-            archive_dir = Path(archive_dir)
             archive_dir.mkdir(parents=True, exist_ok=True)
             archive_path = archive_dir / "manifest_final.json"
 
@@ -702,6 +712,7 @@ class CheckpointManifest:
                     manifest.setdefault("input_fingerprint", "")
                     manifest.setdefault("model_config_hash", "")
                     manifest.setdefault("global_checkpoints", [])
+                    manifest["version"] = "2.0"
                 return manifest
         except json.JSONDecodeError as e:
             logger.error(f"Primary manifest corrupted: {e}")
@@ -737,9 +748,10 @@ class CheckpointManifest:
         )
 
     def _save_manifest(self, manifest: Dict):
-        """Save manifest to disk with atomic write and backup.
+        """Save manifest to disk with atomic write.
 
-        Creates backup after successful write, not before, to maintain atomicity.
+        Uses atomic replace with .tmp file for crash recovery. No separate backup
+        is needed since .tmp file provides recovery capability if write is interrupted.
 
         Args:
             manifest: Manifest dictionary to save
@@ -749,13 +761,6 @@ class CheckpointManifest:
             json.dump(manifest, f, indent=2)
 
         temp_path.replace(self.manifest_path)
-
-        if self.manifest_path.exists():
-            backup_path = self.manifest_path.with_suffix('.backup')
-            try:
-                shutil.copy2(self.manifest_path, backup_path)
-            except OSError:
-                pass  # Backup may fail if path is invalid, primary write succeeded
 
     def exists(self) -> bool:
         """Check if manifest file exists.
