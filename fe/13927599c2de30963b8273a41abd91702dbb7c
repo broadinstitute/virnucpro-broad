@@ -1,0 +1,26 @@
+.planning/phases/09-checkpointing-integration/09-05-SUMMARY.md
+  73d5b4ecf77d33d1 1-174
+.planning/STATE.md
+  73d5b4ecf77d33d1 14-16,18,23-25,40,43-44,140-148,189,194-195,200,203
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "fe13927599c2de30963b8273a41abd91702dbb7c",
+  "prompts": {
+    "73d5b4ecf77d33d1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "29ac33fa-13c5-45c6-88f0-efcf023573c2",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 198,
+      "total_deletions": 14,
+      "accepted_lines": 198,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/65ec0c01a98098c2dbe681ab6902798871f48061f8f64d76d8f396ca5c10a477"
+    }
+  }
+}
