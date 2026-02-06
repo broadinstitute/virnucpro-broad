@@ -642,6 +642,14 @@ def run_prediction(
                 cuda_devices = detect_cuda_devices()
                 num_gpus = len(cuda_devices) if cuda_devices else 1
 
+                # Validate world_size against actual GPU count (Gap 5)
+                actual_gpu_count = torch.cuda.device_count() if torch.cuda.is_available() else 0
+                if num_gpus > actual_gpu_count and actual_gpu_count > 0:
+                    raise RuntimeError(
+                        f"Requested {num_gpus} GPUs but only {actual_gpu_count} available. "
+                        f"Use --gpus to specify available GPU IDs, or set CUDA_VISIBLE_DEVICES."
+                    )
+
                 esm_model_config = {
                     'model_type': 'esm2',
                     'model_name': 'esm2_t36_3B_UR50D',
@@ -669,14 +677,26 @@ def run_prediction(
 
                 # Convert v2.0 HDF5 output to v1.0 per-file .pt format for merge stage compatibility
                 # Uses streaming approach to avoid loading entire HDF5 into memory (Issue 2)
+                conversion_start = time.monotonic()
                 protein_feature_files = _stream_h5_to_pt_files(
                     esm_output_path, protein_split_dir, nucleotide_feature_files
                 )
+                conversion_elapsed = time.monotonic() - conversion_start
                 failed_files = []  # No failures (we fail-fast above)
 
                 logger.info(f"v2.0 ESM-2 complete: {len(protein_feature_files)} feature files created")
+                logger.info(
+                    f"HDF5-to-PT conversion: {conversion_elapsed:.1f}s for "
+                    f"{len(protein_feature_files)} files"
+                )
+                if conversion_elapsed > 60:
+                    logger.warning(
+                        f"HDF5-to-PT conversion took {conversion_elapsed:.1f}s - "
+                        f"consider Phase 10.2 merge stage HDF5 refactor"
+                    )
             else:
                 # --- v1.0 ESM-2 CODE BELOW (UNCHANGED) ---
+                esm_v1_start = time.monotonic()
                 from virnucpro.pipeline.features import extract_esm_features
 
                 protein_feature_files = []
@@ -865,6 +885,11 @@ def run_prediction(
                                 failed_files.append((pro_file, str(e)))
                             pbar.update(1)
                             pbar.set_postfix_str(f"Current: {pro_file.name}")
+
+                esm_v1_elapsed = time.monotonic() - esm_v1_start
+                logger.info(
+                    f"v1.0 ESM-2 complete: {len(protein_feature_files)} files in {esm_v1_elapsed:.1f}s"
+                )
 
             checkpoint_manager.mark_stage_completed(
                 state,
