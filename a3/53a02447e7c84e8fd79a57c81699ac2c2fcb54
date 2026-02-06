@@ -1,0 +1,38 @@
+.planning/phases/09-checkpointing-integration/09-01-PLAN.md
+  e5f663ff99c456d9 1-138
+.planning/phases/09-checkpointing-integration/09-07-PLAN.md
+  e5f663ff99c456d9 1-165
+.planning/phases/09-checkpointing-integration/09-03-PLAN.md
+  e5f663ff99c456d9 1-175
+.planning/phases/09-checkpointing-integration/09-04-PLAN.md
+  e5f663ff99c456d9 1-161
+.planning/phases/09-checkpointing-integration/09-05-PLAN.md
+  e5f663ff99c456d9 1-215
+.planning/phases/09-checkpointing-integration/09-06-PLAN.md
+  e5f663ff99c456d9 1-177
+.planning/phases/09-checkpointing-integration/09-02-PLAN.md
+  e5f663ff99c456d9 1-154
+.planning/ROADMAP.md
+  e5f663ff99c456d9 173,176-182,220,224
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "a353a02447e7c84e8fd79a57c81699ac2c2fcb54",
+  "prompts": {
+    "e5f663ff99c456d9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "15bc83ee-14f2-4928-a10c-0a294c095b67",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 1195,
+      "total_deletions": 4,
+      "accepted_lines": 1195,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/2ce62871d8b4a10d301b5dcf7e67e277999f7f3c2ee284f50b0cbb5fc715904b"
+    }
+  }
+}
