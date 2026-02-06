@@ -1,0 +1,28 @@
+.planning/phases/10.1-cli-integration-for-v2-0-architecture/10.1-03-PLAN.md
+  fb71ee5066699143 1-240
+.planning/ROADMAP.md
+  fb71ee5066699143 252,255
+.planning/phases/10.1-cli-integration-for-v2-0-architecture/10.1-04-PLAN.md
+  fb71ee5066699143 1-334
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "837df648463d938d9b0acc01b1d484fc33314a2e",
+  "prompts": {
+    "fb71ee5066699143": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "838aca34-4030-4a6a-9e2e-5314441f6d10",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 576,
+      "total_deletions": 2,
+      "accepted_lines": 576,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/a038d81c5b8fb91e3b75bfe417953dca0625f7632a024de745dd9613b2ee2a47"
+    }
+  }
+}
