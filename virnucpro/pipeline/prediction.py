@@ -677,23 +677,37 @@ def run_prediction(
 
                 # Convert v2.0 HDF5 output to v1.0 per-file .pt format for merge stage compatibility
                 # Uses streaming approach to avoid loading entire HDF5 into memory (Issue 2)
-                conversion_start = time.monotonic()
-                protein_feature_files = _stream_h5_to_pt_files(
-                    esm_output_path, protein_split_dir, nucleotide_feature_files
-                )
-                conversion_elapsed = time.monotonic() - conversion_start
-                failed_files = []  # No failures (we fail-fast above)
-
-                logger.info(f"v2.0 ESM-2 complete: {len(protein_feature_files)} feature files created")
-                logger.info(
-                    f"HDF5-to-PT conversion: {conversion_elapsed:.1f}s for "
-                    f"{len(protein_feature_files)} files"
-                )
-                if conversion_elapsed > 60:
-                    logger.warning(
-                        f"HDF5-to-PT conversion took {conversion_elapsed:.1f}s - "
-                        f"consider Phase 10.2 merge stage HDF5 refactor"
+                # Wrap in try/finally to clean up partial files on crash (Gap 6)
+                esm_pt_files_created = []
+                try:
+                    conversion_start = time.monotonic()
+                    protein_feature_files = _stream_h5_to_pt_files(
+                        esm_output_path, protein_split_dir, nucleotide_feature_files
                     )
+                    conversion_elapsed = time.monotonic() - conversion_start
+                    esm_pt_files_created = list(protein_feature_files)  # Track for cleanup
+                    failed_files = []  # No failures (we fail-fast above)
+
+                    logger.info(f"v2.0 ESM-2 complete: {len(protein_feature_files)} feature files created")
+                    logger.info(
+                        f"HDF5-to-PT conversion: {conversion_elapsed:.1f}s for "
+                        f"{len(protein_feature_files)} files"
+                    )
+                    if conversion_elapsed > 60:
+                        logger.warning(
+                            f"HDF5-to-PT conversion took {conversion_elapsed:.1f}s - "
+                            f"consider Phase 10.2 merge stage HDF5 refactor"
+                        )
+                except Exception:
+                    # Clean up any partial .pt files created before the crash
+                    for pt_file in esm_pt_files_created:
+                        try:
+                            if Path(pt_file).exists():
+                                Path(pt_file).unlink()
+                                logger.debug(f"Cleaned up partial file: {pt_file}")
+                        except OSError:
+                            pass  # Best-effort cleanup
+                    raise  # Re-raise the original exception
             else:
                 # --- v1.0 ESM-2 CODE BELOW (UNCHANGED) ---
                 esm_v1_start = time.monotonic()

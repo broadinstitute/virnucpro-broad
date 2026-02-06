@@ -178,6 +178,23 @@ def gpu_worker(
         resumed_ids: Set[str] = set()
         resumed_embeddings = None
         if enable_checkpointing and not force_restart:
+            # Check for v1.0 checkpoint format (Gap 4: format compatibility)
+            if checkpoint_dir:
+                checkpoint_base = Path(checkpoint_dir)
+                if checkpoint_base.exists():
+                    # v1.0 uses .done markers; v2.0 uses shard_*/batch_*.pt
+                    done_files = list(checkpoint_base.glob("*.done"))
+                    shard_dirs = list(checkpoint_base.glob("shard_*"))
+                    if done_files and not shard_dirs:
+                        raise RuntimeError(
+                            f"v1.0 checkpoint format detected in {checkpoint_base}: "
+                            f"found {len(done_files)} .done marker files but no shard_* directories. "
+                            f"v2.0 cannot resume from v1.0 checkpoints. "
+                            f"Options: (1) Use --v1-fallback to resume with v1.0, "
+                            f"(2) Use --force-resume to start fresh with v2.0, "
+                            f"(3) Delete {checkpoint_base} and re-run."
+                        )
+
             logger.info(f"Rank {rank}: Checking for existing checkpoints in {checkpoint_dir}")
             resumed_ids_list, resumed_embs, resume_batch_idx, corrupted_ids = resume_from_checkpoints(
                 checkpoint_dir, rank, force_restart
