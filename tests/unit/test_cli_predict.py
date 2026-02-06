@@ -13,15 +13,18 @@ from unittest.mock import patch, MagicMock
 
 from virnucpro.cli.main import cli
 
-if 'esm' not in sys.modules:
-    sys.modules['esm'] = MagicMock()
-
 try:
     from virnucpro.pipeline.runtime_config import RuntimeConfig
     RUNTIME_CONFIG_IMPORTED = True
 except ImportError as e:
     RUNTIME_CONFIG_IMPORTED = False
     RUNTIME_CONFIG_IMPORT_ERROR = str(e)
+
+if 'esm' not in sys.modules:
+    if not RUNTIME_CONFIG_IMPORTED:
+        sys.modules['esm'] = MagicMock()
+    else:
+        raise ImportError("esm module required but not available")
 
 
 @pytest.fixture
@@ -33,7 +36,7 @@ def tmp_fasta(tmp_path):
 
 
 @pytest.fixture
-def cli_mocks(tmp_path):
+def cli_mocks():
     """Common mocking setup for CLI tests. Creates fresh mocks per test."""
     import torch
     from unittest.mock import MagicMock, patch
