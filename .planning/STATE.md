@@ -11,18 +11,18 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 9 of 10 (Checkpointing Integration) - IN PROGRESS
-Plan: 4 of 6 in phase - COMPLETE (Wave 2: 2/3)
-Status: GPU worker checkpoint integration complete
-Last activity: 2026-02-06 — Completed 09-04-PLAN.md (GPU worker checkpoint integration)
+Plan: 5 of 6 in phase - COMPLETE (Wave 2: 3/3 complete)
+Status: Coordinator integration with fault-tolerant retry policies complete
+Last activity: 2026-02-06 — Completed 09-05-PLAN.md (Coordinator integration)
 
-Progress: [███████░░░] 75/TBD plans (v1.0: 34/34 complete, v2.0: 41/TBD)
+Progress: [███████░░░] 76/TBD plans (v1.0: 34/34 complete, v2.0: 42/TBD)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 74 (v1.0: 34, v2.0: 40)
-- Average duration: 3.1 min
-- Total execution time: 4.0 hours
+- Total plans completed: 75 (v1.0: 34, v2.0: 41)
+- Average duration: 3.2 min
+- Total execution time: 4.1 hours
 
 **By Phase:**
 
@@ -37,11 +37,11 @@ Progress: [███████░░░] 75/TBD plans (v1.0: 34/34 complete, v
 | 6 | 8 | 28 min | 3.5 min |
 | 7 | 8 | 29 min | 3.6 min |
 | 8 | 4 (complete) | 13 min | 3.25 min |
-| 9 | 4 | 18 min | 4.5 min |
+| 9 | 5 | 22.5 min | 4.5 min |
 
 **Recent Trend:**
-- Last 5 plans: ~3.8 min average
-- Trend: Steady (Phase 9 Wave 2 in progress)
+- Last 5 plans: ~4.2 min average
+- Trend: Steady (Phase 9 Wave 2 complete)
 
 *Updated after each plan completion*
 
@@ -137,6 +137,15 @@ Recent decisions affecting current work:
 - **Per-shard checkpoint isolation (09-04)**: checkpoint_dir = checkpoint_base_dir / f"shard_{rank}" prevents cross-GPU conflicts when multiple workers checkpoint simultaneously
 - **SIGTERM handler for spot preemption (09-04)**: signal.signal(SIGTERM, sigterm_handler) saves emergency checkpoint when spot instance receives termination signal (30s timeout, exit code 143)
 - **Differentiated error handling (09-04)**: Categorize errors (cuda_oom, cuda_runtime, generic) via error_type field while maintaining backward compatibility (error field contains message) - enables targeted retry strategies
+- **RuntimeConfig separation (09-05)**: Operational parameters (checkpointing, retries, timeouts) separated from model architecture config - clean serialization boundary for worker passing
+- **Per-attempt timeout (09-05)**: timeout_per_attempt applies per retry attempt, not globally - enables infinite spot retry while preventing individual attempt hangs
+- **Spot preemption infinite retry (09-05)**: Spot preemption (SIGTERM exitcode 143) retries infinitely with 60s polling - capacity returns eventually
+- **Poison input circuit breaker (09-05)**: Track failures per (rank, batch_idx), trigger circuit breaker after 2 failures on same batch to isolate toxic sequences
+- **Coordinator-only manifest writes (09-05)**: Workers signal via results_queue, only coordinator updates manifest - eliminates POSIX lock contention
+- **Async monitoring non-blocking (09-05)**: Coordinator polls workers every 5s, continues monitoring healthy workers during retries - enables partial completion
+- **Elastic redistribution (09-05)**: Failed shard work reassigned to lowest-numbered active worker via CheckpointManifest.reassign_shard()
+- **SIGTERM handler coordination (09-05)**: Coordinator waits 30s for workers to save emergency checkpoints before terminating - graceful spot instance handling
+- **Checkpoint validation before respawn (09-05)**: Remove orphaned .tmp files and verify .done markers before worker restart - prevents corruption propagation
 
 ### Pending Todos
 
@@ -177,17 +186,18 @@ None yet.
 - ✅ FP16 performance benchmarks (454K seq/hour, 6.06GB memory)
 - Note: LayerNorm may have limited dynamic range in FP16 - selective FP32 for specific layers if needed
 
-**Phase 9 (Checkpointing Integration):** IN PROGRESS - Wave 2
+**Phase 9 (Checkpointing Integration):** IN PROGRESS - Wave 2 COMPLETE
 - ✅ Checkpoint foundation (CheckpointTrigger, AsyncCheckpointWriter, validation, resume) - 09-01
 - ✅ CheckpointManifest for multi-GPU coordination - 09-02
 - ✅ AsyncInferenceRunner checkpoint integration (batch boundaries, resume, metadata) - 09-03
 - ✅ GPU worker integration (resume, index filtering, SIGTERM, error tiers) - 09-04
-- Next: Coordinator integration (09-05)
+- ✅ Coordinator integration (differentiated retry policies, async monitoring, elastic redistribution) - 09-05
+- Next: End-to-end integration tests (09-06)
 
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 09-04-PLAN.md (GPU worker checkpoint integration)
+Stopped at: Completed 09-05-PLAN.md (Coordinator integration with fault-tolerant retry policies)
 Resume file: None
 
-**Next step:** Continue Phase 9 Wave 2 - Coordinator integration (09-05)
+**Next step:** Continue Phase 9 Wave 3 - End-to-end integration tests (09-06)
