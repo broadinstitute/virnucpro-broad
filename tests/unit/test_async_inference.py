@@ -14,6 +14,8 @@ from unittest.mock import Mock, MagicMock, patch
 from pathlib import Path
 from typing import Dict, Any, List
 
+from virnucpro.utils.precision import should_use_fp16
+
 
 # Skip entire module if CUDA not available
 pytestmark = pytest.mark.skipif(
@@ -550,7 +552,8 @@ class TestCheckpointDirectoryStructure:
         device = torch.device("cuda:0")
         runner = AsyncInferenceRunner(mock_model, device, checkpoint_dir=checkpoint_base, rank=0)
 
-        runner._ckpt_embeddings = [torch.randn(10, 768)]
+        expected_dtype = torch.float16 if should_use_fp16() else torch.float32
+        runner._ckpt_embeddings = [torch.randn(10, 768, dtype=expected_dtype)]
         runner._ckpt_ids = ["seq_0", "seq_1", "seq_2"]
         runner._ckpt_batch_idx = 0
 
@@ -568,7 +571,8 @@ class TestCheckpointDirectoryStructure:
 
         checkpoint_data = torch.load(expected_ckpt, weights_only=False, map_location='cpu')
         assert len(checkpoint_data["embeddings"]) == 10
-        assert str(checkpoint_data["embeddings"].dtype) == 'float32'
+        expected_dtype = torch.float16 if should_use_fp16() else torch.float32
+        assert checkpoint_data["embeddings"].dtype == expected_dtype
         assert checkpoint_data["sequence_ids"] == ["seq_0", "seq_1", "seq_2"]
 
         double_nested = checkpoint_base / "shard_0" / "shard_0" / "batch_00000.pt"
@@ -590,14 +594,16 @@ class TestCheckpointDirectoryStructure:
         mock_param2.numel.return_value = 2000
         mock_model.parameters.return_value = [mock_param1, mock_param2]
 
-        device = torch.device("cuda:0")
-        runner = AsyncInferenceRunner(mock_model, device, checkpoint_dir=checkpoint_base, rank=0)
-
-        mock_model.parameters.assert_called_once()
+        # Sanity check: verify mock setup produces expected values
         assert mock_param1.dtype == torch.float32
         assert mock_param1.numel() == 1000
         assert mock_param2.dtype == torch.float16
         assert mock_param2.numel() == 2000
+
+        device = torch.device("cuda:0")
+        runner = AsyncInferenceRunner(mock_model, device, checkpoint_dir=checkpoint_base, rank=0)
+
+        mock_model.parameters.assert_called_once()
 
     def test_checkpoint_dir_relative_path(self, tmp_path, monkeypatch):
         """Verify checkpoint_dir works with relative paths converted to absolute."""
