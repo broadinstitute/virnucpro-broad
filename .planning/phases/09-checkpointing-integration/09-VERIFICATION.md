@@ -8,6 +8,8 @@ human_verification:
     expected: "Worker killed with SIGKILL during batch processing. On restart, pipeline resumes from last checkpoint and completes remaining sequences without reprocessing checkpointed sequences."
     result: "✅ VERIFIED - test_kill_resume_aggressive.py: 2000 sequences, killed after 200 checkpointed (10%), resumed and completed all 2000 with zero duplicates"
     verified_at: "2026-02-06T15:25:00Z"
+    verified_by: "commit af78442 (test_kill_resume_aggressive.py)"
+    artifacts: ["KILL_RESUME_TEST_SUCCESS.md"]
 ---
 
 # Phase 9: Checkpointing Integration Verification Report

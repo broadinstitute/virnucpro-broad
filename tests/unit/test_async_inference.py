@@ -10,6 +10,7 @@ import pytest
 import torch
 import numpy as np
 from unittest.mock import Mock, MagicMock, patch
+from pathlib import Path
 from typing import Dict, Any, List
 
 
@@ -466,6 +467,7 @@ class TestCheckpointDirectoryStructure:
             f"Expected 1 shard directory, found {shard_subdir_count}. "
             f"Directories: {[d.name for d in shard_dirs]}"
         )
+        assert runner.shard_checkpoint_dir is not None
         assert runner.shard_checkpoint_dir.name == f"shard_{rank}"
 
     def test_checkpoint_dir_none_disables_checkpointing(self):
@@ -529,3 +531,79 @@ class TestCheckpointDirectoryStructure:
                     assert runners[rank].shard_checkpoint_dir != runners[other_rank].shard_checkpoint_dir, (
                         f"Ranks {rank} and {other_rank} should have different directories"
                     )
+
+    def test_checkpoint_writes_to_correct_shard_directory(self, tmp_path):
+        """Verify actual checkpoint writes use shard_checkpoint_dir path."""
+        from virnucpro.pipeline.async_inference import AsyncInferenceRunner
+
+        checkpoint_base = tmp_path / "checkpoints"
+        checkpoint_base.mkdir()
+
+        mock_model = Mock()
+        mock_param = Mock()
+        mock_param.dtype = torch.float32
+        mock_param.numel.return_value = 1000000
+        mock_param.device = torch.device("cuda:0")
+        mock_model.parameters.side_effect = lambda: iter([mock_param])
+
+        device = torch.device("cuda:0")
+        runner = AsyncInferenceRunner(mock_model, device, checkpoint_dir=checkpoint_base, rank=0)
+
+        runner._ckpt_embeddings = [torch.randn(10, 768)]
+        runner._ckpt_ids = ["seq_0", "seq_1", "seq_2"]
+        runner._ckpt_batch_idx = 0
+
+        runner._write_checkpoint("test_trigger")
+
+        assert runner.writer is not None
+        runner.writer.executor.shutdown(wait=True)
+
+        assert runner.shard_checkpoint_dir is not None
+        expected_ckpt = runner.shard_checkpoint_dir / "batch_00000.pt"
+        assert expected_ckpt.exists(), f"Checkpoint should exist at {expected_ckpt}"
+
+        double_nested = checkpoint_base / "shard_0" / "shard_0" / "batch_00000.pt"
+        assert not double_nested.exists(), f"Double-nested checkpoint found at {double_nested}"
+
+    def test_model_parameter_access_pattern(self, tmp_path):
+        """Verify correct parameter access when multiple parameters exist."""
+        from virnucpro.pipeline.async_inference import AsyncInferenceRunner
+
+        checkpoint_base = tmp_path / "checkpoints"
+        checkpoint_base.mkdir()
+
+        mock_model = Mock()
+        mock_param1 = Mock()
+        mock_param1.dtype = torch.float32
+        mock_param1.numel.return_value = 1000
+        mock_param2 = Mock()
+        mock_param2.dtype = torch.float16
+        mock_param2.numel.return_value = 2000
+        mock_model.parameters.return_value = [mock_param1, mock_param2]
+
+        device = torch.device("cuda:0")
+        runner = AsyncInferenceRunner(mock_model, device, checkpoint_dir=checkpoint_base, rank=0)
+
+        mock_model.parameters.assert_called_once()
+
+    def test_checkpoint_dir_relative_path(self, tmp_path):
+        """Verify checkpoint_dir works with relative paths converted to absolute."""
+        import os
+        from virnucpro.pipeline.async_inference import AsyncInferenceRunner
+
+        mock_model = Mock()
+        mock_param = Mock()
+        mock_param.dtype = torch.float32
+        mock_param.numel.return_value = 1000000
+        mock_model.parameters.return_value = [mock_param]
+
+        original_cwd = Path.cwd()
+        try:
+            os.chdir(tmp_path)
+            rel_path = Path("relative_checkpoints")
+            runner = AsyncInferenceRunner(mock_model, torch.device("cuda:0"), checkpoint_dir=rel_path, rank=0)
+            assert runner.shard_checkpoint_dir is not None
+            assert runner.shard_checkpoint_dir.name == "shard_0"
+            assert (tmp_path / "relative_checkpoints" / "shard_0").exists()
+        finally:
+            os.chdir(original_cwd)
