@@ -16,9 +16,8 @@ from virnucpro.cli.main import cli
 try:
     from virnucpro.pipeline.runtime_config import RuntimeConfig
     RUNTIME_CONFIG_IMPORTED = True
-except ImportError as e:
+except ImportError:
     RUNTIME_CONFIG_IMPORTED = False
-    RUNTIME_CONFIG_IMPORT_ERROR = str(e)
 
 
 
@@ -78,7 +77,7 @@ def cli_mocks():
 def test_parallel_routes_esm2_to_v2(tmp_fasta, tmp_path, cli_mocks):
     """Test that --parallel routes ESM-2 to v2.0 architecture by default."""
     if not RUNTIME_CONFIG_IMPORTED:
-        pytest.skip(f"RuntimeConfig import failed: {RUNTIME_CONFIG_IMPORT_ERROR}")
+        pytest.skip("RuntimeConfig not available")
 
     runner = CliRunner()
     result = runner.invoke(cli, [
@@ -116,7 +115,7 @@ def test_parallel_routes_esm2_to_v2(tmp_fasta, tmp_path, cli_mocks):
 def test_v1_fallback_routes_all_to_v1(tmp_fasta, tmp_path, cli_mocks):
     """Test that --v1-fallback routes all stages to v1.0 architecture."""
     if not RUNTIME_CONFIG_IMPORTED:
-        pytest.skip(f"RuntimeConfig import failed: {RUNTIME_CONFIG_IMPORT_ERROR}")
+        pytest.skip("RuntimeConfig not available")
 
     runner = CliRunner()
     result = runner.invoke(cli, [
@@ -164,7 +163,7 @@ def test_single_gpu_routes_to_v1(tmp_fasta, tmp_path, cli_mocks):
 def test_parallel_constructs_runtime_config_with_resume(tmp_fasta, tmp_path, cli_mocks):
     """Test that --resume constructs RuntimeConfig with checkpointing enabled."""
     if not RUNTIME_CONFIG_IMPORTED:
-        pytest.skip(f"RuntimeConfig import failed: {RUNTIME_CONFIG_IMPORT_ERROR}")
+        pytest.skip("RuntimeConfig not available")
 
     runner = CliRunner()
     result = runner.invoke(cli, [
@@ -189,7 +188,7 @@ def test_parallel_constructs_runtime_config_with_resume(tmp_fasta, tmp_path, cli
 def test_parallel_force_resume_sets_config(tmp_fasta, tmp_path, cli_mocks):
     """Test that --force-resume sets force_restart in RuntimeConfig."""
     if not RUNTIME_CONFIG_IMPORTED:
-        pytest.skip(f"RuntimeConfig import failed: {RUNTIME_CONFIG_IMPORT_ERROR}")
+        pytest.skip("RuntimeConfig not available")
 
     runner = CliRunner()
     result = runner.invoke(cli, [
