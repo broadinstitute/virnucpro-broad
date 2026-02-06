@@ -1,0 +1,24 @@
+test_kill_resume_aggressive.py
+  bd9f569830f8f7b4 1-276
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "9ebe3879cc9e4216d101e7bce01807b29e39c1b1",
+  "prompts": {
+    "bd9f569830f8f7b4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef533e41-3e09-49cd-ae33-ca47da119248",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 276,
+      "total_deletions": 0,
+      "accepted_lines": 276,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/603dd88538c97f70f9d017fe624415ae7cac2f53b405056b1565578626592a10"
+    }
+  }
+}
