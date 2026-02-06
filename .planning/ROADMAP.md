@@ -183,28 +183,56 @@ Plans:
 
 ### Phase 10: Performance Validation & Tuning
 
-**Goal**: Pipeline meets <10h target with >80% GPU utilization
+**Goal**: Pipeline meets <10h target with >70% GPU utilization (adjusted per user decision)
 
 **Depends on**: Phase 9
 
 **Requirements**: PERF-01, PERF-02, PERF-03, PERF-04, PERF-05
 
 **Success Criteria** (what must be TRUE):
-  1. End-to-end pipeline completes one sample in <10 hours on 4 GPUs
-  2. GPU utilization >80% during embedding steps (validated via nvitop)
-  3. Linear GPU scaling verified (2x GPUs = 1.9-2x faster)
+  1. End-to-end pipeline completes one sample in <10 hours on 2 GPUs (typical hardware)
+  2. GPU utilization >70% during embedding steps (validated via nvitop)
+  3. Linear GPU scaling verified (2x GPUs = 1.9x+ speedup, 95% efficiency)
   4. Telemetry logs tokens/sec, packing efficiency, and I/O wait time per batch
-  5. Throughput targets met: 1M-2M sequences/hour per GPU with FlashAttention
+  5. Packing efficiency >90% maintained on production workloads
+  6. v2.0 achieves >=4.0x speedup over v1.0 baseline
 
-**Plans**: TBD
+**Plans**: 5 plans in 3 waves
 
 Plans:
-- [ ] TBD during phase planning
+- [ ] 10-01-PLAN.md — TelemetryLogger and InferenceProgressReporter
+- [ ] 10-02-PLAN.md — Production workload benchmark with PERF requirements validation
+- [ ] 10-03-PLAN.md — v2.0 multi-GPU scaling validation (2-GPU 1.9x requirement)
+- [ ] 10-04-PLAN.md — DataLoader and packing parameter sweep
+- [ ] 10-05-PLAN.md — v1.0 vs v2.0 speedup comparison and human verification
+
+### Phase 10.1: CLI Integration for v2.0 Architecture (INSERTED)
+
+**Goal**: Update CLI to use v2.0 architecture (run_multi_gpu_inference) instead of v1.0 code
+
+**Depends on**: Phase 10
+
+**Requirements**: CLI-01 (predict command calls v2.0 API), CLI-02 (benchmark CLI for Phase 10 tests)
+
+**Success Criteria** (what must be TRUE):
+  1. `python -m virnucpro predict --parallel` calls run_multi_gpu_inference() not v1.0 parallel_esm/parallel_dnabert workers
+  2. Benchmark CLI exposes Phase 10 validation tests for manual execution
+  3. Breaking changes documented in migration guide
+  4. CLI integration tests verify v2.0 API usage
+
+**Plans**: 2 plans in 1 wave
+
+Plans:
+- [ ] 10.1-01-PLAN.md — Update predict command to route --parallel to v2.0 API with CLI tests
+- [ ] 10.1-02-PLAN.md — Benchmark CLI Phase 10 suites and migration guide
+
+**Details:**
+Discovered during Phase 10 planning: Phases 5-9 built v2.0 async architecture but didn't update CLI. Users running `python -m virnucpro predict --parallel` still get v1.0 multi-worker-per-GPU code. Phase 10 Plan 05 (v1.0 vs v2.0 comparison) would accidentally compare v1.0 to v1.0. Must wire v2.0 API before executing Phase 10 benchmarks.
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 5 → 6 → 7 → 8 → 9 → 10
+Phases execute in numeric order: 5 → 6 → 7 → 8 → 9 → 10 → 10.1
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -218,7 +246,8 @@ Phases execute in numeric order: 5 → 6 → 7 → 8 → 9 → 10
 | 7. Multi-GPU Coordination | v2.0 | 8/8 | Complete | 2026-02-05 |
 | 8. FP16 Precision Validation | v2.0 | 4/5 | Complete | 2026-02-05 |
 | 9. Checkpointing Integration | v2.0 | 7/7 | Complete | 2026-02-06 |
-| 10. Performance Validation & Tuning | v2.0 | 0/TBD | Not started | - |
+| 10. Performance Validation & Tuning | v2.0 | 0/5 | Blocked | - |
+| 10.1. CLI Integration for v2.0 Architecture | v2.0 | 0/2 | Not started | - |
 
 ---
-*Last updated: 2026-02-06 - Phase 9 complete, ready for Phase 10*
+*Last updated: 2026-02-06 - Phase 10.1 planned: 2 plans in 1 wave*
