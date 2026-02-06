@@ -213,12 +213,20 @@ class TestFP16Equivalence:
 
 
 class TestFP16PackedEquivalence:
-    """Test FP16 vs FP32 in production forward_packed() code path."""
+    """Test FP16 forward_packed() implementation correctness.
 
-    def test_packed_inference_fp16_vs_fp32(self, esm_model_fp16, esm_model_fp32):
-        """Verify FP16 forward_packed matches FP32 forward_packed."""
+    These tests validate that forward_packed() produces the same results as
+    standard forward() when both use FP16. This verifies the packing implementation
+    itself (RoPE timing, FlashAttention varlen, boundary handling), not FP16 precision.
+
+    Note: FP32 + forward_packed() is illegal (FlashAttention requires FP16/BF16),
+    so we compare FP16 packed vs FP16 unpacked. FP16 vs FP32 equivalence is already
+    validated in TestFP16Equivalence.
+    """
+
+    def test_packed_inference_fp16_correctness(self, esm_model_fp16):
+        """Verify FP16 forward_packed matches FP16 standard forward (validates packing implementation)."""
         model_fp16, batch_converter = esm_model_fp16
-        model_fp32, _ = esm_model_fp32
 
         # Create sequences
         sequences = [
@@ -229,13 +237,17 @@ class TestFP16PackedEquivalence:
 
         # Tokenize
         labels, strs, tokens = batch_converter(sequences)
+        tokens = tokens.to("cuda:0")
 
-        # Create packed batch manually
-        # ESM uses 0 for padding, token IDs start at 4 (A), BOS=0, EOS=2
+        # === Standard forward (unpacked) ===
+        with torch.no_grad():
+            out_unpacked = model_fp16(tokens, repr_layers=[36])
+        emb_unpacked = out_unpacked['representations'][36]  # [batch, max_len, hidden]
+
+        # === Packed forward ===
         # Extract actual tokens (excluding padding)
         input_ids_list = []
         for i in range(len(sequences)):
-            # Find sequence length (tokens before padding/EOS)
             seq_tokens = tokens[i]
             # Find EOS token (value 2)
             eos_idx = (seq_tokens == 2).nonzero(as_tuple=True)[0]
@@ -243,61 +255,55 @@ class TestFP16PackedEquivalence:
                 end_idx = eos_idx[0].item() + 1  # Include EOS
             else:
                 end_idx = len(seq_tokens)
-
             input_ids_list.append(seq_tokens[:end_idx])
 
         # Concatenate into 1D packed format
         input_ids = torch.cat(input_ids_list)
 
         # Create cu_seqlens
-        cu_seqlens = torch.zeros(len(sequences) + 1, dtype=torch.int32)
+        cu_seqlens = torch.zeros(len(sequences) + 1, dtype=torch.int32, device="cuda:0")
         cu_seqlens[0] = 0
         for i, ids in enumerate(input_ids_list):
             cu_seqlens[i + 1] = cu_seqlens[i] + len(ids)
-
         max_seqlen = max(len(ids) for ids in input_ids_list)
 
-        # Compare forward_packed() outputs
         with torch.no_grad():
-            out_fp32 = model_fp32.forward_packed(
-                input_ids=input_ids.to("cuda:0"),
-                cu_seqlens=cu_seqlens.to("cuda:0"),
+            out_packed = model_fp16.forward_packed(
+                input_ids=input_ids,
+                cu_seqlens=cu_seqlens,
                 max_seqlen=max_seqlen,
                 repr_layers=[36]
             )
-            out_fp16 = model_fp16.forward_packed(
-                input_ids=input_ids.to("cuda:0"),
-                cu_seqlens=cu_seqlens.to("cuda:0"),
-                max_seqlen=max_seqlen,
-                repr_layers=[36]
-            )
+        emb_packed = out_packed['representations'][36]  # [total_tokens, hidden]
 
-        # Compare embeddings (both should be [total_tokens, hidden_dim])
-        emb_fp32 = out_fp32['representations'][36]
-        emb_fp16 = out_fp16['representations'][36]
+        # Compare embeddings per sequence
+        packed_offset = 0
+        similarities = []
+        for i, seq_len in enumerate([len(ids) for ids in input_ids_list]):
+            # Unpacked: [batch_idx, 1:seq_len] (skip BOS at position 0)
+            emb_u = emb_unpacked[i, 1:seq_len].float()
+            # Packed: [packed_offset+1:packed_offset+seq_len] (skip BOS)
+            emb_p = emb_packed[packed_offset+1:packed_offset+seq_len].float()
 
-        # Compute per-token cosine similarity
-        similarity = F.cosine_similarity(
-            emb_fp32.float(),
-            emb_fp16.float(),
-            dim=-1
-        )
+            # Compute per-token similarity
+            sim = F.cosine_similarity(emb_u, emb_p, dim=-1).mean().item()
+            similarities.append(sim)
+            packed_offset += seq_len
 
-        min_sim = similarity.min().item()
-        mean_sim = similarity.mean().item()
+        mean_sim = sum(similarities) / len(similarities)
+        min_sim = min(similarities)
 
-        print(f"\nPacked inference FP16 vs FP32:")
-        print(f"  Min token similarity: {min_sim:.6f}")
-        print(f"  Mean token similarity: {mean_sim:.6f}")
-        print(f"  Shape: {emb_fp16.shape}")
+        print(f"\nPacked vs Unpacked (FP16):")
+        print(f"  Mean sequence similarity: {mean_sim:.6f}")
+        print(f"  Min sequence similarity: {min_sim:.6f}")
+        print(f"  Per-sequence: {[f'{s:.6f}' for s in similarities]}")
 
-        assert mean_sim > 0.99, f"Packed FP16 mean similarity {mean_sim:.4f} < 0.99"
-        assert min_sim > 0.95, f"Packed FP16 min similarity {min_sim:.4f} < 0.95 (some tokens very different)"
+        assert mean_sim > 0.99, f"Packed vs unpacked mean similarity {mean_sim:.4f} < 0.99"
+        assert min_sim > 0.95, f"Packed vs unpacked min similarity {min_sim:.4f} < 0.95"
 
-    def test_packed_long_sequences_fp16(self, esm_model_fp16, esm_model_fp32):
+    def test_packed_long_sequences_fp16(self, esm_model_fp16):
         """Test forward_packed with sequences >400aa (stresses RoPE and FlashAttention with FP16)."""
         model_fp16, batch_converter = esm_model_fp16
-        model_fp32, _ = esm_model_fp32
 
         # Long sequences
         sequences = [
@@ -305,8 +311,13 @@ class TestFP16PackedEquivalence:
             ("long2", "MKTAYIAKVLSPADKTNVKAAW" * 22),  # 484 aa
         ]
 
-        # Tokenize
+        # Tokenize and run standard forward
         labels, strs, tokens = batch_converter(sequences)
+        tokens = tokens.to("cuda:0")
+
+        with torch.no_grad():
+            out_unpacked = model_fp16(tokens, repr_layers=[36])
+        emb_unpacked = out_unpacked['representations'][36]
 
         # Create packed batch
         input_ids_list = []
@@ -320,43 +331,43 @@ class TestFP16PackedEquivalence:
             input_ids_list.append(seq_tokens[:end_idx])
 
         input_ids = torch.cat(input_ids_list)
-        cu_seqlens = torch.zeros(len(sequences) + 1, dtype=torch.int32)
+        cu_seqlens = torch.zeros(len(sequences) + 1, dtype=torch.int32, device="cuda:0")
         cu_seqlens[0] = 0
         for i, ids in enumerate(input_ids_list):
             cu_seqlens[i + 1] = cu_seqlens[i] + len(ids)
         max_seqlen = max(len(ids) for ids in input_ids_list)
 
         with torch.no_grad():
-            out_fp32 = model_fp32.forward_packed(
-                input_ids=input_ids.to("cuda:0"),
-                cu_seqlens=cu_seqlens.to("cuda:0"),
+            out_packed = model_fp16.forward_packed(
+                input_ids=input_ids,
+                cu_seqlens=cu_seqlens,
                 max_seqlen=max_seqlen,
                 repr_layers=[36]
             )
-            out_fp16 = model_fp16.forward_packed(
-                input_ids=input_ids.to("cuda:0"),
-                cu_seqlens=cu_seqlens.to("cuda:0"),
-                max_seqlen=max_seqlen,
-                repr_layers=[36]
-            )
+        emb_packed = out_packed['representations'][36]
 
-        emb_fp32 = out_fp32['representations'][36]
-        emb_fp16 = out_fp16['representations'][36]
+        # Compare per sequence
+        packed_offset = 0
+        similarities = []
+        for i, seq_len in enumerate([len(ids) for ids in input_ids_list]):
+            emb_u = emb_unpacked[i, 1:seq_len].float()
+            emb_p = emb_packed[packed_offset+1:packed_offset+seq_len].float()
+            sim = F.cosine_similarity(emb_u, emb_p, dim=-1).mean().item()
+            similarities.append(sim)
+            packed_offset += seq_len
 
-        similarity = F.cosine_similarity(emb_fp32.float(), emb_fp16.float(), dim=-1)
-        mean_sim = similarity.mean().item()
+        mean_sim = sum(similarities) / len(similarities)
 
-        print(f"\nPacked long sequences FP16 validation:")
+        print(f"\nPacked long sequences validation:")
         print(f"  Sequence lengths: {[len(s[1]) for s in sequences]}")
         print(f"  Total tokens: {len(input_ids)}")
         print(f"  Mean similarity: {mean_sim:.6f}")
 
-        assert mean_sim > 0.99, f"Long packed FP16 similarity {mean_sim:.4f} < 0.99"
+        assert mean_sim > 0.99, f"Long packed similarity {mean_sim:.4f} < 0.99"
 
-    def test_packed_boundary_effects_fp16(self, esm_model_fp16, esm_model_fp32):
-        """Test cu_seqlens boundaries don't cause FP16 precision issues at sequence transitions."""
+    def test_packed_boundary_effects_fp16(self, esm_model_fp16):
+        """Test cu_seqlens boundaries don't cause precision issues at sequence transitions."""
         model_fp16, batch_converter = esm_model_fp16
-        model_fp32, _ = esm_model_fp32
 
         # Multiple short sequences to test many boundaries
         sequences = [
@@ -367,8 +378,13 @@ class TestFP16PackedEquivalence:
             ("boundary5", "DERKH"),
         ]
 
-        # Tokenize
+        # Tokenize and run standard forward
         labels, strs, tokens = batch_converter(sequences)
+        tokens = tokens.to("cuda:0")
+
+        with torch.no_grad():
+            out_unpacked = model_fp16(tokens, repr_layers=[36])
+        emb_unpacked = out_unpacked['representations'][36]
 
         # Create packed batch
         input_ids_list = []
@@ -382,64 +398,52 @@ class TestFP16PackedEquivalence:
             input_ids_list.append(seq_tokens[:end_idx])
 
         input_ids = torch.cat(input_ids_list)
-        cu_seqlens = torch.zeros(len(sequences) + 1, dtype=torch.int32)
+        cu_seqlens = torch.zeros(len(sequences) + 1, dtype=torch.int32, device="cuda:0")
         cu_seqlens[0] = 0
         for i, ids in enumerate(input_ids_list):
             cu_seqlens[i + 1] = cu_seqlens[i] + len(ids)
         max_seqlen = max(len(ids) for ids in input_ids_list)
 
         with torch.no_grad():
-            out_fp32 = model_fp32.forward_packed(
-                input_ids=input_ids.to("cuda:0"),
-                cu_seqlens=cu_seqlens.to("cuda:0"),
+            out_packed = model_fp16.forward_packed(
+                input_ids=input_ids,
+                cu_seqlens=cu_seqlens,
                 max_seqlen=max_seqlen,
                 repr_layers=[36]
             )
-            out_fp16 = model_fp16.forward_packed(
-                input_ids=input_ids.to("cuda:0"),
-                cu_seqlens=cu_seqlens.to("cuda:0"),
-                max_seqlen=max_seqlen,
-                repr_layers=[36]
-            )
-
-        emb_fp32 = out_fp32['representations'][36]
-        emb_fp16 = out_fp16['representations'][36]
+        emb_packed = out_packed['representations'][36]
 
         # Check similarity near boundaries (tokens adjacent to cu_seqlens boundaries)
         boundary_sims = []
-        for i in range(len(sequences)):
-            start = cu_seqlens[i].item()
-            end = cu_seqlens[i + 1].item()
+        packed_offset = 0
+        for i, seq_len in enumerate([len(ids) for ids in input_ids_list]):
+            # Compare boundary tokens (first and last of each sequence)
+            emb_u_first = emb_unpacked[i, 1].float()  # First token (skip BOS)
+            emb_p_first = emb_packed[packed_offset+1].float()
+            sim_first = F.cosine_similarity(emb_u_first.unsqueeze(0), emb_p_first.unsqueeze(0), dim=-1).item()
 
-            # Check first and last token of each sequence
-            if start < end:
-                first_token_sim = F.cosine_similarity(
-                    emb_fp32[start].float().unsqueeze(0),
-                    emb_fp16[start].float().unsqueeze(0),
-                    dim=-1
-                ).item()
-                boundary_sims.append(first_token_sim)
+            if seq_len > 2:  # Has tokens beyond BOS/EOS
+                emb_u_last = emb_unpacked[i, seq_len-1].float()  # Last token before EOS
+                emb_p_last = emb_packed[packed_offset+seq_len-1].float()
+                sim_last = F.cosine_similarity(emb_u_last.unsqueeze(0), emb_p_last.unsqueeze(0), dim=-1).item()
+                boundary_sims.extend([sim_first, sim_last])
+            else:
+                boundary_sims.append(sim_first)
 
-            if end - 1 >= start:
-                last_token_sim = F.cosine_similarity(
-                    emb_fp32[end - 1].float().unsqueeze(0),
-                    emb_fp16[end - 1].float().unsqueeze(0),
-                    dim=-1
-                ).item()
-                boundary_sims.append(last_token_sim)
+            packed_offset += seq_len
 
-        min_boundary_sim = min(boundary_sims)
         mean_boundary_sim = sum(boundary_sims) / len(boundary_sims)
+        min_boundary_sim = min(boundary_sims)
 
-        print(f"\nPacked boundary effects FP16 validation:")
-        print(f"  Num boundaries: {len(sequences) - 1}")
-        print(f"  Min boundary token similarity: {min_boundary_sim:.6f}")
-        print(f"  Mean boundary token similarity: {mean_boundary_sim:.6f}")
+        print(f"\nBoundary effects test:")
+        print(f"  Sequences: {len(sequences)}")
+        print(f"  Boundary tokens checked: {len(boundary_sims)}")
+        print(f"  Mean boundary similarity: {mean_boundary_sim:.6f}")
+        print(f"  Min boundary similarity: {min_boundary_sim:.6f}")
 
-        assert min_boundary_sim > 0.95, \
-            f"Boundary token similarity {min_boundary_sim:.4f} < 0.95 (precision issue at boundaries)"
-        assert mean_boundary_sim > 0.99, \
-            f"Mean boundary similarity {mean_boundary_sim:.4f} < 0.99"
+        assert mean_boundary_sim > 0.99, f"Boundary mean similarity {mean_boundary_sim:.4f} < 0.99"
+        assert min_boundary_sim > 0.95, f"Boundary min similarity {min_boundary_sim:.4f} < 0.95"
+
 
 
 class TestFP16NumericalStability:
