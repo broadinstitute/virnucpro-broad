@@ -11,18 +11,18 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 10.1 (CLI Integration for v2.0 Architecture) - INSERTED AFTER PHASE 10
-Plan: 2 of 5 in phase
+Plan: 1 of 5 in phase - Plan 01 complete
 Status: In progress
-Last activity: 2026-02-06 — Completed 10.1-02-PLAN.md (benchmark CLI + migration guide)
+Last activity: 2026-02-06 — Completed 10.1-01-PLAN.md (v2.0 routing for ESM-2)
 
-Progress: [████████░░] 86/89+ plans (v1.0: 34/34 complete, v2.0: 52/55+)
+Progress: [████████░░] 85/89+ plans (v1.0: 34/34 complete, v2.0: 51/55+)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 84 (v1.0: 34, v2.0: 50)
+- Total plans completed: 85 (v1.0: 34, v2.0: 51)
 - Average duration: 3.4 min
-- Total execution time: 4.8 hours
+- Total execution time: 4.9 hours
 
 **By Phase:**
 
@@ -38,10 +38,11 @@ Progress: [████████░░] 86/89+ plans (v1.0: 34/34 complete, v
 | 7 | 8 | 29 min | 3.6 min |
 | 8 | 4 | 13 min | 3.25 min |
 | 9 | 7 (complete) | 40 min | 5.7 min |
+| 10.1 | 1 | 4 min | 4.0 min |
 
 **Recent Trend:**
-- Last 5 plans: ~5.0 min average
-- Trend: Phase 9 complete, ready for Phase 10
+- Last 5 plans: ~4.6 min average
+- Trend: Phase 10.1 in progress (CLI integration)
 
 *Updated after each plan completion*
 
@@ -155,6 +156,10 @@ Recent decisions affecting current work:
 - **Elastic redistribution (09-05)**: Failed shard work reassigned to lowest-numbered active worker via CheckpointManifest.reassign_shard()
 - **SIGTERM handler coordination (09-05)**: Coordinator waits 30s for workers to save emergency checkpoints before terminating - graceful spot instance handling
 - **Checkpoint validation before respawn (09-05)**: Remove orphaned .tmp files and verify .done markers before worker restart - prevents corruption propagation
+- **Hybrid architecture (10.1-01)**: Only ESM-2 uses v2.0 async architecture, DNABERT-S stays v1.0 - staged validation approach (DNABERT-S not validated in Phases 5-9)
+- **Streaming HDF5-to-PT adapter (10.1-01)**: Use 10K chunk size to avoid loading entire HDF5 into memory - merge stage HDF5 refactor deferred to Phase 10.2
+- **CLI v2.0 routing (10.1-01)**: use_v2 = parallel and not v1_fallback determines architecture version - explicit world_size passed to run_multi_gpu_inference
+- **Fail-fast v2.0 worker failures (10.1-01)**: Raise RuntimeError if any v2.0 ESM-2 worker fails instead of mapping ranks to files - simpler for all-or-nothing benchmarks
 
 ### Pending Todos
 
@@ -206,10 +211,18 @@ None yet.
 - Bug fix: Checkpoint path double-nesting resolved
 - Validation: SIGKILL test with 2000 sequences (200 checkpointed, 1800 resumed, zero duplicates)
 
+**Phase 10.1 (CLI Integration for v2.0 Architecture):** In Progress
+- ✅ Plan 01: v2.0 routing for ESM-2 in predict CLI (hybrid architecture)
+  - --parallel routes ESM-2 to v2.0 async architecture, DNABERT-S stays v1.0
+  - --v1-fallback flag for backward compatibility
+  - RuntimeConfig constructed from CLI flags (--resume, --force-resume)
+  - HDF5-to-PT streaming adapter for merge stage compatibility
+  - 7 CLI integration tests (CPU-only with mocking)
+
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 10.1-02-PLAN.md (benchmark CLI + migration guide)
+Stopped at: Completed 10.1-01-PLAN.md execution (v2.0 routing for ESM-2)
 Resume file: None
 
-**Next step:** Execute Phase 10.1 Plan 01 (predict.py v2.0 routing) or Plan 03 (integration tests)
+**Next step:** Execute Phase 10.1 Plan 02 (benchmark CLI) or continue with Phase 10.1 remaining plans
