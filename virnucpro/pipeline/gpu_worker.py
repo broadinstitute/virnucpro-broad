@@ -30,6 +30,7 @@ from virnucpro.data.sequence_dataset import IndexBasedDataset
 from virnucpro.data.collators import VarlenCollator
 from virnucpro.data.dataloader_utils import create_async_dataloader
 from virnucpro.pipeline.async_inference import AsyncInferenceRunner
+from virnucpro.utils.precision import should_use_fp16
 
 
 def gpu_worker(
@@ -64,10 +65,11 @@ def gpu_worker(
         index_path: Path to sequence index JSON
         output_dir: Directory for shard output and logs
         model_config: Dict with model configuration:
-            - 'model_type': 'esm2' (required)
+            - 'model_type': 'esm2' or 'dnabert' (required)
             - 'model_name': ESM-2 model variant (default: 'esm2_t36_3B_UR50D')
             - 'token_budget': Max tokens per batch (default: None for auto)
             - 'enable_fp16': Use FP16 precision (default: True)
+                Note: VIRNUCPRO_DISABLE_FP16 env var overrides this for safety-critical rollback
 
     Note:
         CUDA_VISIBLE_DEVICES already set by parent process.
@@ -115,13 +117,38 @@ def gpu_worker(
 
         if model_type == 'esm2':
             from virnucpro.models.esm2_flash import load_esm2_model
+
+            # Environment variable takes precedence for safety-critical rollback
+            # If VIRNUCPRO_DISABLE_FP16=1 is set, it overrides config
+            if not should_use_fp16():
+                enable_fp16 = False
+            else:
+                enable_fp16 = model_config.get('enable_fp16', True)
+
             model, batch_converter = load_esm2_model(
                 model_name=model_config.get('model_name', 'esm2_t36_3B_UR50D'),
-                device=str(device)
+                device=str(device),
+                enable_fp16=enable_fp16
             )
             logger.info(
                 f"ESM-2 model loaded: {model_config.get('model_name', 'esm2_t36_3B_UR50D')}"
             )
+        elif model_type == 'dnabert':
+            from virnucpro.models.dnabert_flash import load_dnabert_model
+
+            # Environment variable takes precedence (same as ESM-2)
+            if not should_use_fp16():
+                enable_fp16 = False
+            else:
+                enable_fp16 = model_config.get('enable_fp16', True)
+
+            model, tokenizer = load_dnabert_model(
+                device=str(device),
+                enable_fp16=enable_fp16
+            )
+            # DNABERT uses tokenizer directly, not batch_converter
+            batch_converter = tokenizer
+            logger.info("DNABERT-S model loaded")
         else:
             raise ValueError(f"Unsupported model type: {model_type}")
 
@@ -145,9 +172,31 @@ def gpu_worker(
         all_embeddings = []
         all_ids = []
 
-        for result in runner.run(dataloader):
-            all_embeddings.append(result.embeddings)
-            all_ids.extend(result.sequence_ids)
+        batch_idx = 0
+        try:
+            for result in runner.run(dataloader):
+                all_embeddings.append(result.embeddings)
+                all_ids.extend(result.sequence_ids)
+                batch_idx += 1
+        except RuntimeError as e:
+            if "Numerical instability" in str(e):
+                # Log which sequences failed for debugging
+                logger.error(
+                    f"Rank {rank}: NaN/Inf detected in batch {batch_idx}. "
+                    f"Error: {e}"
+                )
+                # Report failure to orchestrator
+                results_queue.put({
+                    "rank": rank,
+                    "status": "numerical_instability",
+                    "failed_batch": batch_idx,
+                    "error": str(e)
+                })
+                # Fail this worker - orchestrator handles partial results (Phase 7 pattern)
+                sys.exit(1)
+            else:
+                # Re-raise unexpected errors
+                raise
 
         logger.info(f"Inference complete: {len(all_ids)} sequences")
 
