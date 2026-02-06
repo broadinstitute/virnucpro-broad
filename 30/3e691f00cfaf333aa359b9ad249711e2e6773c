@@ -1,0 +1,24 @@
+KILL_RESUME_TEST_SUCCESS.md
+  bd9f569830f8f7b4 1-179
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "303e691f00cfaf333aa359b9ad249711e2e6773c",
+  "prompts": {
+    "bd9f569830f8f7b4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef533e41-3e09-49cd-ae33-ca47da119248",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 179,
+      "total_deletions": 0,
+      "accepted_lines": 179,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/a60b3b540d699a7a2f49458d245941190f2dfe9ee1f41096a0fabe79a641fa38"
+    }
+  }
+}
