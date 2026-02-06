@@ -32,7 +32,7 @@ import os
 import fcntl
 import shutil
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger('virnucpro.pipeline.checkpoint_manifest')
@@ -70,6 +70,8 @@ class CheckpointManifest:
         staleness_threshold_sec: Time threshold for zombie shard detection (default 600s = 10min)
     """
 
+    MAX_ORPHANED_RETRIES = 3
+
     def __init__(self, manifest_path: Path, staleness_threshold_sec: int = 600):
         """Initialize checkpoint manifest.
 
@@ -90,19 +92,33 @@ class CheckpointManifest:
 
         Returns:
             File descriptor for the lock file (pass to _release_file_lock)
+
+        Raises:
+            RuntimeError: If lock file cannot be created or lock cannot be acquired
         """
-        fd = os.open(str(self._lock_path), os.O_CREAT | os.O_WRONLY, 0o644)
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            fd = os.open(str(self._lock_path), os.O_CREAT | os.O_WRONLY, 0o644)
+        except OSError as create_err:
+            raise RuntimeError(f"Failed to create lock file: {create_err}")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        except OSError as lock_err:
+            os.close(fd)
+            raise RuntimeError(f"Failed to acquire lock: {lock_err}")
         return fd
 
     def _release_file_lock(self, fd: int):
-        """Release POSIX file lock.
+        """Release POSIX file lock and remove lock file.
 
         Args:
             fd: File descriptor returned from _acquire_file_lock()
         """
         fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)
+        try:
+            os.unlink(self._lock_path)
+        except OSError:
+            pass  # File may not exist if never created or already removed
 
     def initialize(
         self,
@@ -128,7 +144,7 @@ class CheckpointManifest:
             manifest = {
                 "version": "2.0",
                 "world_size": world_size,
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
                 "input_fingerprint": input_fingerprint,
                 "model_config_hash": model_config_hash,
                 "global_checkpoints": [],
@@ -240,8 +256,13 @@ class CheckpointManifest:
         try:
             manifest = self._load_manifest()
 
+            # Validate checkpoint file path is within expected directory
+            checkpoint_dir = (self.manifest_path.parent / f"shard_{rank}").resolve()
+            expected_path = checkpoint_dir / checkpoint_file
+            if not expected_path.resolve().is_relative_to(checkpoint_dir.resolve()):
+                raise ValueError(f"Invalid checkpoint file path: {checkpoint_file}")
+
             # Validate checkpoint file exists
-            expected_path = self.manifest_path.parent / f"shard_{rank}" / checkpoint_file
             if not expected_path.exists():
                 raise FileNotFoundError(
                     f"Checkpoint {checkpoint_file} not found at expected path "
@@ -252,14 +273,14 @@ class CheckpointManifest:
             shard = manifest["shards"][str(rank)]
             shard["last_checkpoint_batch"] = batch_idx
             shard["total_sequences"] += num_sequences
-            shard["last_checkpoint_time"] = datetime.utcnow().isoformat()
+            shard["last_checkpoint_time"] = datetime.now(timezone.utc).isoformat()
 
             # Append checkpoint record
             shard["checkpoints"].append({
                 "batch_idx": batch_idx,
                 "num_sequences": num_sequences,
                 "file": checkpoint_file,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "sequence_range": sequence_range
             })
 
@@ -282,7 +303,7 @@ class CheckpointManifest:
             manifest = self._load_manifest()
             shard = manifest["shards"][str(rank)]
             shard["status"] = "complete"
-            shard["completed_at"] = datetime.utcnow().isoformat()
+            shard["completed_at"] = datetime.now(timezone.utc).isoformat()
             self._save_manifest(manifest)
             logger.info(f"Marked shard {rank} as complete")
         finally:
@@ -300,7 +321,7 @@ class CheckpointManifest:
             manifest = self._load_manifest()
             shard = manifest["shards"][str(rank)]
             shard["status"] = "failed"
-            shard["failed_at"] = datetime.utcnow().isoformat()
+            shard["failed_at"] = datetime.now(timezone.utc).isoformat()
             shard["error"] = error
             shard["retry_count"] += 1
             self._save_manifest(manifest)
@@ -413,7 +434,7 @@ class CheckpointManifest:
                 - model_config_hash: Model config hash from manifest
         """
         manifest = self._load_manifest()
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         completed = 0
         in_progress = 0
@@ -485,7 +506,7 @@ class CheckpointManifest:
 
         threshold = threshold_sec if threshold_sec is not None else self.staleness_threshold_sec
         checkpoint_time = datetime.fromisoformat(last_checkpoint_time)
-        elapsed_sec = (datetime.utcnow() - checkpoint_time).total_seconds()
+        elapsed_sec = (datetime.now(timezone.utc) - checkpoint_time).total_seconds()
 
         return elapsed_sec > threshold
 
@@ -516,7 +537,7 @@ class CheckpointManifest:
     def get_orphaned_shards(self) -> List[int]:
         """Get list of orphaned shards that exceeded max retry attempts.
 
-        Orphaned shards have status "failed" AND retry_count >= 3.
+        Orphaned shards have status "failed" AND retry_count >= MAX_ORPHANED_RETRIES.
         These are candidates for redistribution to healthy GPUs.
 
         Returns:
@@ -526,7 +547,7 @@ class CheckpointManifest:
         orphaned = []
 
         for rank_str, shard in manifest["shards"].items():
-            if shard["status"] == "failed" and shard.get("retry_count", 0) >= 3:
+            if shard["status"] == "failed" and shard.get("retry_count", 0) >= self.MAX_ORPHANED_RETRIES:
                 orphaned.append(int(rank_str))
 
         return sorted(orphaned)
@@ -551,7 +572,7 @@ class CheckpointManifest:
 
             global_checkpoint = {
                 "checkpoint_id": checkpoint_id,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "batch_boundaries": {str(rank): batch_idx for rank, batch_idx in batch_boundaries.items()}
             }
 
@@ -587,26 +608,30 @@ class CheckpointManifest:
         Raises:
             ValueError: If any shards are not complete
         """
-        manifest = self._load_manifest()
+        fd = self._acquire_file_lock()
+        try:
+            manifest = self._load_manifest()
 
-        # Validate all shards complete
-        incomplete = []
-        for rank_str, shard in manifest["shards"].items():
-            if shard["status"] != "complete":
-                incomplete.append(int(rank_str))
+            # Validate all shards complete
+            incomplete = []
+            for rank_str, shard in manifest["shards"].items():
+                if shard["status"] != "complete":
+                    incomplete.append(int(rank_str))
 
-        if incomplete:
-            raise ValueError(
-                f"Cannot archive: shards {incomplete} are not complete"
-            )
+            if incomplete:
+                raise ValueError(
+                    f"Cannot archive: shards {incomplete} are not complete"
+                )
 
-        # Create archive directory and copy manifest
-        archive_dir = Path(archive_dir)
-        archive_dir.mkdir(parents=True, exist_ok=True)
-        archive_path = archive_dir / "manifest_final.json"
+            # Create archive directory and copy manifest
+            archive_dir = Path(archive_dir)
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            archive_path = archive_dir / "manifest_final.json"
 
-        shutil.copy2(self.manifest_path, archive_path)
-        logger.info(f"Manifest archived to {archive_path}")
+            shutil.copy2(self.manifest_path, archive_path)
+            logger.info(f"Manifest archived to {archive_path}")
+        finally:
+            self._release_file_lock(fd)
 
     def cleanup_checkpoints(self, keep_final_only: bool = True):
         """Clean up per-batch checkpoint files.
@@ -618,43 +643,48 @@ class CheckpointManifest:
             keep_final_only: If True, keep only the last checkpoint per shard.
                 If False, remove all per-batch checkpoints.
         """
-        manifest = self._load_manifest()
+        fd = self._acquire_file_lock()
+        try:
+            manifest = self._load_manifest()
 
-        for rank_str, shard in manifest["shards"].items():
-            rank = int(rank_str)
-            checkpoints = shard.get("checkpoints", [])
+            for rank_str, shard in manifest["shards"].items():
+                rank = int(rank_str)
+                checkpoints = shard.get("checkpoints", [])
 
-            if not checkpoints:
-                continue
+                if not checkpoints:
+                    continue
 
-            # Determine which checkpoints to remove
-            if keep_final_only:
-                checkpoints_to_remove = checkpoints[:-1]  # All except last
-            else:
-                checkpoints_to_remove = checkpoints  # All
+                # Determine which checkpoints to remove
+                if keep_final_only:
+                    checkpoints_to_remove = checkpoints[:-1]  # All except last
+                else:
+                    checkpoints_to_remove = checkpoints  # All
 
-            removed_count = 0
-            for checkpoint in checkpoints_to_remove:
-                checkpoint_file = checkpoint["file"]
-                checkpoint_path = self.manifest_path.parent / f"shard_{rank}" / checkpoint_file
+                removed_count = 0
+                for checkpoint in checkpoints_to_remove:
+                    checkpoint_file = checkpoint["file"]
+                    checkpoint_path = self.manifest_path.parent / f"shard_{rank}" / checkpoint_file
 
-                # Remove checkpoint file
-                if checkpoint_path.exists():
-                    checkpoint_path.unlink()
-                    removed_count += 1
+                    # Remove checkpoint file
+                    if checkpoint_path.exists():
+                        checkpoint_path.unlink()
+                        removed_count += 1
 
-                # Remove .done marker
-                done_marker = checkpoint_path.with_suffix(checkpoint_path.suffix + '.done')
-                if done_marker.exists():
-                    done_marker.unlink()
+                    # Remove .done marker
+                    done_marker = checkpoint_path.with_suffix(checkpoint_path.suffix + '.done')
+                    if done_marker.exists():
+                        done_marker.unlink()
 
-            if removed_count > 0:
-                logger.info(f"Shard {rank}: removed {removed_count} checkpoint files")
+                if removed_count > 0:
+                    logger.info(f"Shard {rank}: removed {removed_count} checkpoint files")
+        finally:
+            self._release_file_lock(fd)
 
     def _load_manifest(self) -> Dict:
-        """Load manifest from disk with corruption recovery.
+        """Load manifest from disk with corruption recovery and version migration.
 
         Tries loading from primary file, then .tmp file, then .backup file.
+        Performs version migration for older manifest formats.
         Raises ManifestCorruptedError if all three fail.
 
         Returns:
@@ -666,7 +696,13 @@ class CheckpointManifest:
         # Try primary file
         try:
             with open(self.manifest_path, 'r') as f:
-                return json.load(f)
+                manifest = json.load(f)
+                manifest_version = manifest.get("version", "1.0")
+                if manifest_version == "1.0":
+                    manifest.setdefault("input_fingerprint", "")
+                    manifest.setdefault("model_config_hash", "")
+                    manifest.setdefault("global_checkpoints", [])
+                return manifest
         except json.JSONDecodeError as e:
             logger.error(f"Primary manifest corrupted: {e}")
         except FileNotFoundError:
@@ -703,23 +739,23 @@ class CheckpointManifest:
     def _save_manifest(self, manifest: Dict):
         """Save manifest to disk with atomic write and backup.
 
-        Creates backup before overwriting, then uses atomic temp-then-rename pattern.
+        Creates backup after successful write, not before, to maintain atomicity.
 
         Args:
             manifest: Manifest dictionary to save
         """
-        # Create backup before overwriting
-        if self.manifest_path.exists():
-            backup_path = self.manifest_path.with_suffix('.backup')
-            shutil.copy2(self.manifest_path, backup_path)
-
-        # Atomic write via temp file
         temp_path = self.manifest_path.with_suffix('.tmp')
         with open(temp_path, 'w') as f:
             json.dump(manifest, f, indent=2)
 
-        # Atomic rename
         temp_path.replace(self.manifest_path)
+
+        if self.manifest_path.exists():
+            backup_path = self.manifest_path.with_suffix('.backup')
+            try:
+                shutil.copy2(self.manifest_path, backup_path)
+            except OSError:
+                pass  # Backup may fail if path is invalid, primary write succeeded
 
     def exists(self) -> bool:
         """Check if manifest file exists.
