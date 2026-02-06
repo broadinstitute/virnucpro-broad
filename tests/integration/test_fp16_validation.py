@@ -211,6 +211,71 @@ class TestFP16Equivalence:
         assert result['min_similarity'] > 0.99, \
             f"Min similarity {result['min_similarity']:.6f} <= 0.99"
 
+    def test_packed_fp16_vs_fp32_unpacked(self, esm_model_fp16, esm_model_fp32):
+        """Validate FP16 packed maintains FP32-level quality (cosine similarity >0.99)."""
+        model_fp16, batch_converter = esm_model_fp16
+        model_fp32, _ = esm_model_fp32
+
+        sequences = [
+            ("seq1", "MKTAYIAKQRQISFV"),
+            ("seq2", "VLSPADKTNVKAAWGKVG"),
+            ("seq3", "MVHLTPEEKSAVTALWG"),
+            ("seq4", "MKTAYIAK" * 10),
+        ]
+
+        labels, strs, tokens = batch_converter(sequences)
+        tokens = tokens.to("cuda:0")
+
+        with torch.no_grad():
+            out_fp32 = model_fp32(tokens, repr_layers=[36])
+        emb_fp32 = out_fp32["representations"][36]
+
+        input_ids_list = []
+        for i in range(len(sequences)):
+            seq_tokens = tokens[i]
+            eos_idx = (seq_tokens == 2).nonzero(as_tuple=True)[0]
+            if len(eos_idx) > 0:
+                end_idx = eos_idx[0].item() + 1
+            else:
+                end_idx = len(seq_tokens)
+            input_ids_list.append(seq_tokens[:end_idx])
+
+        input_ids = torch.cat(input_ids_list)
+        cu_seqlens = torch.zeros(len(sequences) + 1, dtype=torch.int32, device="cuda:0")
+        cu_seqlens[0] = 0
+        for i, ids in enumerate(input_ids_list):
+            cu_seqlens[i + 1] = cu_seqlens[i] + len(ids)
+        max_seqlen = max(len(ids) for ids in input_ids_list)
+
+        with torch.no_grad():
+            out_packed = model_fp16.forward_packed(
+                input_ids=input_ids,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+                repr_layers=[36]
+            )
+        emb_packed = out_packed['representations'][36]
+
+        packed_offset = 0
+        similarities = []
+        for i, seq_len in enumerate([len(ids) for ids in input_ids_list]):
+            emb_f = emb_fp32[i, 1:seq_len].float()
+            emb_p = emb_packed[packed_offset+1:packed_offset+seq_len].float()
+            sim = F.cosine_similarity(emb_f, emb_p, dim=-1).mean().item()
+            similarities.append(sim)
+            packed_offset += seq_len
+
+        mean_sim = sum(similarities) / len(similarities)
+        min_sim = min(similarities)
+
+        print(f"\nFP16 packed vs FP32 unpacked:")
+        print(f"  Mean sequence similarity: {mean_sim:.6f}")
+        print(f"  Min sequence similarity: {min_sim:.6f}")
+        print(f"  Per-sequence: {[f'{s:.6f}' for s in similarities]}")
+
+        assert mean_sim > 0.99, f"FP16 packed vs FP32 unpacked mean similarity {mean_sim:.4f} < 0.99"
+        assert min_sim > 0.98, f"FP16 packed vs FP32 unpacked min similarity {min_sim:.4f} < 0.98"
+
 
 class TestFP16PackedEquivalence:
     """Test FP16 forward_packed() implementation correctness.

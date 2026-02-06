@@ -2,8 +2,8 @@
 
 Benchmarks Phase 8 FP16+FlashAttention+Packing throughput on ESM-2 3B.
 
-Note: Cannot benchmark FP32 + forward_packed() baseline because FlashAttention
-requires FP16/BF16 inputs. FP32 + packed inference is illegal (fail-fast validation).
+FlashAttention requires FP16/BF16 inputs - FP32 + packed inference is illegal.
+This benchmark validates FP16 absolute throughput only (no FP32 baseline comparison).
 Phase 7 → Phase 8 comparison should be done via production runs on real workloads.
 
 This benchmark validates:
@@ -194,16 +194,14 @@ def benchmark_model_packed(model, sequences, device, num_warmup=10, num_iteratio
 
 
 class TestFP16Throughput:
-    """FP16 vs FP32+FlashAttention throughput benchmarking."""
+    """FP16 throughput benchmarking (FlashAttention + Packing)."""
 
-    def test_fp16_vs_fp32_throughput(self):
+    def test_fp16_throughput_validation(self):
         """
         Benchmark FP16+FlashAttention+Packing throughput (Phase 8 validation).
 
-        Note: Cannot compare to FP32 + forward_packed() baseline because FlashAttention
-        requires FP16/BF16 inputs. FP32 + packed inference is illegal per fail-fast validation.
-
-        This benchmark validates FP16 absolute throughput meets Phase 8 targets:
+        FlashAttention requires FP16/BF16 inputs - FP32 + packed inference is illegal.
+        This validates FP16 absolute throughput meets Phase 8 targets:
         - Expected: 1M-2M sequences/hour per GPU (from ROADMAP)
         - Memory usage < 12GB (FP16 model)
         - FlashAttention active (no fallback)
