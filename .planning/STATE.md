@@ -6,16 +6,16 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 
 **Core value:** Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs and automatically queue batches, reducing sample processing time from 45+ hours to under 10 hours.
 
-**Current focus:** Phase 9 complete, ready for Phase 10 - Performance Validation & Tuning
+**Current focus:** Phase 10.1 - CLI Integration for v2.0 Architecture (inserted, urgent)
 
 ## Current Position
 
-Phase: 9 of 10 (Checkpointing Integration) - ✅ COMPLETE
-Plan: 7 of 7 in phase - COMPLETE
-Status: All checkpoint functionality verified including kill+resume testing
-Last activity: 2026-02-06 — Phase 9 complete, kill+resume validated
+Phase: 10.1 (CLI Integration for v2.0 Architecture) - INSERTED AFTER PHASE 10
+Plan: 2 of 5 in phase
+Status: In progress
+Last activity: 2026-02-06 — Completed 10.1-02-PLAN.md (benchmark CLI + migration guide)
 
-Progress: [████████░░] 84/TBD plans (v1.0: 34/34 complete, v2.0: 50/TBD)
+Progress: [████████░░] 86/89+ plans (v1.0: 34/34 complete, v2.0: 52/55+)
 
 ## Performance Metrics
 
@@ -46,6 +46,14 @@ Progress: [████████░░] 84/TBD plans (v1.0: 34/34 complete, v
 *Updated after each plan completion*
 
 ## Accumulated Context
+
+### Roadmap Evolution
+
+- **Phase 10.1 inserted after Phase 10**: CLI Integration for v2.0 Architecture (URGENT)
+  - **Reason**: Discovered during Phase 10 planning that CLI was never updated to use v2.0 API
+  - **Impact**: Phase 10 Plan 05 (v1.0 vs v2.0 comparison) would accidentally compare v1.0 to v1.0
+  - **Blocker**: Must complete before executing Phase 10 benchmarks
+  - **Scope**: Update predict.py to call run_multi_gpu_inference(), add benchmark CLI, migration guide
 
 ### Decisions
 
@@ -201,7 +209,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Phase 9 complete - all 7 plans executed, kill+resume validated
+Stopped at: Completed 10.1-02-PLAN.md (benchmark CLI + migration guide)
 Resume file: None
 
-**Next step:** Begin Phase 10 - Performance Validation & Tuning
+**Next step:** Execute Phase 10.1 Plan 01 (predict.py v2.0 routing) or Plan 03 (integration tests)
