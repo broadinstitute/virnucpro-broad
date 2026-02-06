@@ -1023,3 +1023,204 @@ class TestFP16Wiring:
         assert call_args['status'] == 'numerical_instability'
         assert call_args['error'].startswith('Numerical instability')
         assert 'NaN' in call_args['error']
+
+
+class TestErrorFormatConsistency:
+    """Test error reporting format consistency: error field as category code, error_message for diagnostics."""
+
+    @patch('virnucpro.pipeline.gpu_worker.torch.cuda')
+    @patch('virnucpro.pipeline.gpu_worker.AsyncInferenceRunner')
+    @patch('virnucpro.pipeline.gpu_worker.create_async_dataloader')
+    @patch('virnucpro.models.esm2_flash.load_esm2_model')
+    @patch('virnucpro.pipeline.gpu_worker.setup_worker_logging')
+    def test_oom_error_format_category_code(
+        self,
+        mock_setup_logging,
+        mock_load_model,
+        mock_create_loader,
+        mock_runner_class,
+        mock_cuda,
+        temp_index,
+        temp_output_dir,
+        mock_results_queue,
+        mock_model,
+        mock_batch_converter
+    ):
+        """Verify OOM error uses 'cuda_oom' category code in 'error' field and full message in 'error_message'."""
+        mock_setup_logging.return_value = temp_output_dir / "logs" / "worker_0.log"
+        mock_load_model.return_value = (mock_model, mock_batch_converter)
+        mock_cuda.get_device_name.return_value = "Mock GPU"
+        mock_cuda.memory_allocated.return_value = 8e9
+        mock_cuda.max_memory_allocated.return_value = 10e9
+
+        mock_loader = Mock()
+        mock_loader.__iter__ = Mock(return_value=iter([]))
+        mock_create_loader.return_value = mock_loader
+
+        mock_runner = Mock()
+        mock_runner.run = Mock(side_effect=RuntimeError("CUDA out of memory: out of memory"))
+        mock_runner_class.return_value = mock_runner
+
+        model_config = {'model_type': 'esm2'}
+
+        with pytest.raises(SystemExit):
+            gpu_worker(
+                rank=0,
+                world_size=4,
+                results_queue=mock_results_queue,
+                index_path=temp_index,
+                output_dir=temp_output_dir,
+                model_config=model_config
+            )
+
+        mock_results_queue.put.assert_called_once()
+        call_args = mock_results_queue.put.call_args[0][0]
+
+        assert call_args['status'] == 'failed'
+        assert call_args['error'] == 'cuda_oom'
+        assert 'out of memory' in call_args['error_message'].lower()
+        assert 'error_type' not in call_args
+        assert call_args['reduce_batch_size'] is True
+        assert call_args['retry_recommended'] is True
+
+    @patch('virnucpro.pipeline.gpu_worker.torch.cuda')
+    @patch('virnucpro.pipeline.gpu_worker.AsyncInferenceRunner')
+    @patch('virnucpro.pipeline.gpu_worker.create_async_dataloader')
+    @patch('virnucpro.models.esm2_flash.load_esm2_model')
+    @patch('virnucpro.pipeline.gpu_worker.setup_worker_logging')
+    def test_cuda_runtime_error_format_category_code(
+        self,
+        mock_setup_logging,
+        mock_load_model,
+        mock_create_loader,
+        mock_runner_class,
+        mock_cuda,
+        temp_index,
+        temp_output_dir,
+        mock_results_queue,
+        mock_model,
+        mock_batch_converter
+    ):
+        """Verify CUDA runtime error uses 'cuda_runtime' category code in 'error' field."""
+        mock_setup_logging.return_value = temp_output_dir / "logs" / "worker_0.log"
+        mock_load_model.return_value = (mock_model, mock_batch_converter)
+        mock_cuda.get_device_name.return_value = "Mock GPU"
+
+        mock_loader = Mock()
+        mock_loader.__iter__ = Mock(return_value=iter([]))
+        mock_create_loader.return_value = mock_loader
+
+        mock_runner = Mock()
+        mock_runner.run = Mock(side_effect=RuntimeError("CUDA error: an illegal memory access was encountered"))
+        mock_runner_class.return_value = mock_runner
+
+        model_config = {'model_type': 'esm2'}
+
+        with pytest.raises(SystemExit):
+            gpu_worker(
+                rank=0,
+                world_size=4,
+                results_queue=mock_results_queue,
+                index_path=temp_index,
+                output_dir=temp_output_dir,
+                model_config=model_config
+            )
+
+        mock_results_queue.put.assert_called_once()
+        call_args = mock_results_queue.put.call_args[0][0]
+
+        assert call_args['status'] == 'failed'
+        assert call_args['error'] == 'cuda_runtime'
+        assert 'illegal memory access' in call_args['error_message']
+        assert 'error_type' not in call_args
+        assert call_args['circuit_breaker'] is True
+        assert call_args['retry_recommended'] is True
+
+    @patch('virnucpro.pipeline.gpu_worker.torch.cuda')
+    @patch('virnucpro.pipeline.gpu_worker.AsyncInferenceRunner')
+    @patch('virnucpro.pipeline.gpu_worker.create_async_dataloader')
+    @patch('virnucpro.models.esm2_flash.load_esm2_model')
+    @patch('virnucpro.pipeline.gpu_worker.setup_worker_logging')
+    def test_generic_error_format_category_code(
+        self,
+        mock_setup_logging,
+        mock_load_model,
+        mock_create_loader,
+        mock_runner_class,
+        mock_cuda,
+        temp_index,
+        temp_output_dir,
+        mock_results_queue,
+        mock_model,
+        mock_batch_converter
+    ):
+        """Verify generic error uses 'generic_error' category code in 'error' field."""
+        mock_setup_logging.return_value = temp_output_dir / "logs" / "worker_0.log"
+        mock_load_model.return_value = (mock_model, mock_batch_converter)
+        mock_cuda.get_device_name.return_value = "Mock GPU"
+
+        mock_loader = Mock()
+        mock_loader.__iter__ = Mock(return_value=iter([]))
+        mock_create_loader.return_value = mock_loader
+
+        mock_runner = Mock()
+        mock_runner.run = Mock(side_effect=RuntimeError("Unexpected tensor dimension mismatch"))
+        mock_runner_class.return_value = mock_runner
+
+        model_config = {'model_type': 'esm2'}
+
+        with pytest.raises(SystemExit):
+            gpu_worker(
+                rank=0,
+                world_size=4,
+                results_queue=mock_results_queue,
+                index_path=temp_index,
+                output_dir=temp_output_dir,
+                model_config=model_config
+            )
+
+        mock_results_queue.put.assert_called_once()
+        call_args = mock_results_queue.put.call_args[0][0]
+
+        assert call_args['status'] == 'failed'
+        assert call_args['error'] == 'generic_error'
+        assert 'tensor dimension mismatch' in call_args['error_message']
+        assert 'error_type' not in call_args
+
+    @patch('virnucpro.pipeline.gpu_worker.torch.cuda')
+    @patch('virnucpro.models.esm2_flash.load_esm2_model')
+    @patch('virnucpro.pipeline.gpu_worker.setup_worker_logging')
+    def test_generic_exception_error_format(
+        self,
+        mock_setup_logging,
+        mock_load_model,
+        mock_cuda,
+        temp_index,
+        temp_output_dir,
+        mock_results_queue
+    ):
+        """Verify generic Exception (not RuntimeError) uses 'generic_error' category code."""
+        mock_setup_logging.return_value = temp_output_dir / "logs" / "worker_0.log"
+        mock_cuda.get_device_name.return_value = "Mock GPU"
+
+        mock_load_model.side_effect = ValueError("Invalid model configuration: missing required parameter")
+
+        model_config = {'model_type': 'esm2'}
+
+        with pytest.raises(SystemExit):
+            gpu_worker(
+                rank=0,
+                world_size=4,
+                results_queue=mock_results_queue,
+                index_path=temp_index,
+                output_dir=temp_output_dir,
+                model_config=model_config
+            )
+
+        mock_results_queue.put.assert_called_once()
+        call_args = mock_results_queue.put.call_args[0][0]
+
+        assert call_args['status'] == 'failed'
+        assert call_args['error'] == 'generic_error'
+        assert 'Invalid model configuration' in call_args['error_message']
+        assert 'error_type' not in call_args

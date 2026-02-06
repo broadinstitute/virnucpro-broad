@@ -397,9 +397,8 @@ def gpu_worker(
             result_status = {
                 'rank': rank,
                 'status': 'failed',
-                'error': 'cuda_oom',  # Backward compatibility: error is category code
-                'error_message': error_str,  # Full error message for diagnostics
-                'error_type': 'cuda_oom',
+                'error': 'cuda_oom',
+                'error_message': error_str,
                 'retry_recommended': True,
                 'reduce_batch_size': True,
             }
@@ -412,11 +411,10 @@ def gpu_worker(
             result_status = {
                 'rank': rank,
                 'status': 'failed',
-                'error': 'cuda_runtime',  # Backward compatibility: error is category code
-                'error_message': error_str,  # Full error message for diagnostics
-                'error_type': 'cuda_runtime',
+                'error': 'cuda_runtime',
+                'error_message': error_str,
                 'retry_recommended': True,
-                'circuit_breaker': True,  # Trigger circuit breaker after 2 attempts
+                'circuit_breaker': True,
             }
         else:
             # Generic runtime error
