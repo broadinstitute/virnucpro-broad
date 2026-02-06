@@ -1,0 +1,26 @@
+.planning/STATE.md
+  f48f37ba302edf3f 14,16,18,39,112-116,157,160
+.planning/phases/08-fp16-precision-validation**---memory-and-speed-optimization/08-04-SUMMARY.md
+  f48f37ba302edf3f 1-134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "810b60de06c3bdf7b2c8dc388a6498ffb4122a5c",
+  "prompts": {
+    "f48f37ba302edf3f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a0ed9c92-a5ae-40a2-bd92-52b51e3d1994",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 283,
+      "total_deletions": 6,
+      "accepted_lines": 283,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/ae7fec92fdaf1c794f7890fa52fcd54c84265c547242a6aa1b82779347fc6ad8"
+    }
+  }
+}
