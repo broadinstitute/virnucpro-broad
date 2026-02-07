@@ -225,10 +225,18 @@ class VarlenCollator:
             # Direct processing (no buffering)
             return self._tokenize_and_pack(batch)
 
+        # Track total sequences received for flush verification
+        if not hasattr(self, '_total_sequences_received'):
+            self._total_sequences_received = 0
+            self._total_sequences_returned = 0
+        self._total_sequences_received += len(batch)
+
         # If we have pre-packed batches ready, return one and buffer the new sequences
         if self.packed_queue:
             self.buffer.extend(batch)  # Save for later packing
             batch_to_return = self.packed_queue.pop(0)
+            self._total_sequences_returned += len(batch_to_return)
+            logger.debug(f"Returning from packed_queue ({len(self.packed_queue)} batches remaining), buffer now has {len(self.buffer)} sequences")
             return self._tokenize_and_pack(batch_to_return)
 
         # Add sequences to buffer
@@ -237,8 +245,12 @@ class VarlenCollator:
         # When buffer reaches threshold, pack it
         if len(self.buffer) >= self.buffer_size:
             # Run FFD on full buffer
+            logger.debug(f"Buffer reached threshold ({len(self.buffer)}/{self.buffer_size}), packing...")
             packed_batches = self.packer.pack_sequences(self.buffer)
-            logger.debug(f"Packed {len(self.buffer)} sequences → {len(packed_batches)} batches")
+
+            # Count sequences in packed batches for verification
+            total_packed = sum(len(b) for b in packed_batches)
+            logger.debug(f"Packed {len(self.buffer)} sequences → {len(packed_batches)} batches containing {total_packed} sequences")
 
             # Store packed batches in queue and clear buffer
             self.packed_queue.extend(packed_batches)
@@ -247,14 +259,15 @@ class VarlenCollator:
             # Return first packed batch
             if self.packed_queue:
                 batch_to_return = self.packed_queue.pop(0)
+                self._total_sequences_returned += len(batch_to_return)
+                logger.debug(f"Returning first packed batch ({len(batch_to_return)} sequences), {len(self.packed_queue)} batches remaining in queue")
                 return self._tokenize_and_pack(batch_to_return)
 
-        # Buffer not full yet - return micro-batch directly
-        # IMPORTANT: Remove from buffer to prevent duplication during flush()
-        # We're returning these sequences now, so they shouldn't be in buffer
-        if batch:
-            del self.buffer[-len(batch):]
-        return self._tokenize_and_pack(batch)
+        # Buffer not full yet - wait for more sequences
+        # Return empty dict to signal DataLoader to keep accumulating
+        # Sequences stay in buffer until threshold reached
+        logger.debug(f"Buffer accumulating: {len(self.buffer)}/{self.buffer_size} sequences")
+        return {}
 
     def flush(self) -> List[Dict[str, Any]]:
         """Flush remaining buffer at end of dataset.
@@ -262,20 +275,58 @@ class VarlenCollator:
         Returns list of packed batches for any sequences remaining in buffer.
         Called by AsyncInferenceRunner after dataloader exhausted.
         """
+        # Log current state before flushing
+        buffer_count = len(self.buffer)
+        queue_count = len(self.packed_queue)
+        total_received = getattr(self, '_total_sequences_received', 'unknown')
+        total_returned = getattr(self, '_total_sequences_returned', 'unknown')
+
+        logger.info(
+            f"Flush called: buffer has {buffer_count} sequences, "
+            f"packed_queue has {queue_count} batches, "
+            f"total received: {total_received}, total returned so far: {total_returned}"
+        )
+
+        # Calculate expected sequences remaining
+        if isinstance(total_received, int) and isinstance(total_returned, int):
+            expected_remaining = total_received - total_returned
+            logger.info(f"Expected sequences remaining to flush: {expected_remaining}")
+        else:
+            expected_remaining = 'unknown'
+
         results = []
 
         # Pack remaining buffer contents
         if self.buffer:
-            logger.debug(f"Flushing buffer with {len(self.buffer)} sequences")
+            logger.info(f"Flushing buffer with {len(self.buffer)} sequences")
             packed_batches = self.packer.pack_sequences(self.buffer) if self.packer else [self.buffer]
+
+            # Count sequences in packed batches
+            buffer_seq_count = sum(len(b) for b in packed_batches)
+            logger.info(f"Buffer packed into {len(packed_batches)} batches containing {buffer_seq_count} sequences")
+
             self.buffer = []
 
             # Tokenize and pack each batch
-            for packed_batch in packed_batches:
+            for i, packed_batch in enumerate(packed_batches):
+                logger.debug(f"Processing buffer batch {i+1}/{len(packed_batches)}: {len(packed_batch)} sequences")
                 results.append(self._tokenize_and_pack(packed_batch))
 
         # Also flush any remaining packed_queue
+        if self.packed_queue:
+            queue_seq_count = sum(len(b) for b in self.packed_queue)
+            logger.info(f"Flushing {len(self.packed_queue)} batches from packed_queue containing {queue_seq_count} sequences")
+
         while self.packed_queue:
-            results.append(self._tokenize_and_pack(self.packed_queue.pop(0)))
+            batch = self.packed_queue.pop(0)
+            logger.debug(f"Processing packed_queue batch: {len(batch)} sequences")
+            results.append(self._tokenize_and_pack(batch))
+
+        # Calculate total sequences in flushed results
+        total_flushed = sum(r.get('num_sequences', 0) for r in results if r)
+        logger.info(
+            f"Flush complete: {len(results)} batches returned containing {total_flushed} sequences "
+            f"(from {buffer_count} buffer + {queue_count} queue batches)"
+        )
 
         return results

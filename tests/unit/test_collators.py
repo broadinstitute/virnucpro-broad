@@ -35,11 +35,11 @@ class TestVarlenCollatorPacking:
         assert collator.packer is None
 
     def test_buffer_accumulation(self):
-        """Verify micro-batches NOT buffered to prevent flush duplicates.
+        """Verify sequences ARE buffered when threshold not reached.
 
         When buffer isn't full and no packed_queue exists, sequences are
-        returned immediately as micro-batches and NOT kept in buffer.
-        This prevents sequence duplication when flush() is called later.
+        kept in buffer and empty dict is returned. This allows sequences
+        to accumulate until buffer_size threshold is reached for optimal packing.
         """
         from virnucpro.data.collators import VarlenCollator
 
@@ -54,15 +54,13 @@ class TestVarlenCollatorPacking:
             {'id': 'seq2', 'sequence': 'VLSPADKTNV'},
         ]
 
-        # Mock tokenization to prevent actual ESM calls
-        with patch.object(collator, '_tokenize_and_pack', return_value={'test': 'data'}):
-            # First call - returns micro-batch immediately
-            result = collator(batch)
+        # Call collator - should buffer sequences and return empty dict
+        result = collator(batch)
 
-            # Buffer should be EMPTY (micro-batches not buffered)
-            assert len(collator.buffer) == 0
-            # Result should be returned
-            assert result == {'test': 'data'}
+        # Buffer should contain the sequences (waiting for more to reach threshold)
+        assert len(collator.buffer) == 2
+        # Empty dict signals "not ready yet, accumulating"
+        assert result == {}
 
     def test_packing_triggered_at_threshold(self):
         """Verify packing runs when buffer reaches threshold."""
@@ -402,7 +400,7 @@ class TestVarlenCollatorSingleItem:
         assert result['sequence_ids'] == ['seq1', 'seq2']
 
     def test_single_item_with_packing_enabled(self):
-        """Verify single item processed and NOT buffered (prevents flush duplicates)."""
+        """Verify single item IS buffered when packing enabled (waits for threshold)."""
         from virnucpro.data.collators import VarlenCollator
         import torch
 
@@ -416,12 +414,11 @@ class TestVarlenCollatorSingleItem:
 
         collator = VarlenCollator(mock_bc, enable_packing=True, buffer_size=10)
 
-        # Single dict - returned as micro-batch, NOT buffered
+        # Single dict - buffered and empty dict returned (waiting for more sequences)
         single_item = {'id': 'seq1', 'sequence': 'MKTAYIAK', 'file': 'test.fasta'}
         result = collator(single_item)
 
-        # Buffer should be EMPTY (micro-batches not buffered to prevent duplicates)
-        assert len(collator.buffer) == 0
-        # Result should contain the sequence
-        assert 'sequence_ids' in result
-        assert result['sequence_ids'] == ['seq1']
+        # Buffer should contain the single sequence (waiting for more to reach threshold)
+        assert len(collator.buffer) == 1
+        # Empty dict returned (not ready yet, accumulating)
+        assert result == {}
