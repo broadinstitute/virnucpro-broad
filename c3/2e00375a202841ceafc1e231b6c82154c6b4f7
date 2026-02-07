@@ -1,0 +1,24 @@
+virnucpro/models/dnabert_flash.py
+  e67f94d44fd863ac 354-355
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "c32e00375a202841ceafc1e231b6c82154c6b4f7",
+  "prompts": {
+    "e67f94d44fd863ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5b76bfd5-44ff-44f2-abec-04fb5ea1adff",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 4,
+      "accepted_lines": 2,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/2209552085ce48d7e5447d1d55a35e7b63ad6d34756613d3e657645ea25aaa3f"
+    }
+  }
+}
