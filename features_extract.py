@@ -9,7 +9,9 @@ sequences_per_file = 10000
 DNABERT_S_tokenizer = AutoTokenizer.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
 DNABERT_S_model = AutoModel.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
 
-ESM_model, ESM_alphabet = pretrained.load_model_and_alphabet('esm2_t36_3B_UR50D')
+# ESM2 3B model loading removed - will be replaced with FastESM2_650 in Phase 2
+ESM_model = None
+ESM_alphabet = None
 
 
 def process_file_seq(file):

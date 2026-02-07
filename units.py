@@ -4,7 +4,7 @@ import os
 
 import torch
 from transformers import AutoTokenizer, AutoModel
-from esm import FastaBatchedDataset, pretrained
+# fair-esm removed - extract_esm() deprecated, replaced by extract_fast_esm() in Phase 2
 
 def split_fasta_chunk(input_file, output_file, chunk_size):
     with open(output_file, 'w') as out_handle:
@@ -201,68 +201,14 @@ def extract_DNABERT_S(input_file, out_file,
         torch.save({'nucleotide': nucleotide, 'data': data}, out_file)
 
 
-def extract_esm(fasta_file, 
+def extract_esm(fasta_file,
                 model_location='esm2_t36_3B_UR50D',
                 truncation_seq_length=1024, toks_per_batch=2048,
                 out_file=None, model_loaded = False, model = None, alphabet = None):
-    if out_file is not None and os.path.exists(out_file):
-        obj = torch.load(out_file)
-        data = obj['data']
-        proteins = obj['proteins']
-        return proteins, data
-    if model_loaded == False:
-        model, alphabet = pretrained.load_model_and_alphabet(model_location)
-    else:
-        model = model
-        alphabet = alphabet
-    model.eval()
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-    dataset = FastaBatchedDataset.from_file(fasta_file)
-        
-    batches = dataset.get_batch_indices(toks_per_batch, extra_toks_per_seq=1)
-
-    data_loader = torch.utils.data.DataLoader(
-        dataset, collate_fn=alphabet.get_batch_converter(), batch_sampler=batches
+    raise NotImplementedError(
+        "extract_esm() requires fair-esm which has been removed. "
+        "Use extract_fast_esm() instead (implemented in Phase 2)."
     )
-    print(f"Read {fasta_file} with {len(dataset)} sequences")
-
-    return_contacts = False
-
-    repr_layers = [36,]
-
-    proteins = []
-    data = []
-
-    with torch.no_grad():
-        for batch_idx, (labels, strs, toks) in enumerate(data_loader):
-
-            print(f"Processing {batch_idx + 1} of {len(batches)} batches ({toks.size(0)} sequences)")
-
-            if device:
-                toks = toks.to(device, non_blocking=True)
-
-            out = model(toks, repr_layers=repr_layers, return_contacts=return_contacts)
-
-            representations = {
-                layer: t.to(device) for layer, t in out["representations"].items()
-            }
-
-            for i, label in enumerate(labels):
-
-                result = {"label": label, "mean_representations": {}}
-                truncate_len = min(truncation_seq_length, len(strs[i]))
-                result["mean_representations"] = {
-                    layer: t[i, 1 : truncate_len + 1].mean(0).clone().to('cpu')
-                    for layer, t in representations.items()
-                }
-                proteins.append(label)
-                data.append(result["mean_representations"][36])
-
-    if out_file is not None:
-        torch.save({'proteins': proteins, 'data': data}, out_file)
-    return proteins, data
 
 def split_fasta_file(input_file, output_dir, sequences_per_file):
     if not os.path.exists(output_dir):
