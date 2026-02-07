@@ -351,10 +351,8 @@ def load_dnabert_model(
 
     log.info(f"Model loaded: {model_name}")
 
-    # EXPERIMENTAL: Skip attention patch to test vanilla compatibility
-    # Original code:
-    # _ensure_attention_patched()
-    log.info("EXPERIMENTAL: Skipping DNABERT-S attention patch (using stock Triton/matmul attention)")
+    # Patch attention for FP16/BF16 compatibility
+    _ensure_attention_patched()
 
     # Convert device string to torch.device
     device_obj = torch.device(device)
