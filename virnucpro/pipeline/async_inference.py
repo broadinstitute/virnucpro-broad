@@ -371,17 +371,23 @@ class AsyncInferenceRunner:
         if cu_seqlens is not None and len(sequence_ids) > 0:
             # Packed format: representations shape is [total_tokens, hidden_dim]
             # NOT [batch, seq, hidden]
+            # Each sequence in cu_seqlens includes BOS and EOS tokens:
+            #   [BOS, aa_1, aa_2, ..., aa_L, EOS]
+            # We mean-pool over aa_1..aa_L only (exclude BOS at start, EOS at end-1)
+            # This matches v1.0 behavior in features.py:224-231
             embeddings = []
             for i in range(len(sequence_ids)):
                 start = cu_seqlens[i].item()
                 end = cu_seqlens[i + 1].item()
-                # Skip BOS token (position 0 of each sequence), mean pool the rest
-                # For sequence at [start:end], BOS is at position 'start'
-                if end - start > 1:
-                    # Mean pool positions start+1 to end (exclude BOS)
+                seq_len = end - start  # Total including BOS + EOS
+                if seq_len > 2:
+                    # Mean pool positions start+1 to end-1 (exclude BOS and EOS)
+                    seq_repr = representations[start + 1:end - 1].mean(dim=0)
+                elif seq_len == 2:
+                    # Only BOS + EOS, no actual sequence tokens - use EOS as fallback
                     seq_repr = representations[start + 1:end].mean(dim=0)
                 else:
-                    # Single token sequence - use as-is
+                    # Single token - use as-is
                     seq_repr = representations[start:end].mean(dim=0)
                 embeddings.append(seq_repr)
 
