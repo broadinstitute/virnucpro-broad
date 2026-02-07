@@ -1,6 +1,7 @@
 """Unit tests for VarlenCollator and dataloader integration.
 
-Tests buffer-based packing (PACK-02) and dynamic token budget (PACK-03).
+Tests buffer-based packing (PACK-02), dynamic token budget (PACK-03),
+and main-process collation (worker buffer data loss prevention).
 """
 
 import pytest
@@ -467,3 +468,215 @@ class TestVarlenCollatorSingleItem:
         assert len(collator.buffer) == 1
         # Empty dict returned (not ready yet, accumulating)
         assert result == {}
+
+
+class TestMainProcessCollation:
+    """Tests for main-process collation to prevent worker buffer data loss.
+
+    When VarlenCollator has enable_packing=True, it is stateful (maintains a
+    buffer). If passed as collate_fn to DataLoader with num_workers>0, PyTorch
+    pickles the collator to each worker process. Each worker gets its own copy
+    with its own buffer. When workers finish, sequences remaining in their
+    buffers are lost because flush() runs on the main process's collator
+    (which was never used).
+
+    The fix: create_async_dataloader uses a passthrough collate_fn for the
+    DataLoader and stores the real collator as dataloader.collator. The
+    AsyncInferenceRunner.run() method calls the collator in the main process.
+    """
+
+    def test_stateful_collator_not_passed_to_dataloader_workers(self):
+        """Verify stateful collator is NOT used as DataLoader's collate_fn.
+
+        This is the core fix: a stateful collator (enable_packing=True) must
+        not be pickled to worker subprocesses, where each worker's buffer
+        would lose data.
+        """
+        from virnucpro.data.dataloader_utils import create_async_dataloader, _passthrough_collate
+        from torch.utils.data import IterableDataset
+
+        mock_dataset = MagicMock(spec=IterableDataset)
+        mock_collator = MagicMock()
+        mock_collator.enable_packing = True  # Stateful
+        mock_collator.packer = None
+
+        loader = create_async_dataloader(
+            dataset=mock_dataset,
+            collate_fn=mock_collator,
+            batch_size=None,
+            num_workers=2,
+            token_budget=4096,
+        )
+
+        # The DataLoader's collate_fn should be the passthrough, NOT the collator
+        assert loader.collate_fn is _passthrough_collate, \
+            "Stateful collator should NOT be DataLoader's collate_fn"
+
+        # The real collator should be stored separately
+        assert loader.collator is mock_collator, \
+            "Real collator should be stored as loader.collator"
+
+    def test_stateless_collator_passed_to_dataloader_normally(self):
+        """Verify stateless collator (enable_packing=False) works as before."""
+        from virnucpro.data.dataloader_utils import create_async_dataloader
+        from torch.utils.data import IterableDataset
+
+        mock_dataset = MagicMock(spec=IterableDataset)
+        mock_collator = MagicMock()
+        mock_collator.enable_packing = False  # Stateless
+
+        loader = create_async_dataloader(
+            dataset=mock_dataset,
+            collate_fn=mock_collator,
+            batch_size=None,
+            num_workers=2,
+            token_budget=4096,
+        )
+
+        # Stateless collator should be passed directly to DataLoader
+        assert loader.collate_fn is mock_collator, \
+            "Stateless collator should be DataLoader's collate_fn"
+
+        # Real collator still stored for backward compatibility
+        assert loader.collator is mock_collator
+
+    def test_collator_without_enable_packing_attribute_treated_as_stateless(self):
+        """Verify collators without enable_packing attr are treated as stateless."""
+        from virnucpro.data.dataloader_utils import create_async_dataloader
+        from torch.utils.data import IterableDataset
+
+        mock_dataset = MagicMock(spec=IterableDataset)
+        # Plain callable without enable_packing attribute
+        mock_collator = MagicMock(spec=['__call__', 'max_tokens_per_batch', 'packer'])
+        mock_collator.max_tokens_per_batch = 4096
+        mock_collator.packer = MagicMock()
+
+        loader = create_async_dataloader(
+            dataset=mock_dataset,
+            collate_fn=mock_collator,
+            batch_size=None,
+            num_workers=2,
+            token_budget=4096,
+        )
+
+        # Should be passed directly (no enable_packing = not stateful)
+        assert loader.collate_fn is mock_collator
+
+    def test_pin_memory_disabled_for_stateful_collator(self):
+        """Verify pin_memory=False when using passthrough collate_fn.
+
+        When using passthrough collation, workers yield raw dicts (not tensors),
+        so pin_memory would fail. It must be disabled.
+        """
+        from virnucpro.data.dataloader_utils import create_async_dataloader
+        from torch.utils.data import IterableDataset
+
+        mock_dataset = MagicMock(spec=IterableDataset)
+        mock_collator = MagicMock()
+        mock_collator.enable_packing = True
+        mock_collator.packer = None
+
+        loader = create_async_dataloader(
+            dataset=mock_dataset,
+            collate_fn=mock_collator,
+            batch_size=None,
+            num_workers=2,
+            pin_memory=True,  # Requested True but should be overridden
+            token_budget=4096,
+        )
+
+        # pin_memory should be False for passthrough (raw dicts have no tensors)
+        assert loader.pin_memory is False, \
+            "pin_memory must be False when using passthrough collate_fn"
+
+    def test_runner_detects_main_process_collation(self):
+        """Verify AsyncInferenceRunner detects main-process collation mode."""
+        from virnucpro.pipeline.async_inference import AsyncInferenceRunner
+        from unittest.mock import Mock
+        import torch
+
+        mock_model = Mock()
+        mock_param = Mock()
+        mock_param.dtype = torch.float32
+        mock_param.numel.return_value = 1000
+        mock_param.device = torch.device('cpu')
+        mock_model.parameters.side_effect = lambda: iter([mock_param])
+
+        runner = AsyncInferenceRunner(mock_model, torch.device('cpu'), enable_streams=False)
+
+        # DataLoader with stateful collator stored
+        mock_dataloader = Mock()
+        mock_collator = Mock()
+        mock_collator.enable_packing = True
+        mock_collator.flush = Mock(return_value=[])
+        mock_dataloader.collator = mock_collator
+
+        assert runner._is_main_process_collation(mock_dataloader) is True
+
+        # DataLoader without collator attribute
+        mock_dataloader_no_collator = Mock(spec=['__iter__'])
+        del mock_dataloader_no_collator.collator
+        assert runner._is_main_process_collation(mock_dataloader_no_collator) is False
+
+    def test_runner_get_collator_prefers_stored_collator(self):
+        """Verify _get_collator prefers dataloader.collator over collate_fn."""
+        from virnucpro.pipeline.async_inference import AsyncInferenceRunner
+        from unittest.mock import Mock
+        import torch
+
+        mock_model = Mock()
+        mock_param = Mock()
+        mock_param.dtype = torch.float32
+        mock_param.numel.return_value = 1000
+        mock_param.device = torch.device('cpu')
+        mock_model.parameters.side_effect = lambda: iter([mock_param])
+
+        runner = AsyncInferenceRunner(mock_model, torch.device('cpu'), enable_streams=False)
+
+        # Both collator and collate_fn.flush exist
+        mock_collator = Mock()
+        mock_collator.flush = Mock()
+        mock_collate_fn = Mock()
+        mock_collate_fn.flush = Mock()
+
+        mock_dataloader = Mock()
+        mock_dataloader.collator = mock_collator
+        mock_dataloader.collate_fn = mock_collate_fn
+
+        result = runner._get_collator(mock_dataloader)
+        assert result is mock_collator, \
+            "Should prefer dataloader.collator over dataloader.collate_fn"
+
+    def test_runner_get_collator_falls_back_to_collate_fn(self):
+        """Verify _get_collator falls back to collate_fn for backward compat."""
+        from virnucpro.pipeline.async_inference import AsyncInferenceRunner
+        from unittest.mock import Mock
+        import torch
+
+        mock_model = Mock()
+        mock_param = Mock()
+        mock_param.dtype = torch.float32
+        mock_param.numel.return_value = 1000
+        mock_param.device = torch.device('cpu')
+        mock_model.parameters.side_effect = lambda: iter([mock_param])
+
+        runner = AsyncInferenceRunner(mock_model, torch.device('cpu'), enable_streams=False)
+
+        # Only collate_fn.flush (no .collator attribute)
+        mock_collate_fn = Mock()
+        mock_collate_fn.flush = Mock()
+
+        mock_dataloader = Mock(spec=['collate_fn'])
+        mock_dataloader.collate_fn = mock_collate_fn
+
+        result = runner._get_collator(mock_dataloader)
+        assert result is mock_collate_fn, \
+            "Should fall back to collate_fn when no collator attribute"
+
+    def test_passthrough_collate_identity(self):
+        """Verify _passthrough_collate returns input unchanged."""
+        from virnucpro.data.dataloader_utils import _passthrough_collate
+
+        item = {'id': 'seq1', 'sequence': 'MKTAYIAK', 'file': 'test.fasta'}
+        result = _passthrough_collate(item)
+        assert result is item, "Passthrough should return exact same object"

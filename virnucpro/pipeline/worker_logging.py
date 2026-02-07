@@ -48,9 +48,9 @@ def setup_worker_logging(
     )
     file_handler.setFormatter(formatter)
 
-    # Create console handler for immediate feedback (warnings/errors only)
+    # Create console handler for worker progress visibility
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.WARNING)  # Only warnings/errors to console
+    console_handler.setLevel(logging.INFO)  # Show progress and key events on console
     console_handler.setFormatter(formatter)
 
     # Add both handlers to root logger

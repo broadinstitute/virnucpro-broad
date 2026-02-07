@@ -2,9 +2,15 @@
 
 This module implements the async DataLoader architecture where:
 - DataLoader workers handle CPU-only I/O (FASTA parsing)
-- Main process tokenizes in collate_fn
-- GPU receives prefetched, pinned batches
+- Main process tokenizes and packs sequences via collator
+- GPU receives prefetched batches
 - CUDA streams overlap data transfer with computation
+
+Critical: Stateful collators (VarlenCollator with enable_packing=True)
+run in the MAIN PROCESS, not in DataLoader workers. This prevents data
+loss from PyTorch pickling stateful collators to worker subprocesses,
+where each worker's buffer would accumulate sequences that are never
+flushed when the worker process ends.
 
 This is the single-GPU foundation. Multi-GPU coordination is Phase 7.
 """
@@ -463,6 +469,52 @@ class AsyncInferenceRunner:
             batch_idx=self._batch_count - 1
         )
 
+    def _get_collator(self, dataloader: DataLoader):
+        """Get the real collator from the DataLoader.
+
+        create_async_dataloader stores the collator as dataloader.collator
+        to prevent it from being pickled to worker subprocesses.
+
+        Falls back to dataloader.collate_fn for backward compatibility
+        with DataLoaders not created by create_async_dataloader.
+
+        Args:
+            dataloader: DataLoader to extract collator from
+
+        Returns:
+            Collator object, or None if no stateful collator found
+        """
+        # Prefer the explicitly stored collator (set by create_async_dataloader)
+        collator = getattr(dataloader, 'collator', None)
+        if collator is not None:
+            return collator
+
+        # Backward compatibility: check collate_fn directly
+        if hasattr(dataloader, 'collate_fn') and hasattr(dataloader.collate_fn, 'flush'):
+            return dataloader.collate_fn
+
+        return None
+
+    def _is_main_process_collation(self, dataloader: DataLoader) -> bool:
+        """Check if collation should happen in the main process.
+
+        Returns True when the DataLoader uses a passthrough collate_fn
+        and has a stateful collator stored separately (the fix for the
+        worker buffer data loss bug).
+
+        Args:
+            dataloader: DataLoader to check
+
+        Returns:
+            True if main process collation is needed
+        """
+        collator = getattr(dataloader, 'collator', None)
+        if collator is None:
+            return False
+
+        # Check if collator is stateful (has buffer-based packing)
+        return getattr(collator, 'enable_packing', False)
+
     def run(
         self,
         dataloader: DataLoader,
@@ -472,8 +524,15 @@ class AsyncInferenceRunner:
         """
         Run inference on all batches from DataLoader.
 
+        When the DataLoader has a stateful collator (stored as dataloader.collator
+        by create_async_dataloader), raw items from workers are passed through
+        the collator in the main process. This prevents data loss from PyTorch
+        pickling stateful collators to worker subprocesses.
+
         Args:
-            dataloader: Async DataLoader with prefetched batches
+            dataloader: Async DataLoader with prefetched batches.
+                If created by create_async_dataloader with a stateful collator,
+                raw items are collated in the main process.
             progress_callback: Optional callback(batch_idx, num_sequences)
             force_restart: If True, ignore checkpoints and start fresh (default: False)
 
@@ -489,6 +548,16 @@ class AsyncInferenceRunner:
         self.monitor.set_stage('inference')
 
         logger.info("Starting async inference loop")
+
+        # Detect main-process collation mode
+        main_process_collation = self._is_main_process_collation(dataloader)
+        collator = self._get_collator(dataloader)
+
+        if main_process_collation:
+            logger.info(
+                "Main-process collation enabled: raw items from DataLoader workers "
+                "will be collated in main process to prevent buffer data loss"
+            )
 
         # Resume from checkpoints if available
         if self._checkpointing_enabled and not force_restart:
@@ -538,9 +607,10 @@ class AsyncInferenceRunner:
         # Log dataset info if available
         if hasattr(dataloader, 'dataset') and hasattr(dataloader.dataset, '__len__'):
             dataset_size = len(dataloader.dataset)
+            collator_ref = collator if collator is not None else getattr(dataloader, 'collate_fn', None)
             logger.info(
                 f"Starting inference on {dataset_size:,} sequences "
-                f"(buffer size: {getattr(dataloader.collate_fn, 'buffer_size', 'unknown')})"
+                f"(buffer size: {getattr(collator_ref, 'buffer_size', 'unknown')})"
             )
         else:
             logger.info("Starting inference (dataset size unknown)")
@@ -554,7 +624,7 @@ class AsyncInferenceRunner:
                 try:
                     # FIX 1: Measure time BEFORE fetching (inter-batch arrival)
                     fetch_start = time.perf_counter()
-                    batch = next(dataloader_iter)
+                    raw_item = next(dataloader_iter)
                     fetch_time_ms = (time.perf_counter() - fetch_start) * 1000
 
                 except StopIteration:
@@ -569,13 +639,25 @@ class AsyncInferenceRunner:
                         f"Check worker logs and CUDA isolation."
                     ) from e
 
+                if main_process_collation:
+                    # Main-process collation: raw_item is a dict from the dataset.
+                    # Pass through the collator which buffers and returns packed
+                    # batches when ready (or {} when buffer not full).
+                    batch = collator(raw_item)
+                else:
+                    # Legacy path: collation already happened in DataLoader workers
+                    batch = raw_item
+
                 # Skip empty batches (collator returns {} when buffer not full)
                 if not batch or 'input_ids' not in batch:
                     continue
 
                 # FIX 5: Validate memory pinning (critical for performance)
                 if batch_idx == 0:
-                    self._validate_pinned_memory(batch)
+                    if not main_process_collation:
+                        # Only validate pinning when DataLoader handles collation
+                        # (main-process collation produces non-pinned tensors)
+                        self._validate_pinned_memory(batch)
                     # Calculate how long buffering took
                     buffering_time = time.perf_counter() - processing_start_time
                     logger.info(
@@ -709,10 +791,12 @@ class AsyncInferenceRunner:
                 batch_idx += 1
 
             # Flush collator buffer (handles last <buffer_size sequences)
-            # VarlenCollator accumulates sequences; flush ensures no data loss
-            if hasattr(dataloader.collate_fn, 'flush'):
+            # VarlenCollator accumulates sequences; flush ensures no data loss.
+            # With main-process collation, the collator has the actual buffered
+            # data (not a pickled copy), so flush works correctly.
+            if collator is not None and hasattr(collator, 'flush'):
                 logger.info("Flushing collator buffer for remaining sequences")
-                flushed_batches = dataloader.collate_fn.flush()
+                flushed_batches = collator.flush()
                 logger.info(f"Flush returned {len(flushed_batches)} batches")
                 for batch in flushed_batches:
                     if not batch or 'input_ids' not in batch:
@@ -720,8 +804,8 @@ class AsyncInferenceRunner:
                         continue
                     result = self.process_batch(batch)
                     yield result
-            else:
-                logger.warning("Collator does not have flush() method - data may be lost!")
+            elif collator is None:
+                logger.warning("No collator found on DataLoader - data may be lost if sequences were buffered!")
 
             # Final checkpoint (after loop completion)
             if self._checkpointing_enabled and self._ckpt_embeddings:

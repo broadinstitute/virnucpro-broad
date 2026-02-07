@@ -113,7 +113,7 @@ class TestWorkerLogging:
 
         assert len(console_handlers) > 0
         for handler in console_handlers:
-            assert handler.level == logging.WARNING
+            assert handler.level == logging.INFO
 
     def test_multiple_workers(self, temp_log_dir):
         """Test that ranks 0, 1, 2 create separate files."""

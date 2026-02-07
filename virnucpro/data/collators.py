@@ -12,13 +12,22 @@ Architecture:
         cu_seqlens: [0, len(seq1), len(seq1)+len(seq2), ...]
 
 Critical:
-    This collator runs in the MAIN PROCESS (not workers). Workers yield
-    raw sequence strings, and this collator handles ESM tokenization.
-    This ensures workers remain CUDA-safe.
+    When enable_packing=True (default), the collator is STATEFUL (maintains
+    a buffer). It MUST run in the MAIN PROCESS, not in DataLoader workers.
+    create_async_dataloader() handles this by using a passthrough collate_fn
+    for the DataLoader and storing the collator separately. The
+    AsyncInferenceRunner.run() method then calls the collator explicitly
+    in the main process loop.
+
+    Workers yield raw sequence strings; the collator handles ESM tokenization
+    in the main process, ensuring workers remain CUDA-safe.
 
 Integration:
-    Use as collate_fn parameter in DataLoader:
-        DataLoader(dataset, collate_fn=VarlenCollator(batch_converter))
+    Pass collator to create_async_dataloader(), which stores it on the
+    DataLoader for use by AsyncInferenceRunner:
+        loader = create_async_dataloader(dataset, collator)
+        for result in runner.run(loader):
+            ...
 """
 
 import logging
@@ -104,7 +113,7 @@ class VarlenCollator:
             self.packer = None
 
         # Sequence tracking counters
-        # No lock needed: collate_fn is called sequentially by DataLoader
+        # No lock needed: collator is called sequentially in main process
         self._total_sequences_received = 0
         self._total_sequences_returned = 0
 

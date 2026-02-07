@@ -227,6 +227,21 @@ def create_sequence_dataloader(
     return create_optimized_dataloader(dataset, batch_size, **kwargs)
 
 
+def _passthrough_collate(item):
+    """Identity collate function that passes items through unchanged.
+
+    Used when the real collator is stateful (has buffer) and must run
+    in the main process, not in DataLoader worker subprocesses.
+
+    Args:
+        item: Raw item from dataset (dict with 'id', 'sequence', 'file')
+
+    Returns:
+        The item unchanged
+    """
+    return item
+
+
 def create_async_dataloader(
     dataset: IterableDataset,
     collate_fn: Callable,
@@ -244,18 +259,27 @@ def create_async_dataloader(
 
     This factory configures DataLoader for the async architecture where:
     - Workers perform CPU-only I/O (FASTA parsing)
-    - Main process handles tokenization (via collate_fn)
+    - Main process handles tokenization via the collator
     - GPU inference receives prefetched, pinned batches
+
+    When the collator is stateful (has buffer/enable_packing), it is NOT
+    passed as the DataLoader's collate_fn. Instead, a passthrough function
+    is used so workers just yield raw dicts. The real collator is stored
+    as `dataloader.collator` for use by AsyncInferenceRunner.run(), which
+    calls it manually in the main process. This prevents data loss from
+    PyTorch pickling stateful collators to worker subprocesses.
 
     Configuration follows PyTorch best practices for GPU workloads:
     - spawn context: Prevents CUDA context inheritance (safe multiprocessing)
     - persistent_workers: Keeps workers alive (faster, no restart overhead)
-    - pin_memory: Enables fast CPU-to-GPU transfer
+    - pin_memory: Enables fast CPU-to-GPU transfer (disabled for passthrough)
     - prefetch_factor: Aggressive prefetching (4 batches per worker = 16 total)
 
     Args:
         dataset: IterableDataset (e.g., SequenceDataset) for streaming data
-        collate_fn: Callable to process batches (e.g., VarlenCollator)
+        collate_fn: Callable to process batches (e.g., VarlenCollator).
+            If stateful (has 'enable_packing' attribute set to True),
+            will be stored on the DataLoader and called from main process.
         batch_size: Number of items per batch. Use None for dynamic batching where
             collate_fn determines batch size (e.g., VarlenCollator with token budget).
             For VarlenCollator (token-budget packing), MUST be None - otherwise fixed
@@ -272,7 +296,9 @@ def create_async_dataloader(
         model_memory_gb: Estimated model memory for budget calculation
 
     Returns:
-        Configured DataLoader ready for async GPU inference
+        Configured DataLoader ready for async GPU inference.
+        When collator is stateful, the real collator is stored as
+        dataloader.collator for use by AsyncInferenceRunner.
 
     Example:
         >>> from virnucpro.data import SequenceDataset, VarlenCollator
@@ -281,16 +307,17 @@ def create_async_dataloader(
         >>> # batch_size=None lets VarlenCollator control batching via token budget
         >>> # token_budget=None enables dynamic budget calculation (PACK-03)
         >>> loader = create_async_dataloader(dataset, collator, batch_size=None)
-        >>> for batch in loader:
-        ...     # batch has pinned tensors ready for GPU transfer
-        ...     gpu_batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
+        >>> # Collator is stored on loader.collator, called by runner in main process
+        >>> runner = AsyncInferenceRunner(model, device)
+        >>> for result in runner.run(loader):
+        ...     process(result)
 
     Raises:
         ValueError: If num_workers < 1 (async requires workers)
 
     Note:
         - Workers MUST NOT touch CUDA (enforced via cuda_safe_worker_init)
-        - Tokenization happens in main process via collate_fn
+        - Stateful collators run in main process (not pickled to workers)
         - batch_size=None is recommended for VarlenCollator (token-budget packing)
         - For single-threaded loading, use create_optimized_dataloader instead
     """
@@ -318,23 +345,49 @@ def create_async_dataloader(
         if collate_fn.packer is not None:
             collate_fn.packer.max_tokens_per_batch = token_budget
 
+    # Determine if collator is stateful (has buffer that would lose data if pickled)
+    is_stateful = getattr(collate_fn, 'enable_packing', False)
+
+    if is_stateful:
+        # Stateful collator: use passthrough so workers yield raw dicts.
+        # The real collator will be called in the main process by
+        # AsyncInferenceRunner.run().
+        actual_collate_fn = _passthrough_collate
+        # pin_memory=False because raw dicts don't contain tensors
+        actual_pin_memory = False
+        logger.info(
+            "Stateful collator detected (enable_packing=True): "
+            "using passthrough collate_fn to prevent worker buffer data loss. "
+            "Collator will run in main process via AsyncInferenceRunner."
+        )
+    else:
+        # Stateless collator: safe to pass directly to DataLoader workers
+        actual_collate_fn = collate_fn
+        actual_pin_memory = pin_memory
+
     logger.info(
         f"Creating async DataLoader: batch_size={batch_size}, num_workers={num_workers}, "
-        f"prefetch_factor={prefetch_factor}, pin_memory={pin_memory}, timeout={timeout}s"
+        f"prefetch_factor={prefetch_factor}, pin_memory={actual_pin_memory}, timeout={timeout}s"
     )
 
-    return DataLoader(
+    loader = DataLoader(
         dataset,
         batch_size=batch_size,
         num_workers=num_workers,
         prefetch_factor=prefetch_factor,
-        pin_memory=pin_memory,
+        pin_memory=actual_pin_memory,
         persistent_workers=True,
         multiprocessing_context='spawn',
-        collate_fn=collate_fn,
+        collate_fn=actual_collate_fn,
         worker_init_fn=cuda_safe_worker_init,
         timeout=timeout,
     )
+
+    # Store the real collator on the DataLoader for main-process usage
+    # AsyncInferenceRunner.run() checks for this attribute
+    loader.collator = collate_fn
+
+    return loader
 
 
 def estimate_memory_usage(
