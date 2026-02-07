@@ -71,13 +71,22 @@ def _stream_h5_to_pt_files(
         # Load nucleotide .pt to get sequence IDs in this file
         nuc_data = torch.load(nuc_feat_path, weights_only=False)
 
-        # Build ESM features dict for sequences in this file
-        esm_features = {}
-        for seq_id in nuc_data.keys():
+        # Extract actual sequence IDs from the 'nucleotide' key
+        # DNABERT .pt format: {'nucleotide': [seq_ids...], 'data': [features...]}
+        seq_ids_in_file = nuc_data['nucleotide']
+
+        # Build ESM features in v1.0 format: {'proteins': [...], 'data': [...]}
+        # This matches what merge_features() expects at features.py:286
+        proteins = []
+        data = []
+        for seq_id in seq_ids_in_file:
             if seq_id in seq_to_embedding:
-                esm_features[seq_id] = seq_to_embedding[seq_id]
+                proteins.append(seq_id)
+                data.append(seq_to_embedding[seq_id])
             else:
                 logger.warning(f"Sequence {seq_id} not found in v2.0 ESM-2 output")
+
+        esm_features = {'proteins': proteins, 'data': data}
 
         # Save with matching name: output_0_DNABERT_S.pt -> output_0_ESM.pt
         esm_filename = nuc_feat_path.name.replace('_DNABERT_S.pt', '_ESM.pt')
