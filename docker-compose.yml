@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  virnucpro:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: virnucpro:latest
+    container_name: virnucpro
+
+    # GPU access - requires NVIDIA Container Toolkit
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    # Mount current directory to /workspace
+    volumes:
+      - .:/workspace
+      - ./data:/workspace/data
+      - ./.cache:/workspace/.cache
+
+    # Environment variables
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TRANSFORMERS_CACHE=/workspace/.cache/huggingface
+
+    # Keep container running for interactive use
+    stdin_open: true
+    tty: true
+
+    # Default command: validation
+    command: python scripts/validate_environment.py
