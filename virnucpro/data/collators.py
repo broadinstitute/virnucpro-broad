@@ -22,7 +22,6 @@ Integration:
 """
 
 import logging
-import threading
 from typing import List, Dict, Any, Union
 
 import torch
@@ -104,10 +103,10 @@ class VarlenCollator:
         else:
             self.packer = None
 
-        # Sequence tracking counters (thread-safe)
+        # Sequence tracking counters
+        # No lock needed: collate_fn is called sequentially by DataLoader
         self._total_sequences_received = 0
         self._total_sequences_returned = 0
-        self._counter_lock = threading.Lock()
 
         logger.debug(
             f"VarlenCollator initialized: max_tokens={max_tokens_per_batch}, "
@@ -245,15 +244,13 @@ class VarlenCollator:
             return self._tokenize_and_pack(batch)
 
         # Track total sequences received for flush verification
-        with self._counter_lock:
-            self._total_sequences_received += len(batch)
+        self._total_sequences_received += len(batch)
 
         # If we have pre-packed batches ready, return one and buffer the new sequences
         if self.packed_queue:
             self.buffer.extend(batch)  # Save for later packing
             batch_to_return = self.packed_queue.pop(0)
-            with self._counter_lock:
-                self._total_sequences_returned += len(batch_to_return)
+            self._total_sequences_returned += len(batch_to_return)
             logger.debug(f"Returning from packed_queue ({len(self.packed_queue)} batches remaining), buffer now has {len(self.buffer)} sequences")
             return self._tokenize_and_pack(batch_to_return)
 
@@ -277,8 +274,7 @@ class VarlenCollator:
             # Return first packed batch
             if self.packed_queue:
                 batch_to_return = self.packed_queue.pop(0)
-                with self._counter_lock:
-                    self._total_sequences_returned += len(batch_to_return)
+                self._total_sequences_returned += len(batch_to_return)
                 logger.debug(f"Returning first packed batch ({len(batch_to_return)} sequences), {len(self.packed_queue)} batches remaining in queue")
                 return self._tokenize_and_pack(batch_to_return)
 
@@ -333,8 +329,7 @@ class VarlenCollator:
                 for packed_batch in packed_batches:
                     result = self._tokenize_and_pack(packed_batch)
                     if result:
-                        with self._counter_lock:
-                            self._total_sequences_returned += result.get('num_sequences', 0)
+                        self._total_sequences_returned += result.get('num_sequences', 0)
                         results.append(result)
 
             # Drain packed_queue (may also produce overflow back to buffer)
@@ -342,8 +337,7 @@ class VarlenCollator:
                 batch = self.packed_queue.pop(0)
                 result = self._tokenize_and_pack(batch)
                 if result:
-                    with self._counter_lock:
-                        self._total_sequences_returned += result.get('num_sequences', 0)
+                    self._total_sequences_returned += result.get('num_sequences', 0)
                     results.append(result)
 
         if self.buffer:
