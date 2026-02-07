@@ -1,0 +1,24 @@
+virnucpro/data/collators.py
+  e67f94d44fd863ac 107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "236ba1f1af8a1400e9a81f61be8811bb2628115f",
+  "prompts": {
+    "e67f94d44fd863ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5b76bfd5-44ff-44f2-abec-04fb5ea1adff",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 7,
+      "total_deletions": 13,
+      "accepted_lines": 1,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/048554c80c2b3dd32e8e2227fae7b479039da8405a61501ac47dc1534c61571b"
+    }
+  }
+}
