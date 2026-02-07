@@ -250,8 +250,8 @@ def main():
             ESM_outfile = torch.load(output_path)
             protein_data_dict = {}
 
-            for protein, data in zip(ESM_outfile['proteins'], ESM_outfile['data']):
-                protein_data_dict[protein] = data
+            for protein, emb in zip(ESM_outfile['proteins'], ESM_outfile['data']):
+                protein_data_dict[protein] = emb
 
             # Validate each entry
             for key, val in protein_data_dict.items():
