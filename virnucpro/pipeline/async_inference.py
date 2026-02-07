@@ -531,6 +531,20 @@ class AsyncInferenceRunner:
         # FIX 1: Track inter-batch arrival time (not processing time)
         last_batch_time = time.perf_counter()
 
+        # Progress tracking
+        total_sequences_processed = 0
+        processing_start_time = time.perf_counter()
+
+        # Log dataset info if available
+        if hasattr(dataloader, 'dataset') and hasattr(dataloader.dataset, '__len__'):
+            dataset_size = len(dataloader.dataset)
+            logger.info(
+                f"Starting inference on {dataset_size:,} sequences "
+                f"(buffer size: {getattr(dataloader.collate_fn, 'buffer_size', 'unknown')})"
+            )
+        else:
+            logger.info("Starting inference (dataset size unknown)")
+
         try:
             # FIX 6: Wrap DataLoader iteration with exception handling
             dataloader_iter = iter(dataloader)
@@ -555,9 +569,20 @@ class AsyncInferenceRunner:
                         f"Check worker logs and CUDA isolation."
                     ) from e
 
+                # Skip empty batches (collator returns {} when buffer not full)
+                if not batch or 'input_ids' not in batch:
+                    continue
+
                 # FIX 5: Validate memory pinning (critical for performance)
                 if batch_idx == 0:
                     self._validate_pinned_memory(batch)
+                    # Calculate how long buffering took
+                    buffering_time = time.perf_counter() - processing_start_time
+                    logger.info(
+                        f"First batch ready after {buffering_time:.1f}s buffering "
+                        f"({len(batch['sequence_ids'])} sequences, "
+                        f"{batch['input_ids'].numel()} tokens). Processing starting..."
+                    )
 
                 # Process batch
                 result = self.process_batch(batch)
@@ -595,15 +620,56 @@ class AsyncInferenceRunner:
                 if batch_idx % 10 == 0 and batch_idx > 0:
                     is_bottleneck, severity, avg_util = self.monitor.check_bottleneck()
 
-                # Periodic logging every 100 batches
-                if batch_idx % 100 == 0 and batch_idx > 0:
+                # Track cumulative progress
+                total_sequences_processed += num_sequences
+
+                # Adaptive progress logging:
+                # - First 10 batches: log every batch (startup phase)
+                # - Batches 10-100: log every 10 batches
+                # - After batch 100: log every 100 batches
+                should_log_progress = False
+                if batch_idx < 10:
+                    should_log_progress = True  # Log every batch during startup
+                elif batch_idx < 100:
+                    should_log_progress = (batch_idx % 10 == 0)  # Every 10 batches
+                else:
+                    should_log_progress = (batch_idx % 100 == 0)  # Every 100 batches
+
+                if should_log_progress:
                     dl_stats = self.monitor.get_dataloader_statistics()
                     throughput = self.monitor.get_throughput()
+
+                    # Calculate elapsed time and ETA
+                    elapsed_time = time.perf_counter() - processing_start_time
+                    seq_per_sec = throughput.get('sequences_per_sec', 0)
+
+                    # Try to estimate total sequences from dataset if available
+                    estimated_total = None
+                    eta_str = "unknown"
+                    progress_pct = ""
+
+                    if hasattr(dataloader, 'dataset') and hasattr(dataloader.dataset, '__len__'):
+                        try:
+                            estimated_total = len(dataloader.dataset)
+                            if estimated_total > 0:
+                                progress_pct = f"{total_sequences_processed}/{estimated_total} ({100*total_sequences_processed/estimated_total:.1f}%) | "
+                                remaining = estimated_total - total_sequences_processed
+                                if seq_per_sec > 0:
+                                    eta_seconds = remaining / seq_per_sec
+                                    eta_minutes = eta_seconds / 60
+                                    eta_str = f"{eta_minutes:.1f}m" if eta_minutes < 60 else f"{eta_minutes/60:.1f}h"
+                        except:
+                            pass
+
+                    if not progress_pct:
+                        progress_pct = f"{total_sequences_processed:,} sequences | "
+
                     logger.info(
-                        f"Batch {batch_idx}: "
-                        f"{dl_stats.get('avg_packing_efficiency', 0):.1%} avg efficiency, "
-                        f"{throughput.get('tokens_per_sec', 0):.0f} tokens/sec, "
-                        f"{throughput.get('sequences_per_sec', 0):.1f} seq/sec"
+                        f"Batch {batch_idx}: {progress_pct}"
+                        f"{dl_stats.get('avg_packing_efficiency', 0):.1%} pack eff, "
+                        f"{throughput.get('tokens_per_sec', 0):,.0f} tok/s, "
+                        f"{seq_per_sec:.1f} seq/s, "
+                        f"ETA: {eta_str}"
                     )
 
                 # Progress callback
@@ -645,10 +711,17 @@ class AsyncInferenceRunner:
             # Flush collator buffer (handles last <buffer_size sequences)
             # VarlenCollator accumulates sequences; flush ensures no data loss
             if hasattr(dataloader.collate_fn, 'flush'):
-                logger.debug("Flushing collator buffer for remaining sequences")
-                for batch in dataloader.collate_fn.flush():
+                logger.info("Flushing collator buffer for remaining sequences")
+                flushed_batches = dataloader.collate_fn.flush()
+                logger.info(f"Flush returned {len(flushed_batches)} batches")
+                for batch in flushed_batches:
+                    if not batch or 'input_ids' not in batch:
+                        logger.warning("Skipping empty batch from flush")
+                        continue
                     result = self.process_batch(batch)
                     yield result
+            else:
+                logger.warning("Collator does not have flush() method - data may be lost!")
 
             # Final checkpoint (after loop completion)
             if self._checkpointing_enabled and self._ckpt_embeddings:
