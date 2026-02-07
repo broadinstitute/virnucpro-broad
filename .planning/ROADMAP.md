@@ -47,10 +47,11 @@ Plans:
   4. Batch processing works with configurable batch size and GPU acceleration active
   5. Feature extraction outputs saved to .pt files in same format as existing ESM2 pipeline
   6. Test run on sample sequences completes without errors and produces valid embeddings
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 02-01: TBD
+- [ ] 02-01-PLAN.md -- Implement extract_fast_esm() in units.py and update features_extract.py for FastESM2_650
+- [ ] 02-02-PLAN.md -- End-to-end extraction test with sample sequences and human verification
 
 ### Phase 3: Dimension Compatibility
 **Goal**: All downstream code updated for 1664-dim merged features with validation at merge points
@@ -109,7 +110,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Environment Setup | 2/2 | Complete | 2026-02-07 |
-| 2. Feature Extraction Pipeline | 0/TBD | Not started | - |
+| 2. Feature Extraction Pipeline | 0/2 | Not started | - |
 | 3. Dimension Compatibility | 0/TBD | Not started | - |
 | 4. Training Data Preparation | 0/TBD | Not started | - |
 | 5. Model Training & Validation | 0/TBD | Not started | - |
