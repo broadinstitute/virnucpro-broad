@@ -373,7 +373,7 @@ class AsyncInferenceRunner:
             # NOT [batch, seq, hidden]
             # Each sequence in cu_seqlens includes BOS and EOS tokens:
             #   [BOS, aa_1, aa_2, ..., aa_L, EOS]
-            # We mean-pool over aa_1..aa_L only (exclude BOS at start, EOS at last position)
+            # We mean-pool over aa_1..aa_L only (exclude BOS at start, EOS at position end-1 (cu_seqlens[i+1]-1))
             # This matches v1.0 behavior in features.py:224-231
             embeddings = []
             for i in range(len(sequence_ids)):

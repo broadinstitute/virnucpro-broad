@@ -358,6 +358,35 @@ class TestEmbeddingExtraction:
         assert "insufficient tokens" in caplog.text or "seq_len=1" in caplog.text
         assert embeddings.shape == (1, hidden_dim)
 
+    def test_extract_embeddings_empty_sequence_ids_uses_fallback(self, runner):
+        """Verify empty sequence_ids falls back to non-packed path."""
+        hidden_dim = 32
+
+        representations = torch.randn(1, hidden_dim, device=runner.device)
+
+        gpu_batch = {
+            'cu_seqlens': torch.tensor([0, 1], dtype=torch.int32, device=runner.device),
+            'sequence_ids': [],
+        }
+
+        embeddings = runner._extract_embeddings(representations, gpu_batch)
+
+        assert embeddings.shape == (1,)
+
+    def test_extract_embeddings_cu_seqlens_insufficient_elements_raises(self, runner):
+        """Verify IndexError when cu_seqlens has fewer elements than sequence_ids."""
+        hidden_dim = 32
+
+        representations = torch.randn(2, hidden_dim, device=runner.device)
+
+        gpu_batch = {
+            'cu_seqlens': torch.tensor([0], dtype=torch.int32, device=runner.device),
+            'sequence_ids': ['seq_a', 'seq_b'],
+        }
+
+        with pytest.raises(IndexError):
+            runner._extract_embeddings(representations, gpu_batch)
+
 
 class TestRankValidation:
     """Tests for rank parameter validation."""
