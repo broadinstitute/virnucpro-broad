@@ -30,10 +30,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. FastESM2_650 model loads from HuggingFace Hub with trust_remote_code=True
   4. SDPA functionality validated on target GPU (2x speedup confirmed vs old attention)
   5. transformers library version compatible (4.30.0+) and can tokenize protein sequences
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 01-01: TBD
+- [ ] 01-01-PLAN.md -- Configure pixi environment with pinned dependencies and fix fair-esm imports
+- [ ] 01-02-PLAN.md -- Create validation script (ENV-01 through ENV-05 + SDPA benchmark) and update README
 
 ### Phase 2: Feature Extraction Pipeline
 **Goal**: New extract_fast_esm() function produces 1280-dim embeddings with batch processing and GPU acceleration
@@ -107,7 +108,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Environment Setup | 0/TBD | Not started | - |
+| 1. Environment Setup | 0/2 | Planned | - |
 | 2. Feature Extraction Pipeline | 0/TBD | Not started | - |
 | 3. Dimension Compatibility | 0/TBD | Not started | - |
 | 4. Training Data Preparation | 0/TBD | Not started | - |
