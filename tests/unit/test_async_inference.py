@@ -254,6 +254,110 @@ class TestEmbeddingExtraction:
         assert embeddings.shape == (1, hidden_dim)
         assert embeddings.dtype == torch.float32
 
+    def test_extract_embeddings_matches_v1_0_behavior(self, runner):
+        """Verify packed format mean pooling matches v1.0 unpacking behavior.
+
+        Regression test for FIX: EOS token was incorrectly included in mean pooling.
+        The packed format excludes BOS (position start) and EOS (position end-1),
+        matching v1.0 features.py:224-231 behavior which mean pools positions
+        1 to truncate_len+1 (excluding special tokens).
+        """
+        hidden_dim = 64
+
+        # Create deterministic representations for 3 sequences
+        # Sequence 1: 5 tokens (positions 0-6: BOS + 4 tokens + EOS)
+        # Sequence 2: 3 tokens (positions 6-9: BOS + 2 tokens + EOS)
+        # Sequence 3: 4 tokens (positions 9-14: BOS + 3 tokens + EOS)
+        torch.manual_seed(42)
+        representations = torch.randn(14, hidden_dim, device=runner.device)
+
+        # cu_seqlens: [0, 6, 9, 14]
+        # seq1: indices 0-5 (BOS at 0, EOS at 5)
+        # seq2: indices 6-8 (BOS at 6, EOS at 8)
+        # seq3: indices 9-13 (BOS at 9, EOS at 13)
+        gpu_batch = {
+            'cu_seqlens': torch.tensor([0, 6, 9, 14], dtype=torch.int32, device=runner.device),
+            'sequence_ids': ['seq_1', 'seq_2', 'seq_3'],
+        }
+
+        packed_embeddings = runner._extract_embeddings(representations, gpu_batch)
+
+        # Simulate v1.0 behavior: process each sequence independently (unpacked)
+        v1_embeddings = []
+        for start, end in [(0, 6), (6, 9), (9, 14)]:
+            seq_len = end - start
+            truncate_len = seq_len - 2  # Exclude BOS and EOS
+            v1_emb = representations[start + 1:end - 1].mean(dim=0)
+            v1_embeddings.append(v1_emb)
+
+        v1_embeddings = torch.stack(v1_embeddings)
+
+        # Packed embeddings must match v1.0 unpacking behavior exactly
+        assert torch.allclose(packed_embeddings, v1_embeddings, rtol=1e-5, atol=1e-5), (
+            "Packed format mean pooling does not match v1.0 unpacking behavior. "
+            "This indicates EOS token may be incorrectly included in pooling."
+        )
+
+    def test_extract_embeddings_excludes_bos_and_eos(self, runner):
+        """Verify both BOS and EOS tokens are excluded from mean pooling."""
+        hidden_dim = 32
+
+        representations = torch.zeros(8, hidden_dim, device=runner.device)
+        representations[0] = 100.0   # BOS - should be excluded
+        representations[1:5] = 1.0    # Sequence tokens - should be included
+        representations[5] = 200.0    # EOS - should be excluded
+
+        gpu_batch = {
+            'cu_seqlens': torch.tensor([0, 6], dtype=torch.int32, device=runner.device),
+            'sequence_ids': ['test_seq'],
+        }
+
+        embeddings = runner._extract_embeddings(representations, gpu_batch)
+
+        # Mean of positions 1-4 (all 1.0) should be 1.0
+        expected_mean = 1.0
+        actual_mean = embeddings[0].mean().item()
+        assert abs(actual_mean - expected_mean) < 0.001, (
+            f"Expected mean {expected_mean}, got {actual_mean}. "
+            "BOS and/or EOS tokens may not be properly excluded."
+        )
+
+    def test_extract_embeddings_edge_case_bos_eos_only(self, runner, caplog):
+        """Verify warning logged for sequences with only BOS+EOS tokens."""
+        hidden_dim = 32
+
+        representations = torch.randn(2, hidden_dim, device=runner.device)
+
+        gpu_batch = {
+            'cu_seqlens': torch.tensor([0, 2], dtype=torch.int32, device=runner.device),
+            'sequence_ids': ['degenerate_seq'],
+        }
+
+        with caplog.at_level(logging.WARNING):
+            embeddings = runner._extract_embeddings(representations, gpu_batch)
+
+        assert "degenerate_seq" in caplog.text
+        assert "only BOS+EOS tokens" in caplog.text or "seq_len=2" in caplog.text
+        assert embeddings.shape == (1, hidden_dim)
+
+    def test_extract_embeddings_edge_case_single_token(self, runner, caplog):
+        """Verify warning logged for single-token sequences."""
+        hidden_dim = 32
+
+        representations = torch.randn(1, hidden_dim, device=runner.device)
+
+        gpu_batch = {
+            'cu_seqlens': torch.tensor([0, 1], dtype=torch.int32, device=runner.device),
+            'sequence_ids': ['single_token_seq'],
+        }
+
+        with caplog.at_level(logging.WARNING):
+            embeddings = runner._extract_embeddings(representations, gpu_batch)
+
+        assert "single_token_seq" in caplog.text
+        assert "insufficient tokens" in caplog.text or "seq_len=1" in caplog.text
+        assert embeddings.shape == (1, hidden_dim)
+
 
 class TestRankValidation:
     """Tests for rank parameter validation."""

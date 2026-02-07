@@ -373,10 +373,11 @@ class AsyncInferenceRunner:
             # NOT [batch, seq, hidden]
             # Each sequence in cu_seqlens includes BOS and EOS tokens:
             #   [BOS, aa_1, aa_2, ..., aa_L, EOS]
-            # We mean-pool over aa_1..aa_L only (exclude BOS at start, EOS at end-1)
+            # We mean-pool over aa_1..aa_L only (exclude BOS at start, EOS at last position)
             # This matches v1.0 behavior in features.py:224-231
             embeddings = []
             for i in range(len(sequence_ids)):
+                seq_id = sequence_ids[i]
                 start = cu_seqlens[i].item()
                 end = cu_seqlens[i + 1].item()
                 seq_len = end - start  # Total including BOS + EOS
@@ -385,9 +386,17 @@ class AsyncInferenceRunner:
                     seq_repr = representations[start + 1:end - 1].mean(dim=0)
                 elif seq_len == 2:
                     # Only BOS + EOS, no actual sequence tokens - use EOS as fallback
+                    logger.warning(
+                        f"Sequence {seq_id} has only BOS+EOS tokens (seq_len={seq_len}), "
+                        "falling back to EOS embedding"
+                    )
                     seq_repr = representations[start + 1:end].mean(dim=0)
                 else:
                     # Single token - use as-is
+                    logger.warning(
+                        f"Sequence {seq_id} has insufficient tokens (seq_len={seq_len}), "
+                        "falling back to available token"
+                    )
                     seq_repr = representations[start:end].mean(dim=0)
                 embeddings.append(seq_repr)
 
