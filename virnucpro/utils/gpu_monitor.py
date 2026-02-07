@@ -252,11 +252,11 @@ class NvitopMonitor:
             if self._devices:
                 logger.info(f"Nvitop monitoring initialized for {len(self._devices)} GPUs")
             else:
-                logger.warning("Nvitop available but failed to initialize devices, falling back to torch.cuda")
+                logger.info("Nvitop available but failed to initialize devices, using fallback monitoring")
                 self._nvitop_available = False
 
         except ImportError:
-            logger.warning("nvitop not available, using fallback monitoring (torch.cuda only)")
+            logger.info("nvitop not available, using fallback monitoring (torch.cuda memory only, no utilization metrics)")
             self._nvitop_available = False
 
     def start_monitoring(self):
@@ -348,8 +348,8 @@ class NvitopMonitor:
             self._total_sequences += sequences_in_batch
             self._total_tokens += tokens_in_batch
 
-        # Log warning if packing efficiency below threshold
-        if packing_efficiency is not None and packing_efficiency < 0.80:
+        # Log warning if packing efficiency below threshold (every 100 batches to reduce noise)
+        if packing_efficiency is not None and packing_efficiency < 0.80 and batch_idx % 100 == 0:
             logger.warning(
                 f"Low packing efficiency: {packing_efficiency:.1%} < 80% at batch {batch_idx}"
             )
@@ -374,7 +374,17 @@ class NvitopMonitor:
         Returns:
             Tuple of (is_bottleneck, severity, avg_utilization)
             severity: 'critical' | 'mild' | 'none'
+
+        Note:
+            When nvitop is not available, gpu_util is always 0.0 (fallback monitoring
+            only tracks memory). Bottleneck detection is disabled in this case to
+            avoid false positives.
         """
+        # Skip bottleneck detection when using fallback monitoring
+        # (gpu_util is always 0.0 without nvitop)
+        if not self._nvitop_available:
+            return False, 'none', 0.0
+
         with self._lock:
             if len(self._metrics) < recent_samples:
                 return False, 'none', 0.0
