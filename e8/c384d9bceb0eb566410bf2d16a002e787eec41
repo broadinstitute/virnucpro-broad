@@ -1,0 +1,34 @@
+virnucpro/pipeline/async_inference.py
+  e67f94d44fd863ac 5-6,9-13,472-517,527-530,533-535,552-561,610,613,627,642-649,657-659,794-797,799,807-808
+virnucpro/data/collators.py
+  e67f94d44fd863ac 15-20,22-23,26-30,116
+virnucpro/data/dataloader_utils.py
+  e67f94d44fd863ac 230-244,262,265-271,275,280-282,299-301,310-313,320,348-349,351-367,370,373,378,381,386-390
+virnucpro/pipeline/worker_logging.py
+  e67f94d44fd863ac 51,53
+tests/unit/test_worker_logging.py
+  e67f94d44fd863ac 116
+tests/unit/test_collators.py
+  e67f94d44fd863ac 3-4,139,142,144,150,153,156,164,166,170,173,180,471-682
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "e8c384d9bceb0eb566410bf2d16a002e787eec41",
+  "prompts": {
+    "e67f94d44fd863ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5b76bfd5-44ff-44f2-abec-04fb5ea1adff",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 538,
+      "total_deletions": 89,
+      "accepted_lines": 492,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/2eb9613ee6532c125aa5e6d6ae7ded72f034239fa998bf486dd5cf9824e06833"
+    }
+  }
+}
