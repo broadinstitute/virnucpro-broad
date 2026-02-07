@@ -1,10 +1,13 @@
 from Bio import SeqIO
 from tqdm import tqdm
 import os
+import logging
 
 import torch
 from transformers import AutoTokenizer, AutoModel
 # fair-esm removed - extract_esm() deprecated, replaced by extract_fast_esm() in Phase 2
+
+logger = logging.getLogger(__name__)
 
 def split_fasta_chunk(input_file, output_file, chunk_size):
     with open(output_file, 'w') as out_handle:
@@ -209,6 +212,242 @@ def extract_esm(fasta_file,
         "extract_esm() requires fair-esm which has been removed. "
         "Use extract_fast_esm() instead (implemented in Phase 2)."
     )
+
+def get_batch_indices(sequence_lengths, toks_per_batch=2048):
+    """
+    Groups sequences into batches where total tokens (including BOS/EOS) does not exceed toks_per_batch.
+
+    Args:
+        sequence_lengths: list of sequence lengths
+        toks_per_batch: maximum tokens per batch
+
+    Returns:
+        list of lists of indices (each inner list is one batch)
+    """
+    # Create list of (index, length) tuples and sort by length descending
+    indexed_lengths = list(enumerate(sequence_lengths))
+    indexed_lengths.sort(key=lambda x: x[1], reverse=True)
+
+    batches = []
+    current_batch = []
+    current_tokens = 0
+
+    for idx, seq_len in indexed_lengths:
+        # Each sequence needs seq_len + 2 tokens (for BOS and EOS)
+        tokens_needed = seq_len + 2
+
+        # If single sequence exceeds limit, it gets its own batch
+        if tokens_needed > toks_per_batch:
+            if current_batch:
+                batches.append(current_batch)
+                current_batch = []
+                current_tokens = 0
+            batches.append([idx])
+            continue
+
+        # Check if adding this sequence would exceed the batch limit
+        if current_tokens + tokens_needed > toks_per_batch:
+            # Start new batch
+            batches.append(current_batch)
+            current_batch = [idx]
+            current_tokens = tokens_needed
+        else:
+            # Add to current batch
+            current_batch.append(idx)
+            current_tokens += tokens_needed
+
+    # Add final batch if not empty
+    if current_batch:
+        batches.append(current_batch)
+
+    return batches
+
+def validate_embeddings(proteins, data, expected_dim=1280):
+    """
+    Validates embedding dimensions, NaN, and Inf values.
+
+    Args:
+        proteins: list of protein labels
+        data: list of embedding tensors
+        expected_dim: expected embedding dimension
+
+    Returns:
+        list of error strings (empty list if all valid)
+    """
+    errors = []
+
+    for protein, embedding in zip(proteins, data):
+        # Check dimension
+        if embedding.shape != (expected_dim,):
+            errors.append(f"{protein}: Expected shape ({expected_dim},), got {embedding.shape}")
+
+        # Check for NaN
+        if torch.isnan(embedding).any():
+            errors.append(f"{protein}: Contains NaN values")
+
+        # Check for Inf
+        if torch.isinf(embedding).any():
+            errors.append(f"{protein}: Contains Inf values")
+
+    return errors
+
+def extract_fast_esm(fasta_file, out_file=None, model=None, tokenizer=None,
+                     truncation_seq_length=1024, toks_per_batch=2048):
+    """
+    Extract FastESM2 embeddings from a FASTA file.
+
+    Args:
+        fasta_file: path to input FASTA file
+        out_file: path to output .pt file (if None, don't save)
+        model: pre-loaded FastESM2 model
+        tokenizer: pre-loaded tokenizer
+        truncation_seq_length: maximum sequence length before truncation
+        toks_per_batch: maximum tokens per batch
+
+    Returns:
+        tuple of (proteins, data) where proteins is list of labels and data is list of 1D tensors
+    """
+    # Skip if output file already exists (resume capability)
+    if out_file and os.path.exists(out_file):
+        logger.info(f"Output file {out_file} already exists, loading and returning...")
+        loaded = torch.load(out_file)
+        return (loaded['proteins'], loaded['data'])
+
+    logger.info(f"Extracting FastESM2 embeddings from {fasta_file}")
+
+    # Read all sequences from FASTA
+    records = list(SeqIO.parse(fasta_file, 'fasta'))
+    sequences = [str(record.seq) for record in records]
+    labels = [record.id for record in records]
+
+    # Compute sequence lengths (capped at truncation_seq_length)
+    sequence_lengths = [min(len(seq), truncation_seq_length) for seq in sequences]
+
+    # Create batches using dynamic batching
+    batch_indices = get_batch_indices(sequence_lengths, toks_per_batch=toks_per_batch)
+
+    proteins = []
+    data = []
+    failures = []
+
+    # Process batches with progress bar
+    for batch_idx_list in tqdm(batch_indices, desc="Processing batches"):
+        try:
+            # Get sequences for this batch
+            batch_seqs = [sequences[i] for i in batch_idx_list]
+            batch_labels = [labels[i] for i in batch_idx_list]
+            batch_seq_lengths = [sequence_lengths[i] for i in batch_idx_list]
+
+            # Process batch
+            with torch.no_grad():
+                # Tokenize
+                inputs = tokenizer(
+                    batch_seqs,
+                    return_tensors='pt',
+                    padding='longest',
+                    truncation=True,
+                    max_length=truncation_seq_length + 2
+                )
+
+                # Move to device
+                input_ids = inputs['input_ids'].to(model.device)
+                attention_mask = inputs['attention_mask'].to(model.device)
+
+                # Forward pass
+                outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+
+                # Mean pool excluding BOS/EOS for each sequence
+                for i, (label, seq_len) in enumerate(zip(batch_labels, batch_seq_lengths)):
+                    # Extract embeddings from positions 1 to seq_len+1 (excluding BOS at 0 and EOS after seq_len+1)
+                    embedding = outputs.last_hidden_state[i, 1:seq_len+1].mean(0)
+
+                    # Convert to float32 on CPU
+                    embedding = embedding.float().cpu()
+
+                    proteins.append(label)
+                    data.append(embedding)
+
+        except torch.cuda.OutOfMemoryError as e:
+            logger.warning(f"CUDA OOM for batch of size {len(batch_idx_list)}, attempting to split batch")
+            torch.cuda.empty_cache()
+
+            # If batch has more than 1 sequence, split and retry
+            if len(batch_idx_list) > 1:
+                mid = len(batch_idx_list) // 2
+                half1 = batch_idx_list[:mid]
+                half2 = batch_idx_list[mid:]
+
+                # Recursively process each half
+                for half_batch in [half1, half2]:
+                    try:
+                        batch_seqs = [sequences[i] for i in half_batch]
+                        batch_labels = [labels[i] for i in half_batch]
+                        batch_seq_lengths = [sequence_lengths[i] for i in half_batch]
+
+                        with torch.no_grad():
+                            inputs = tokenizer(
+                                batch_seqs,
+                                return_tensors='pt',
+                                padding='longest',
+                                truncation=True,
+                                max_length=truncation_seq_length + 2
+                            )
+
+                            input_ids = inputs['input_ids'].to(model.device)
+                            attention_mask = inputs['attention_mask'].to(model.device)
+
+                            outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+
+                            for i, (label, seq_len) in enumerate(zip(batch_labels, batch_seq_lengths)):
+                                embedding = outputs.last_hidden_state[i, 1:seq_len+1].mean(0)
+                                embedding = embedding.float().cpu()
+                                proteins.append(label)
+                                data.append(embedding)
+
+                    except Exception as sub_e:
+                        error_msg = f"Failed to process half-batch: {str(sub_e)}"
+                        logger.error(error_msg)
+                        for label in batch_labels:
+                            failures.append((label, 'processing_error', str(sub_e)))
+            else:
+                # Single sequence OOM - log and skip
+                error_msg = f"Single sequence OOM: {batch_labels[0]}"
+                logger.error(error_msg)
+                failures.append((batch_labels[0], 'oom', str(e)))
+
+        except Exception as e:
+            error_msg = f"Error processing batch: {str(e)}"
+            logger.error(error_msg)
+            for idx in batch_idx_list:
+                failures.append((labels[idx], 'batch_error', str(e)))
+
+    # Log failures to extraction_failures.log
+    if failures:
+        with open('extraction_failures.log', 'a') as f:
+            from datetime import datetime
+            timestamp = datetime.utcnow().isoformat()
+            for seq_id, error_type, error_msg in failures:
+                f.write(f"{timestamp} | {fasta_file} | {seq_id} | {error_type} | {error_msg}\n")
+        logger.warning(f"Logged {len(failures)} failures to extraction_failures.log")
+
+    # Validate embeddings
+    validation_errors = validate_embeddings(proteins, data)
+    if validation_errors:
+        for error in validation_errors:
+            logger.warning(f"Validation error: {error}")
+
+        # If ALL embeddings failed, raise error
+        if len(validation_errors) == len(proteins):
+            raise RuntimeError(f"All embeddings failed validation for {fasta_file}")
+
+    # Save output
+    if out_file:
+        torch.save({'proteins': proteins, 'data': data}, out_file)
+        logger.info(f"Saved {len(proteins)} embeddings to {out_file}")
+
+    logger.info(f"Extraction complete: {len(proteins)} proteins processed, {len(failures)} failures")
+
+    return (proteins, data)
 
 def split_fasta_file(input_file, output_dir, sequences_per_file):
     if not os.path.exists(output_dir):
