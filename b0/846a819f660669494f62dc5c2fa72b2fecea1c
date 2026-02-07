@@ -1,0 +1,24 @@
+virnucpro/utils/gpu_monitor.py
+  e67f94d44fd863ac 255
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "b0846a819f660669494f62dc5c2fa72b2fecea1c",
+  "prompts": {
+    "e67f94d44fd863ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5b76bfd5-44ff-44f2-abec-04fb5ea1adff",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 1,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/f7bd76cb7e404cb05af86906dd1fd8bde5b83185f2b6e65a16a387cb0ab0b2f6"
+    }
+  }
+}
