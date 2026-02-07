@@ -290,7 +290,7 @@ class AsyncCheckpointWriter:
             }
 
             # Write to temp file
-            torch.save(checkpoint_dict, temp_path)
+            torch.save(checkpoint_dict, temp_path, pickle_protocol=4)
 
             # Atomic rename
             try:
