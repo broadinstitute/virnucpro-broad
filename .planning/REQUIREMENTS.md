@@ -88,13 +88,40 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (To be filled by roadmap) | | |
+| ENV-01 | Phase 1 | Pending |
+| ENV-02 | Phase 1 | Pending |
+| ENV-03 | Phase 1 | Pending |
+| ENV-04 | Phase 1 | Pending |
+| ENV-05 | Phase 1 | Pending |
+| FEAT-01 | Phase 2 | Pending |
+| FEAT-02 | Phase 2 | Pending |
+| FEAT-03 | Phase 2 | Pending |
+| FEAT-04 | Phase 2 | Pending |
+| FEAT-05 | Phase 2 | Pending |
+| FEAT-06 | Phase 2 | Pending |
+| DIM-01 | Phase 3 | Pending |
+| DIM-02 | Phase 3 | Pending |
+| DIM-03 | Phase 3 | Pending |
+| DIM-04 | Phase 3 | Pending |
+| DIM-05 | Phase 3 | Pending |
+| TRAIN-01 | Phase 4 | Pending |
+| TRAIN-02 | Phase 5 | Pending |
+| TRAIN-03 | Phase 5 | Pending |
+| TRAIN-04 | Phase 5 | Pending |
+| TRAIN-05 | Phase 5 | Pending |
+| TEST-01 | Phase 5 | Pending |
+| TEST-02 | Phase 5 | Pending |
+| TEST-03 | Phase 5 | Pending |
+| TEST-04 | Phase 5 | Pending |
+| TEST-05 | Phase 5 | Pending |
+| TEST-06 | Phase 5 | Pending |
 
 **Coverage:**
-- v1 requirements: 0 total
-- Mapped to phases: 0
+- v1 requirements: 26 total
+- Mapped to phases: 26
 - Unmapped: 0
+- Coverage: 100%
 
 ---
 *Requirements defined: 2026-02-07*
-*Last updated: 2026-02-07 after initial definition*
+*Last updated: 2026-02-07 after roadmap creation*
