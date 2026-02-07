@@ -121,6 +121,11 @@ class VarlenCollator:
         This is the core packing logic extracted from __call__.
         Used by both buffer-based and direct packing modes.
 
+        When actual tokenized lengths exceed the token budget (due to
+        differences between GreedyPacker's length estimates and actual
+        ESM tokenization), overflow sequences are returned to self.buffer
+        for processing in a subsequent batch.
+
         Args:
             batch: List of sequence dicts with 'id' and 'sequence' keys
 
@@ -146,6 +151,8 @@ class VarlenCollator:
         sequence_ids = []
         max_seqlen = 0
 
+        packed_count = 0  # Track how many sequences actually fit
+
         for i in range(len(sequences)):
             # Find actual sequence length by locating padding
             # ESM adds special tokens (BOS, EOS), so we need to find
@@ -168,11 +175,7 @@ class VarlenCollator:
             # Normal case: Check if adding this sequence exceeds budget
             # (skip check for first sequence - always include it)
             if i > 0 and cu_seqlens[-1] + len(seq_tokens) > self.max_tokens_per_batch:
-                # Stop packing - would exceed token budget
-                logger.debug(
-                    f"Stopping at {i}/{len(sequences)} sequences: "
-                    f"token budget reached ({cu_seqlens[-1]} + {len(seq_tokens)} > {self.max_tokens_per_batch})"
-                )
+                # Stop packing - return overflow to buffer for later processing
                 break
 
             # Add this sequence to packed batch
@@ -180,6 +183,16 @@ class VarlenCollator:
             cu_seqlens.append(len(all_tokens))  # Cumulative length
             sequence_ids.append(labels[i])
             max_seqlen = max(max_seqlen, len(seq_tokens))
+            packed_count += 1
+
+        # Handle overflow: return unprocessed sequences to buffer
+        if packed_count < len(batch):
+            overflow = batch[packed_count:]
+            self.buffer.extend(overflow)
+            logger.info(
+                f"Token budget overflow: {len(overflow)} sequences returned to buffer "
+                f"(packed {packed_count}/{len(batch)}, budget {self.max_tokens_per_batch})"
+            )
 
         # Convert to tensors
         input_ids = torch.tensor(all_tokens, dtype=torch.long)
@@ -280,61 +293,71 @@ class VarlenCollator:
 
         Returns list of packed batches for any sequences remaining in buffer.
         Called by AsyncInferenceRunner after dataloader exhausted.
+
+        Loops until buffer is fully drained, since _tokenize_and_pack may
+        return overflow sequences back to the buffer when actual tokenized
+        lengths exceed the GreedyPacker's estimates.
         """
         # Log current state before flushing
         buffer_count = len(self.buffer)
         queue_count = len(self.packed_queue)
-        total_received = getattr(self, '_total_sequences_received', 'unknown')
-        total_returned = getattr(self, '_total_sequences_returned', 'unknown')
 
         logger.info(
             f"Flush called: buffer has {buffer_count} sequences, "
             f"packed_queue has {queue_count} batches, "
-            f"total received: {total_received}, total returned so far: {total_returned}"
+            f"total received: {self._total_sequences_received}, "
+            f"total returned so far: {self._total_sequences_returned}"
         )
 
-        # Calculate expected sequences remaining
-        if isinstance(total_received, int) and isinstance(total_returned, int):
-            expected_remaining = total_received - total_returned
-            logger.info(f"Expected sequences remaining to flush: {expected_remaining}")
-        else:
-            expected_remaining = 'unknown'
+        expected_remaining = self._total_sequences_received - self._total_sequences_returned
+        logger.info(f"Expected sequences remaining to flush: {expected_remaining}")
 
         results = []
 
-        # Pack remaining buffer contents
+        # Loop until buffer AND packed_queue are both empty.
+        # _tokenize_and_pack may put overflow back into buffer, so we
+        # must keep draining until nothing remains.
+        max_iterations = 50  # Safety limit to prevent infinite loops
+        iteration = 0
+
+        while (self.buffer or self.packed_queue) and iteration < max_iterations:
+            iteration += 1
+
+            # Pack remaining buffer contents
+            if self.buffer:
+                logger.info(f"Flush iteration {iteration}: packing {len(self.buffer)} buffer sequences")
+                packed_batches = self.packer.pack_sequences(self.buffer) if self.packer else [self.buffer]
+                self.buffer = []
+
+                # Tokenize and pack each batch (may produce overflow back to buffer)
+                for packed_batch in packed_batches:
+                    result = self._tokenize_and_pack(packed_batch)
+                    if result:
+                        with self._counter_lock:
+                            self._total_sequences_returned += result.get('num_sequences', 0)
+                        results.append(result)
+
+            # Drain packed_queue (may also produce overflow back to buffer)
+            while self.packed_queue:
+                batch = self.packed_queue.pop(0)
+                result = self._tokenize_and_pack(batch)
+                if result:
+                    with self._counter_lock:
+                        self._total_sequences_returned += result.get('num_sequences', 0)
+                    results.append(result)
+
         if self.buffer:
-            logger.info(f"Flushing buffer with {len(self.buffer)} sequences")
-            packed_batches = self.packer.pack_sequences(self.buffer) if self.packer else [self.buffer]
-
-            # Count sequences in packed batches
-            buffer_seq_count = sum(len(b) for b in packed_batches)
-            logger.info(f"Buffer packed into {len(packed_batches)} batches containing {buffer_seq_count} sequences")
-
-            self.buffer = []
-
-            # Tokenize and pack each batch
-            for i, packed_batch in enumerate(packed_batches):
-                logger.debug(f"Processing buffer batch {i+1}/{len(packed_batches)}: {len(packed_batch)} sequences")
-                results.append(self._tokenize_and_pack(packed_batch))
-
-        # Also flush any remaining packed_queue
-        if self.packed_queue:
-            queue_seq_count = sum(len(b) for b in self.packed_queue)
-            logger.info(f"Flushing {len(self.packed_queue)} batches from packed_queue containing {queue_seq_count} sequences")
-
-        while self.packed_queue:
-            batch = self.packed_queue.pop(0)
-            with self._counter_lock:
-                self._total_sequences_returned += len(batch)
-            logger.debug(f"Processing packed_queue batch: {len(batch)} sequences")
-            results.append(self._tokenize_and_pack(batch))
+            logger.error(
+                f"Flush safety limit reached after {max_iterations} iterations! "
+                f"{len(self.buffer)} sequences still in buffer - these will be lost."
+            )
 
         # Calculate total sequences in flushed results
         total_flushed = sum(r.get('num_sequences', 0) for r in results if r)
         logger.info(
-            f"Flush complete: {len(results)} batches returned containing {total_flushed} sequences "
-            f"(from {buffer_count} buffer + {queue_count} queue batches)"
+            f"Flush complete: {len(results)} batches, {total_flushed} sequences flushed "
+            f"(started with {buffer_count} buffer + {queue_count} queue batches, "
+            f"{iteration} iteration(s))"
         )
 
         return results
