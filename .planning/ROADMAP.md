@@ -13,7 +13,7 @@ This roadmap guides the migration from ESM2 3B to FastESM2_650 embeddings for vi
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Environment Setup** - Establish FastESM2-compatible environment with PyTorch 2.5+ and SDPA support
-- [ ] **Phase 2: Feature Extraction Pipeline** - Implement FastESM2_650 protein embedding extraction with HuggingFace API
+- [x] **Phase 2: Feature Extraction Pipeline** - Implement FastESM2_650 protein embedding extraction with HuggingFace API
 - [ ] **Phase 3: Dimension Compatibility** - Update downstream code for 1280-dim embeddings and 1664-dim merged features
 - [ ] **Phase 4: Training Data Preparation** - Re-extract all training data with FastESM2_650 embeddings
 - [ ] **Phase 5: Model Training & Validation** - Train new MLP classifier and validate performance against baseline
@@ -50,8 +50,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 02-01-PLAN.md -- Implement extract_fast_esm() in units.py and update features_extract.py for FastESM2_650
-- [ ] 02-02-PLAN.md -- End-to-end extraction test with sample sequences and human verification
+- [x] 02-01-PLAN.md -- Implement extract_fast_esm() in units.py and update features_extract.py for FastESM2_650
+- [x] 02-02-PLAN.md -- End-to-end extraction test with sample sequences and human verification
 
 ### Phase 3: Dimension Compatibility
 **Goal**: All downstream code updated for 1664-dim merged features with validation at merge points
@@ -110,7 +110,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Environment Setup | 2/2 | Complete | 2026-02-07 |
-| 2. Feature Extraction Pipeline | 0/2 | Not started | - |
+| 2. Feature Extraction Pipeline | 2/2 | Complete | 2026-02-07 |
 | 3. Dimension Compatibility | 0/TBD | Not started | - |
 | 4. Training Data Preparation | 0/TBD | Not started | - |
 | 5. Model Training & Validation | 0/TBD | Not started | - |
