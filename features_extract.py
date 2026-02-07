@@ -2,6 +2,9 @@ from units import *
 import random
 import math
 import multiprocessing
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 nucleotide_input_file_list = []
 sequences_per_file = 10000
@@ -9,9 +12,13 @@ sequences_per_file = 10000
 DNABERT_S_tokenizer = AutoTokenizer.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
 DNABERT_S_model = AutoModel.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
 
-# ESM2 3B model loading removed - will be replaced with FastESM2_650 in Phase 2
-ESM_model = None
-ESM_alphabet = None
+# Load FastESM2_650 once at module level
+FastESM_model = AutoModel.from_pretrained(
+    "Synthyra/FastESM2_650",
+    trust_remote_code=True,
+    torch_dtype=torch.float16
+).eval().cuda()
+FastESM_tokenizer = FastESM_model.tokenizer
 
 
 def process_file_seq(file):
@@ -30,8 +37,13 @@ def process_file_pro(file):
 
     if os.path.exists(output_file) or os.path.exists(merged_file_path):
         return output_file
-    extract_esm(fasta_file = file, out_file = output_file, model_loaded=True, model=ESM_model, alphabet=ESM_alphabet)
-    print('saved to: ' + output_file)
+    extract_fast_esm(
+        fasta_file=file,
+        out_file=output_file,
+        model=FastESM_model,
+        tokenizer=FastESM_tokenizer
+    )
+    print(f'saved to: {output_file}')
     return output_file
 
 for root, dirs, filenames in os.walk('./data/'):
@@ -67,9 +79,11 @@ for nucleotide_input_file in nucleotide_input_file_list:
             and f.endswith('.fa')
             and sum(1 for _ in SeqIO.parse(os.path.join(protein_output_dir, f), "fasta")) == sequences_per_file
         ]
-        
-        with multiprocessing.Pool(processes=2) as pool:
-            results = pool.map(process_file_pro, viral_protein_files)
+
+        # Sequential processing (CUDA contexts are not fork-safe)
+        results = []
+        for f in tqdm(viral_protein_files, desc="Extracting protein embeddings"):
+            results.append(process_file_pro(f))
 
         ESM_folder = protein_output_dir
         DNABERT_S_folder = nucleotide_output_dir
@@ -223,9 +237,10 @@ random_selected_other_protein_files = [item.replace('nucleotide', 'protein') for
 random_selected_other_protein_files_feature = []
 print(random_selected_other_protein_files)
 
-
-with multiprocessing.Pool(processes=2) as pool:
-    results = pool.map(process_file_pro, random_selected_other_protein_files)
+# Sequential processing (CUDA contexts are not fork-safe)
+results = []
+for f in tqdm(random_selected_other_protein_files, desc="Extracting protein embeddings"):
+    results.append(process_file_pro(f))
 random_selected_other_protein_files_feature.extend(results)
 
 merged_list = [
