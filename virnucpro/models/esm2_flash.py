@@ -211,7 +211,16 @@ class ESM2WithFlashAttention(nn.Module):
         position_ids = create_position_ids_packed(cu_seqlens)
 
         # Get token embeddings - shape: [total_tokens, hidden_dim]
-        embeddings = self.model.embed_tokens(input_ids)
+        embeddings = self.model.embed_scale * self.model.embed_tokens(input_ids)
+
+        # Apply token dropout rescaling to match standard ESM-2 forward behavior.
+        # ESM-2 applies inverse dropout scaling even during inference:
+        #   x = x * (1 - mask_ratio_train) / (1 - mask_ratio_observed)
+        # During inference, mask_ratio_observed=0, so this reduces to x * 0.88.
+        # Without this, packed embeddings are systematically 12% higher than standard.
+        if getattr(self.model, 'token_dropout', False):
+            mask_ratio_train = 0.15 * 0.8  # Same constants as ESM-2 forward
+            embeddings = embeddings * (1 - mask_ratio_train)
 
         # Defensive validation: FlashAttention varlen requires FP16/BF16 inputs
         # Fail fast if user explicitly disabled FP16 but tries to use packed inference
