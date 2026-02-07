@@ -9,11 +9,11 @@ Requirements for initial FastESM2_650 migration experiment. Each maps to roadmap
 
 ### Environment Setup
 
-- [ ] **ENV-01**: PyTorch 2.5+ installed with CUDA support
-- [ ] **ENV-02**: fair-esm 2.0.0 dependency removed from environment
-- [ ] **ENV-03**: HuggingFace transformers library verified compatible (≥4.30.0)
-- [ ] **ENV-04**: FastESM2_650 model can be loaded from HuggingFace Hub with trust_remote_code=True
-- [ ] **ENV-05**: SDPA (Scaled Dot-Product Attention) functionality validated on target GPU
+- [x] **ENV-01**: PyTorch 2.5+ installed with CUDA support
+- [x] **ENV-02**: fair-esm 2.0.0 dependency removed from environment
+- [x] **ENV-03**: HuggingFace transformers library verified compatible (≥4.30.0)
+- [x] **ENV-04**: FastESM2_650 model can be loaded from HuggingFace Hub with trust_remote_code=True
+- [x] **ENV-05**: SDPA (Scaled Dot-Product Attention) functionality validated on target GPU
 
 ### Feature Extraction
 
@@ -88,11 +88,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ENV-01 | Phase 1 | Pending |
-| ENV-02 | Phase 1 | Pending |
-| ENV-03 | Phase 1 | Pending |
-| ENV-04 | Phase 1 | Pending |
-| ENV-05 | Phase 1 | Pending |
+| ENV-01 | Phase 1 | Complete |
+| ENV-02 | Phase 1 | Complete |
+| ENV-03 | Phase 1 | Complete |
+| ENV-04 | Phase 1 | Complete |
+| ENV-05 | Phase 1 | Complete |
 | FEAT-01 | Phase 2 | Pending |
 | FEAT-02 | Phase 2 | Pending |
 | FEAT-03 | Phase 2 | Pending |
