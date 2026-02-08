@@ -231,10 +231,25 @@ Plans:
 **Details:**
 Discovered during Phase 10 planning: Phases 5-9 built v2.0 async architecture but didn't update CLI. Users running `python -m virnucpro predict --parallel` still get v1.0 multi-worker-per-GPU code. Phase 10 Plan 05 (v1.0 vs v2.0 comparison) would accidentally compare v1.0 to v1.0. Must wire v2.0 API before executing Phase 10 benchmarks.
 
+### Phase 10.2: FlashAttention Scoring Divergence Resolution (INSERTED)
+
+**Goal**: Resolve prediction divergence between v2.0 packed FlashAttention varlen path and v1.0 standard bmm attention path
+
+**Depends on**: Phase 10.1
+
+**Plans:** 2 plans in 2 waves
+
+Plans:
+- [ ] 10.2-01-PLAN.md — Prediction-level divergence quantification test
+- [ ] 10.2-02-PLAN.md — V1.0-compatible attention fallback and CLI integration
+
+**Details:**
+v2.0 predictions diverge from v1.0 baseline: 70.3% matching at 1e-3 tolerance, 96% at 1e-2. Root cause investigation found multiple bugs (EOS in mean pooling, missing token dropout rescaling, wrong GELU function) which were fixed, but a fundamental difference remains: v1.0 uses manual torch.bmm attention with FP16 accumulation, while v2.0 uses FlashAttention varlen with FP32 accumulation. Earlier Phase 6 testing (cosine similarity >0.999) validated packed vs unpacked equivalence, but that compared FlashAttention-to-FlashAttention — not FlashAttention-to-bmm. The downstream MLP classifier was trained on v1.0 (bmm) embeddings, so matching v1.0 output is required for correct predictions.
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 5 → 6 → 7 → 8 → 9 → 10 → 10.1
+Phases execute in numeric order: 5 → 6 → 7 → 8 → 9 → 10 → 10.1 → 10.2
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -250,6 +265,7 @@ Phases execute in numeric order: 5 → 6 → 7 → 8 → 9 → 10 → 10.1
 | 9. Checkpointing Integration | v2.0 | 7/7 | Complete | 2026-02-06 |
 | 10. Performance Validation & Tuning | v2.0 | 0/5 | Pending | - |
 | 10.1. CLI Integration for v2.0 Architecture | v2.0 | 4/4 | Complete | 2026-02-06 |
+| 10.2. FlashAttention Scoring Divergence | v2.0 | 0/2 | Planned | - |
 
 ---
-*Last updated: 2026-02-06 - Phase 10.1 complete (gap closure verified)*
+*Last updated: 2026-02-07 - Phase 10.2 inserted (FlashAttention divergence resolution)*
