@@ -13,6 +13,7 @@ import torch.nn as nn
 from typing import Optional, Tuple, Any, Literal
 import logging
 import esm
+from esm.modules import gelu as esm_gelu
 
 from virnucpro.cuda.attention_utils import (
     get_attention_implementation,
@@ -343,7 +344,7 @@ class ESM2WithFlashAttention(nn.Module):
         residual = hidden_states
         hidden_states = layer.final_layer_norm(hidden_states)
         hidden_states = layer.fc1(hidden_states)
-        hidden_states = torch.nn.functional.gelu(hidden_states)
+        hidden_states = esm_gelu(hidden_states)
         hidden_states = layer.fc2(hidden_states)
         hidden_states = residual + hidden_states
 
@@ -387,13 +388,14 @@ class ESM2WithFlashAttention(nn.Module):
         # position_ids: [total_tokens]
         # inv_freq: [rotary_dim // 2]
         # freqs: [total_tokens, rotary_dim // 2]
-        freqs = torch.einsum('i,j->ij', position_ids.float(), inv_freq)
+        # Match standard ESM-2 forward precision: use inv_freq's dtype (FP16 after
+        # model.half()) for position values, matching RotaryEmbedding._update_cos_sin_tables
+        # which does `t = torch.arange(...).type_as(self.inv_freq)`.
+        freqs = torch.einsum('i,j->ij', position_ids.to(inv_freq.dtype), inv_freq)
         # Duplicate for sin and cos application: [total_tokens, rotary_dim]
         emb = torch.cat([freqs, freqs], dim=-1)
-        # CRITICAL: Keep sin/cos in FP32 to avoid precision loss over 36 layers
-        # Casting to FP16 too early causes accumulated rounding errors for long sequences
-        cos = emb.cos()  # [total_tokens, rotary_dim] - FP32
-        sin = emb.sin()  # [total_tokens, rotary_dim] - FP32
+        cos = emb.cos()  # [total_tokens, rotary_dim] - same dtype as inv_freq
+        sin = emb.sin()  # [total_tokens, rotary_dim] - same dtype as inv_freq
 
         # Reshape for broadcasting: [total_tokens, 1, rotary_dim]
         cos = cos.unsqueeze(1)
@@ -401,7 +403,6 @@ class ESM2WithFlashAttention(nn.Module):
 
         # ESM-2 uses partial rotary embeddings - only first rotary_dim dimensions
         # q/k shape: [total_tokens, num_heads, head_dim]
-        original_dtype = q.dtype
 
         # Split into rotary and non-rotary parts
         q_rot = q[..., :rotary_dim]
@@ -409,18 +410,16 @@ class ESM2WithFlashAttention(nn.Module):
         k_rot = k[..., :rotary_dim]
         k_pass = k[..., rotary_dim:]
 
-        # Apply rotation in FP32 to preserve precision
+        # Apply rotation in same dtype as Q/K, matching standard ESM-2 forward
+        # which computes (q * cos) + (rotate_half(q) * sin) entirely in model dtype
         def rotate_half(x):
             """Rotate half the hidden dims of the input."""
             x1 = x[..., : x.shape[-1] // 2]
             x2 = x[..., x.shape[-1] // 2 :]
             return torch.cat((-x2, x1), dim=-1)
 
-        # Convert to FP32 for rotation, then back to original dtype
-        q_rot_fp32 = q_rot.float()
-        k_rot_fp32 = k_rot.float()
-        q_rot = ((q_rot_fp32 * cos) + (rotate_half(q_rot_fp32) * sin)).to(original_dtype)
-        k_rot = ((k_rot_fp32 * cos) + (rotate_half(k_rot_fp32) * sin)).to(original_dtype)
+        q_rot = (q_rot * cos) + (rotate_half(q_rot) * sin)
+        k_rot = (k_rot * cos) + (rotate_half(k_rot) * sin)
 
         # Concatenate rotary and non-rotary parts back together
         q_rotated = torch.cat([q_rot, q_pass], dim=-1)
