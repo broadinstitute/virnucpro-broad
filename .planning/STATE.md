@@ -11,18 +11,18 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 10.2 (FlashAttention Scoring Divergence Resolution) - INSERTED AFTER PHASE 10.1
-Plan: 1 of 1 in phase
+Plan: 2 of 2 in phase
 Status: PHASE COMPLETE
-Last activity: 2026-02-08 — Completed 10.2-01-PLAN.md
+Last activity: 2026-02-08 — Completed 10.2-02-PLAN.md
 
-Progress: [█████████░] 89/90 plans (v1.0: 34/34 complete, v2.0: 55/56)
+Progress: [█████████░] 90/90 plans (v1.0: 34/34 complete, v2.0: 56/56)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 88 (v1.0: 34, v2.0: 54)
+- Total plans completed: 90 (v1.0: 34, v2.0: 56)
 - Average duration: 3.4 min
-- Total execution time: 5.0 hours
+- Total execution time: 5.1 hours
 
 **By Phase:**
 
@@ -39,11 +39,11 @@ Progress: [█████████░] 89/90 plans (v1.0: 34/34 complete, v2
 | 8 | 4 | 13 min | 3.25 min |
 | 9 | 7 (complete) | 40 min | 5.7 min |
 | 10.1 | 4 (complete) | 14 min | 3.5 min |
-| 10.2 | 1 (complete) | 3 min | 3.0 min |
+| 10.2 | 2 (complete) | 9 min | 4.5 min |
 
 **Recent Trend:**
-- Last 5 plans: ~3.3 min average
-- Trend: Phase 10.2 COMPLETE - FlashAttention divergence resolved, ready for Phase 10 benchmarks
+- Last 5 plans: ~3.5 min average
+- Trend: Phase 10.2 COMPLETE - v2.0 FlashAttention validated (100% label agreement), v1_compatible fallback available, Phase 10 benchmarks ready
 
 *Updated after each plan completion*
 
@@ -174,6 +174,9 @@ Recent decisions affecting current work:
 - **Checkpoint format detection via .done files (10.1-04)**: Check for .done markers without shard_* dirs to detect v1.0 format - simple filesystem inspection is reliable and fast
 - **world_size validation guards CPU systems (10.1-04)**: Check actual_gpu_count > 0 to avoid failing on CPU-only systems where GPU detection may return mock values
 - **Best-effort cleanup preserves errors (10.1-04)**: Catch OSError during partial file cleanup to avoid masking original exception - cleanup is helpful but shouldn't hide real error
+- **v2.0 FlashAttention validated (10.2-01)**: Prediction-level test shows 100% label agreement between v1.0 and v2.0 attention paths - divergence is cosmetic, does not affect predictions
+- **v1_compatible parameter as safety valve (10.2-02)**: forward_packed() accepts v1_compatible parameter (default False) for exact v1.0 embedding reproduction - enables production validation and debugging without requiring v1.0 fallback
+- **VIRNUCPRO_V1_ATTENTION env var (10.2-02)**: Environment variable overrides v1_compatible parameter for runtime control without code changes - follows VIRNUCPRO_DISABLE_PACKING pattern
 
 ### Pending Todos
 
@@ -243,12 +246,17 @@ None yet.
   - Results: 100% label agreement, cosine similarity 0.999999-1.0
   - Recommendation: ACCEPT v2.0 - divergence is cosmetic
   - All bug fixes validated (EOS exclusion, token dropout, GELU, RoPE precision)
-- **Blocker removed:** v2.0 FlashAttention integration correct, Phase 10 benchmarks can proceed
+- ✅ V1.0-compatible attention fallback (Plan 02)
+  - Added v1_compatible parameter to forward_packed() (default False)
+  - CLI --v1-attention flag sets VIRNUCPRO_V1_ATTENTION env var
+  - Integration test validates v1_compatible path matches standard forward() (cosine 0.999999-1.0, max abs diff 0.0)
+  - Provides safety valve for exact v1.0 embedding reproduction when needed
+- **Blocker removed:** v2.0 FlashAttention validated, v1_compatible fallback available, Phase 10 benchmarks ready
 
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 10.2-01-PLAN.md (prediction-level divergence test)
+Stopped at: Completed 10.2-02-PLAN.md (v1.0-compatible attention fallback)
 Resume file: None
 
 **Next step:** Resume Phase 10 - Performance benchmarks (v1.0 vs v2.0 comparison)
