@@ -388,14 +388,17 @@ class ESM2WithFlashAttention(nn.Module):
         # position_ids: [total_tokens]
         # inv_freq: [rotary_dim // 2]
         # freqs: [total_tokens, rotary_dim // 2]
-        # Match standard ESM-2 forward precision: use inv_freq's dtype (FP16 after
-        # model.half()) for position values, matching RotaryEmbedding._update_cos_sin_tables
-        # which does `t = torch.arange(...).type_as(self.inv_freq)`.
-        freqs = torch.einsum('i,j->ij', position_ids.to(inv_freq.dtype), inv_freq)
+        freqs = torch.einsum('i,j->ij', position_ids.float(), inv_freq)
         # Duplicate for sin and cos application: [total_tokens, rotary_dim]
         emb = torch.cat([freqs, freqs], dim=-1)
-        cos = emb.cos()  # [total_tokens, rotary_dim] - same dtype as inv_freq
-        sin = emb.sin()  # [total_tokens, rotary_dim] - same dtype as inv_freq
+        # Compute sin/cos in FP32 for precision.
+        # Note: the standard ESM-2 forward computes RoPE in FP16 (after model.half()),
+        # but our packed path uses FlashAttention varlen which has FP32 accumulation
+        # (unlike the standard bmm path's FP16 accumulation). Keeping RoPE in FP32
+        # compensates for this attention precision difference, empirically producing
+        # embeddings closer to the standard forward output.
+        cos = emb.cos()  # [total_tokens, rotary_dim] - FP32
+        sin = emb.sin()  # [total_tokens, rotary_dim] - FP32
 
         # Reshape for broadcasting: [total_tokens, 1, rotary_dim]
         cos = cos.unsqueeze(1)
@@ -403,6 +406,7 @@ class ESM2WithFlashAttention(nn.Module):
 
         # ESM-2 uses partial rotary embeddings - only first rotary_dim dimensions
         # q/k shape: [total_tokens, num_heads, head_dim]
+        original_dtype = q.dtype
 
         # Split into rotary and non-rotary parts
         q_rot = q[..., :rotary_dim]
@@ -410,24 +414,18 @@ class ESM2WithFlashAttention(nn.Module):
         k_rot = k[..., :rotary_dim]
         k_pass = k[..., rotary_dim:]
 
-        # Apply rotation in same dtype as Q/K, matching standard ESM-2 forward
-        # which computes (q * cos) + (rotate_half(q) * sin) entirely in model dtype
+        # Apply rotation in FP32 to preserve precision, then cast back
         def rotate_half(x):
             """Rotate half the hidden dims of the input."""
             x1 = x[..., : x.shape[-1] // 2]
             x2 = x[..., x.shape[-1] // 2 :]
             return torch.cat((-x2, x1), dim=-1)
 
-        # Defensive: verify Q/K remain in model dtype throughout rotation
-        # This catches any implicit FP32 upcasts that would break precision alignment
-        if q.dtype in (torch.float16, torch.bfloat16):
-            assert q_rot.dtype == q.dtype, \
-                f"Q dtype changed from {q.dtype} to {q_rot.dtype} during rotation"
-            assert k_rot.dtype == k.dtype, \
-                f"K dtype changed from {k.dtype} to {k_rot.dtype} during rotation"
-
-        q_rot = (q_rot * cos) + (rotate_half(q_rot) * sin)
-        k_rot = (k_rot * cos) + (rotate_half(k_rot) * sin)
+        # Convert to FP32 for rotation, then back to original dtype
+        q_rot_fp32 = q_rot.float()
+        k_rot_fp32 = k_rot.float()
+        q_rot = ((q_rot_fp32 * cos) + (rotate_half(q_rot_fp32) * sin)).to(original_dtype)
+        k_rot = ((k_rot_fp32 * cos) + (rotate_half(k_rot_fp32) * sin)).to(original_dtype)
 
         # Concatenate rotary and non-rotary parts back together
         q_rotated = torch.cat([q_rot, q_pass], dim=-1)
