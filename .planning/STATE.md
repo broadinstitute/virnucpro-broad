@@ -6,16 +6,16 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 
 **Core value:** Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs and automatically queue batches, reducing sample processing time from 45+ hours to under 10 hours.
 
-**Current focus:** Phase 10.1 - CLI Integration for v2.0 Architecture (inserted, urgent)
+**Current focus:** Phase 10.2 - FlashAttention Scoring Divergence Resolution (inserted, urgent)
 
 ## Current Position
 
-Phase: 10.1 (CLI Integration for v2.0 Architecture) - INSERTED AFTER PHASE 10
-Plan: 4 of 4 in phase (PHASE COMPLETE)
-Status: Complete - All gap closure complete, ready for Phase 10
-Last activity: 2026-02-06 — Completed 10.1-04-PLAN.md (validation & cleanup gaps)
+Phase: 10.2 (FlashAttention Scoring Divergence Resolution) - INSERTED AFTER PHASE 10.1
+Plan: 1 of 1 in phase
+Status: PHASE COMPLETE
+Last activity: 2026-02-08 — Completed 10.2-01-PLAN.md
 
-Progress: [█████████░] 88/90 plans (v1.0: 34/34 complete, v2.0: 54/56)
+Progress: [█████████░] 89/90 plans (v1.0: 34/34 complete, v2.0: 55/56)
 
 ## Performance Metrics
 
@@ -39,10 +39,11 @@ Progress: [█████████░] 88/90 plans (v1.0: 34/34 complete, v2
 | 8 | 4 | 13 min | 3.25 min |
 | 9 | 7 (complete) | 40 min | 5.7 min |
 | 10.1 | 4 (complete) | 14 min | 3.5 min |
+| 10.2 | 1 (complete) | 3 min | 3.0 min |
 
 **Recent Trend:**
-- Last 5 plans: ~3.4 min average
-- Trend: Phase 10.1 COMPLETE - ready for Phase 10 benchmarks
+- Last 5 plans: ~3.3 min average
+- Trend: Phase 10.2 COMPLETE - FlashAttention divergence resolved, ready for Phase 10 benchmarks
 
 *Updated after each plan completion*
 
@@ -55,6 +56,12 @@ Progress: [█████████░] 88/90 plans (v1.0: 34/34 complete, v2
   - **Impact**: Phase 10 Plan 05 (v1.0 vs v2.0 comparison) would accidentally compare v1.0 to v1.0
   - **Blocker**: Must complete before executing Phase 10 benchmarks
   - **Scope**: Update predict.py to call run_multi_gpu_inference(), add benchmark CLI, migration guide
+- **Phase 10.2 inserted after Phase 10.1**: FlashAttention Scoring Divergence Resolution (✅ COMPLETE)
+  - **Reason**: v2.0 predictions initially diverged from v1.0 — 70.3% match at 1e-3, 96% at 1e-2
+  - **Root cause**: Multiple bugs (EOS in mean pooling, missing token dropout 0.88x, wrong GELU, RoPE precision)
+  - **Resolution**: All bugs fixed, prediction-level test shows 100% label agreement (divergence cosmetic)
+  - **Outcome**: v2.0 FlashAttention integration is correct and production-ready
+  - **Blocker removed**: Phase 10 benchmarks can proceed without concern about prediction divergence
 
 ### Decisions
 
@@ -157,6 +164,7 @@ Recent decisions affecting current work:
 - **SIGTERM handler coordination (09-05)**: Coordinator waits 30s for workers to save emergency checkpoints before terminating - graceful spot instance handling
 - **Checkpoint validation before respawn (09-05)**: Remove orphaned .tmp files and verify .done markers before worker restart - prevents corruption propagation
 - **Hybrid architecture (10.1-01)**: Only ESM-2 uses v2.0 async architecture, DNABERT-S stays v1.0 - staged validation approach (DNABERT-S not validated in Phases 5-9)
+- **FlashAttention divergence is cosmetic (10.2-01)**: Prediction-level test shows 100% label agreement despite minor embedding differences - v2.0 attention implementation correct
 - **Streaming HDF5-to-PT adapter (10.1-01)**: Use 10K chunk size to avoid loading entire HDF5 into memory - merge stage HDF5 refactor deferred to Phase 10.2
 - **CLI v2.0 routing (10.1-01)**: use_v2 = parallel and not v1_fallback determines architecture version - explicit world_size passed to run_multi_gpu_inference
 - **Fail-fast v2.0 worker failures (10.1-01)**: Raise RuntimeError if any v2.0 ESM-2 worker fails instead of mapping ranks to files - simpler for all-or-nothing benchmarks
@@ -229,10 +237,18 @@ None yet.
   - All 13 CLI tests passing (8 routing + 1 regression + 4 validation)
 - **Ready for Phase 10:** All gaps closed, benchmarks can proceed
 
+**Phase 10.2 (FlashAttention Scoring Divergence Resolution):** ✅ COMPLETE
+- ✅ Prediction-level divergence test (Plan 01)
+  - Test compares v1.0 (standard attention) vs v2.0 (FlashAttention) on 18 sequences
+  - Results: 100% label agreement, cosine similarity 0.999999-1.0
+  - Recommendation: ACCEPT v2.0 - divergence is cosmetic
+  - All bug fixes validated (EOS exclusion, token dropout, GELU, RoPE precision)
+- **Blocker removed:** v2.0 FlashAttention integration correct, Phase 10 benchmarks can proceed
+
 ## Session Continuity
 
-Last session: 2026-02-06
-Stopped at: Completed 10.1-03-PLAN.md (telemetry timing & regression test with atomic_save bug fix)
+Last session: 2026-02-08
+Stopped at: Completed 10.2-01-PLAN.md (prediction-level divergence test)
 Resume file: None
 
-**Next step:** Begin Phase 10 - Performance Benchmarks (v1.0 vs v2.0 comparison)
+**Next step:** Resume Phase 10 - Performance benchmarks (v1.0 vs v2.0 comparison)
