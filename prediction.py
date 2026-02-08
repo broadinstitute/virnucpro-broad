@@ -5,6 +5,7 @@ from torch import nn
 import torch.nn.functional as F
 import sys
 import pandas as pd
+from units import DimensionError, DNA_DIM, PROTEIN_DIM, MERGED_DIM, CHECKPOINT_VERSION
 
 def process_record(record):
     sequence = str(record.seq).upper()
@@ -49,6 +50,7 @@ class MLPClassifier(nn.Module):
     def __init__(self, input_dim, hidden_dim, num_class):
         super(MLPClassifier, self).__init__()
 
+        self.input_dim = input_dim
         self.hidden_layer = nn.Linear(input_dim, hidden_dim)
         self.bn1 = nn.BatchNorm1d(hidden_dim)
 
@@ -62,6 +64,14 @@ class MLPClassifier(nn.Module):
         nn.init.xavier_uniform_(self.output_layer.weight)
 
     def forward(self, x):
+        # Critical path validation - always runs
+        if x.shape[-1] != self.input_dim:
+            raise DimensionError(
+                expected_dim=self.input_dim,
+                actual_dim=x.shape[-1],
+                tensor_name="model_input",
+                location="MLPClassifier.forward()"
+            )
         x = self.hidden_layer(x)
         x = self.bn1(x)
         x = F.relu(x)
@@ -95,6 +105,68 @@ def predict(model, data_loader, device):
     return all_seqids, all_predictions, all_probabilities
 
 
+def load_checkpoint_with_validation(checkpoint_path):
+    """
+    Load checkpoint with validation to reject old ESM2 3B checkpoints.
+
+    Args:
+        checkpoint_path: path to checkpoint file
+
+    Returns:
+        checkpoint dict with validated metadata
+
+    Raises:
+        ValueError: if checkpoint is from ESM2 3B pipeline (no metadata or version 1.x)
+        DimensionError: if checkpoint dimensions don't match expected values
+    """
+    checkpoint = torch.load(checkpoint_path, weights_only=False)
+
+    # Check for metadata key
+    if 'metadata' not in checkpoint:
+        raise ValueError(
+            f"This checkpoint is from ESM2 3B pipeline (no metadata found). "
+            f"Re-extract features with FastESM2_650 and retrain. "
+            f"Old checkpoint: {checkpoint_path}"
+        )
+
+    metadata = checkpoint['metadata']
+
+    # Check checkpoint version
+    version = metadata.get('checkpoint_version', '0.0.0')
+    try:
+        major_version = int(version.split('.')[0])
+    except (ValueError, AttributeError):
+        major_version = 0
+
+    if major_version < 2:
+        raise ValueError(
+            f"This checkpoint uses ESM2 3B (2560-dim, version {version}). "
+            f"Re-extract features with FastESM2_650 and retrain. "
+            f"Incompatible checkpoint: {checkpoint_path}"
+        )
+
+    # Validate merged_dim
+    merged_dim = metadata.get('merged_dim')
+    if merged_dim != MERGED_DIM:
+        raise DimensionError(
+            expected_dim=MERGED_DIM,
+            actual_dim=merged_dim,
+            tensor_name="checkpoint_merged_dim",
+            location="load_checkpoint_with_validation()"
+        )
+
+    # Print checkpoint info
+    print(f"Loaded checkpoint:")
+    print(f"  Version: {version}")
+    print(f"  Model type: {metadata.get('model_type', 'unknown')}")
+    print(f"  DNA dim: {metadata.get('dna_dim')}")
+    print(f"  Protein dim: {metadata.get('protein_dim')}")
+    print(f"  Merged dim: {metadata.get('merged_dim')}")
+    print(f"  Training date: {metadata.get('training_date', 'unknown')}")
+
+    return checkpoint
+
+
 def make_predictdata(predict_fasta_file, expect_length, model_path):
     sequences_per_file = 10000
     nucleotide_chunked_output = predict_fasta_file.split('.fa')[0] + f'_chunked{expect_length}.fa'
@@ -106,9 +178,14 @@ def make_predictdata(predict_fasta_file, expect_length, model_path):
     os.makedirs(nucleotide_output_floder, exist_ok=True)
     os.makedirs(protein_output_floder, exist_ok=True)
 
+    # Load FastESM2 model for protein feature extraction
+    from transformers import AutoModel
+    FastESM_model = AutoModel.from_pretrained("Synthyra/FastESM2_650", trust_remote_code=True, torch_dtype=torch.float16).eval().cuda()
+    FastESM_tokenizer = FastESM_model.tokenizer
+
     fna_list = []
     split_fasta_chunk(predict_fasta_file, nucleotide_chunked_output, int(expect_length))
-    
+
     with open(nucleotide_fasta_file, 'w') as dna_out, open(protein_fasta_file, 'w') as protein_out:
         records = list(SeqIO.parse(nucleotide_chunked_output, 'fasta'))
         for record in tqdm(records, total=len(records)):
@@ -119,18 +196,18 @@ def make_predictdata(predict_fasta_file, expect_length, model_path):
                         sequence_name = item['seqid']
                         dna_sequence = item['nucleotide']
                         protein_sequence = item['protein']
-                        
+
                         dna_out.write(f'>{sequence_name}\n')
                         dna_out.write(f'{dna_sequence}\n')
-                        
+
                         protein_out.write(f'>{sequence_name}\n')
                         protein_out.write(f'{protein_sequence}\n')
 
     split_fasta_file(nucleotide_fasta_file, nucleotide_output_floder, sequences_per_file)
     nucleotide_file_list_feature = []
     nucleotide_file_list = [
-        os.path.join(nucleotide_output_floder, f) 
-        for f in os.listdir(nucleotide_output_floder) 
+        os.path.join(nucleotide_output_floder, f)
+        for f in os.listdir(nucleotide_output_floder)
         if os.path.isfile(os.path.join(nucleotide_output_floder, f)) and f.endswith('.fa')
         ]
     for file in nucleotide_file_list:
@@ -141,14 +218,14 @@ def make_predictdata(predict_fasta_file, expect_length, model_path):
     split_fasta_file(protein_fasta_file, protein_output_floder, sequences_per_file)
     protein_feature = []
     protein_file_list = [
-            os.path.join(protein_output_floder, f) 
-            for f in os.listdir(protein_output_floder) 
+            os.path.join(protein_output_floder, f)
+            for f in os.listdir(protein_output_floder)
             if os.path.isfile(os.path.join(protein_output_floder, f)) and f.endswith('.fa')
             ]
     for file in protein_file_list:
-        extract_esm(fasta_file = file, out_file = f'{file.split(".fa")[0]}_ESM.pt')
-        print ('saved to: ' + f'{file.split(".fa")[0]}_ESM.pt')
-        protein_feature.append(f'{file.split(".fa")[0]}_ESM.pt')
+        extract_fast_esm(fasta_file=file, out_file=f'{file.split(".fa")[0]}_fastesm.pt', model=FastESM_model, tokenizer=FastESM_tokenizer)
+        print ('saved to: ' + f'{file.split(".fa")[0]}_fastesm.pt')
+        protein_feature.append(f'{file.split(".fa")[0]}_fastesm.pt')
     
     merged_list = [
         item.replace('nucleotide', 'merged')
@@ -165,7 +242,16 @@ def make_predictdata(predict_fasta_file, expect_length, model_path):
 
     predict_dataset = PredictDataBatchDataset(merged_list)
     predict_loader = DataLoader(predict_dataset, batch_size=256, shuffle=False, num_workers=4)
-    mlp_model = torch.load(model_path, weights_only=False)
+
+    # Load checkpoint with validation
+    checkpoint = load_checkpoint_with_validation(model_path)
+    mlp_model = MLPClassifier(
+        input_dim=checkpoint['metadata']['input_dim'],
+        hidden_dim=checkpoint['metadata']['hidden_dim'],
+        num_class=checkpoint['metadata']['num_class']
+    )
+    mlp_model.load_state_dict(checkpoint['model_state_dict'])
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     mlp_model = mlp_model.to(device)
     seqids, predictions, probabilities = predict(mlp_model, predict_loader, device)
