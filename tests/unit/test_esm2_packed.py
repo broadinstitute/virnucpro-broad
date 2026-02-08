@@ -7,6 +7,7 @@ in tests/integration/.
 
 import pytest
 import torch
+import os
 from unittest.mock import MagicMock, patch, Mock
 import inspect
 
@@ -158,6 +159,148 @@ def test_layer_forward_packed_signature():
     expected = ['self', 'layer', 'hidden_states', 'cu_seqlens', 'max_seqlen', 'position_ids']
     assert params == expected, \
         f"Expected {expected}, got {params}"
+
+
+def test_v1_compatible_param_calls_fallback():
+    """Verify v1_compatible=True calls the fallback path."""
+    from virnucpro.models.esm2_flash import ESM2WithFlashAttention
+
+    mock_model = Mock()
+    mock_model.to = Mock(return_value=mock_model)
+    mock_model.eval = Mock(return_value=None)
+
+    with patch('virnucpro.models.esm2_flash.get_attention_implementation') as mock_attn:
+        mock_attn.return_value = "flash_attention_2"
+
+        with patch('virnucpro.models.esm2_flash.configure_flash_attention') as mock_config:
+            mock_config.return_value = mock_model
+
+            with patch('virnucpro.models.esm2_flash.FLASH_ATTN_AVAILABLE', True):
+                device = torch.device('cpu')
+                wrapper = ESM2WithFlashAttention(mock_model, device)
+
+                wrapper._forward_packed_fallback = Mock(return_value={'representations': {}})
+
+                input_ids = torch.tensor([1, 2, 3], dtype=torch.long)
+                cu_seqlens = torch.tensor([0, 3], dtype=torch.int32)
+                max_seqlen = 3
+
+                with patch('virnucpro.models.esm2_flash.create_position_ids_packed'):
+                    result = wrapper.forward_packed(
+                        input_ids, cu_seqlens, max_seqlen, v1_compatible=True
+                    )
+
+                wrapper._forward_packed_fallback.assert_called_once()
+
+
+def test_v1_compatible_default_does_not_call_fallback():
+    """Verify v1_compatible=False (default) does not call fallback when FA available."""
+    from virnucpro.models.esm2_flash import ESM2WithFlashAttention
+
+    mock_model = Mock()
+    mock_model.to = Mock(return_value=mock_model)
+    mock_model.eval = Mock(return_value=None)
+    mock_model.embed_tokens = Mock(return_value=torch.zeros(3, 2560))
+    mock_model.embed_scale = 1.0
+    mock_model.token_dropout = False
+    mock_model.emb_layer_norm_after = torch.nn.Identity()
+    mock_model.layers = []
+    mock_model.layer = []
+
+    with patch('virnucpro.models.esm2_flash.get_attention_implementation') as mock_attn:
+        mock_attn.return_value = "flash_attention_2"
+
+        with patch('virnucpro.models.esm2_flash.configure_flash_attention') as mock_config:
+            mock_config.return_value = mock_model
+
+            with patch('virnucpro.models.esm2_flash.FLASH_ATTN_AVAILABLE', True):
+                device = torch.device('cpu')
+                wrapper = ESM2WithFlashAttention(mock_model, device)
+
+                wrapper._forward_packed_fallback = Mock(return_value={'representations': {}})
+
+                input_ids = torch.tensor([1, 2, 3], dtype=torch.long)
+                cu_seqlens = torch.tensor([0, 3], dtype=torch.int32)
+                max_seqlen = 3
+
+                with patch('virnucpro.models.esm2_flash.create_position_ids_packed'):
+                    result = wrapper.forward_packed(
+                        input_ids, cu_seqlens, max_seqlen, v1_compatible=False
+                    )
+
+                wrapper._forward_packed_fallback.assert_not_called()
+
+
+@patch.dict(os.environ, {'VIRNUCPRO_V1_ATTENTION': 'true'})
+def test_env_var_enables_v1_attention():
+    """Verify VIRNUCPRO_V1_ATTENTION=true enables v1.0 compatibility mode."""
+    from virnucpro.models.esm2_flash import ESM2WithFlashAttention
+
+    mock_model = Mock()
+    mock_model.to = Mock(return_value=mock_model)
+    mock_model.eval = Mock(return_value=None)
+
+    with patch('virnucpro.models.esm2_flash.get_attention_implementation') as mock_attn:
+        mock_attn.return_value = "flash_attention_2"
+
+        with patch('virnucpro.models.esm2_flash.configure_flash_attention') as mock_config:
+            mock_config.return_value = mock_model
+
+            with patch('virnucpro.models.esm2_flash.FLASH_ATTN_AVAILABLE', True):
+                device = torch.device('cpu')
+                wrapper = ESM2WithFlashAttention(mock_model, device)
+
+                wrapper._forward_packed_fallback = Mock(return_value={'representations': {}})
+
+                input_ids = torch.tensor([1, 2, 3], dtype=torch.long)
+                cu_seqlens = torch.tensor([0, 3], dtype=torch.int32)
+                max_seqlen = 3
+
+                with patch('virnucpro.models.esm2_flash.create_position_ids_packed'):
+                    result = wrapper.forward_packed(
+                        input_ids, cu_seqlens, max_seqlen, v1_compatible=False
+                    )
+
+                wrapper._forward_packed_fallback.assert_called_once()
+
+
+@patch.dict(os.environ, {'VIRNUCPRO_V1_ATTENTION': 'false'})
+def test_env_var_false_does_not_affect_default():
+    """Verify VIRNUCPRO_V1_ATTENTION=false does not force v1 mode."""
+    from virnucpro.models.esm2_flash import ESM2WithFlashAttention
+
+    mock_model = Mock()
+    mock_model.to = Mock(return_value=mock_model)
+    mock_model.eval = Mock(return_value=None)
+    mock_model.embed_tokens = Mock(return_value=torch.zeros(3, 2560))
+    mock_model.embed_scale = 1.0
+    mock_model.token_dropout = False
+    mock_model.emb_layer_norm_after = torch.nn.Identity()
+    mock_model.layers = []
+    mock_model.layer = []
+
+    with patch('virnucpro.models.esm2_flash.get_attention_implementation') as mock_attn:
+        mock_attn.return_value = "flash_attention_2"
+
+        with patch('virnucpro.models.esm2_flash.configure_flash_attention') as mock_config:
+            mock_config.return_value = mock_model
+
+            with patch('virnucpro.models.esm2_flash.FLASH_ATTN_AVAILABLE', True):
+                device = torch.device('cpu')
+                wrapper = ESM2WithFlashAttention(mock_model, device)
+
+                wrapper._forward_packed_fallback = Mock(return_value={'representations': {}})
+
+                input_ids = torch.tensor([1, 2, 3], dtype=torch.long)
+                cu_seqlens = torch.tensor([0, 3], dtype=torch.int32)
+                max_seqlen = 3
+
+                with patch('virnucpro.models.esm2_flash.create_position_ids_packed'):
+                    result = wrapper.forward_packed(
+                        input_ids, cu_seqlens, max_seqlen, v1_compatible=False
+                    )
+
+                wrapper._forward_packed_fallback.assert_not_called()
 
 
 if __name__ == "__main__":

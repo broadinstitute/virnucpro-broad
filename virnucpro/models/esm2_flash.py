@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 from typing import Optional, Tuple, Any, Literal
 import logging
+import os
 import esm
 from esm.modules import gelu as esm_gelu
 
@@ -187,6 +188,8 @@ class ESM2WithFlashAttention(nn.Module):
                 identical to v1.0 pipeline. Sacrifices packing throughput (2-3x slower)
                 but ensures exact numerical compatibility with v1.0-trained classifier.
                 Default: False (use FlashAttention for maximum throughput).
+                Note: Environment variable VIRNUCPRO_V1_ATTENTION=true takes precedence
+                over this parameter.
 
         Returns:
             Dictionary with 'representations' key containing layer outputs
@@ -203,13 +206,9 @@ class ESM2WithFlashAttention(nn.Module):
         if repr_layers is None:
             repr_layers = [36]  # Default to final layer for ESM-2 3B
 
-        # Check environment variable for v1.0 compatibility mode
-        import os
-        if os.environ.get('VIRNUCPRO_V1_ATTENTION', '').lower() == 'true':
-            v1_compatible = True
+        _use_v1_attention = v1_compatible or os.environ.get('VIRNUCPRO_V1_ATTENTION', '').lower() == 'true'
 
-        # If v1.0 compatibility requested, use standard attention path
-        if v1_compatible:
+        if _use_v1_attention:
             logger.info("Using v1.0-compatible standard attention path (FP16 accumulation, slower)")
             return self._forward_packed_fallback(input_ids, cu_seqlens, max_seqlen, repr_layers)
 
