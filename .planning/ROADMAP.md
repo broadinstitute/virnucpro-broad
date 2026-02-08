@@ -80,10 +80,11 @@ Plans:
   3. Merged features validated to be 2048-dim (768 + 1280)
   4. Extraction completes without errors or dimension mismatches
   5. Data ready for MLP training with correct input dimensions
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 04-01: TBD
+- [ ] 04-01-PLAN.md -- Create extract_training_data.py with auto-discovery, resume, progress, and validation
+- [ ] 04-02-PLAN.md -- Run extraction in Docker and verify results (checkpoint:human-verify)
 
 ### Phase 5: Model Training & Validation
 **Goal**: New MLP classifier trained on FastESM2 embeddings with performance validated against ESM2 3B baseline
