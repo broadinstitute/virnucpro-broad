@@ -18,6 +18,7 @@ from virnucpro.pipeline.work_queue import BatchQueueManager
 from virnucpro.cuda.memory_manager import MemoryManager, configure_memory_optimization
 from virnucpro.data.dataloader_utils import create_optimized_dataloader, get_optimal_workers
 from virnucpro.models.esm2_flash import load_esm2_model
+from virnucpro.pipeline.pipeline_telemetry import PipelineTelemetry
 # Import other pipeline components as they're refactored
 
 logger = logging.getLogger('virnucpro.pipeline.prediction')
@@ -166,6 +167,9 @@ def run_prediction(
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Initialize pipeline telemetry for per-stage timing
+    telemetry = PipelineTelemetry()
+
     # Initialize progress reporter
     from virnucpro.utils.progress import ProgressReporter
     progress = ProgressReporter(disable=not show_progress)
@@ -248,7 +252,7 @@ def run_prediction(
         # Wrap GPU operations for OOM handling
         # Stage 1: Chunking
         if start_stage == PipelineStage.CHUNKING or not checkpoint_manager.can_skip_stage(state, PipelineStage.CHUNKING):
-            logger.info("=== Stage 1: Sequence Chunking ===")
+            telemetry.start_stage("Sequence Chunking")
             checkpoint_manager.mark_stage_started(state, PipelineStage.CHUNKING)
 
             # Chunk sequences with progress bar
@@ -263,6 +267,7 @@ def run_prediction(
                 split_fasta_chunk(input_file, chunked_file, expected_length)
                 pbar.update(num_sequences)
 
+            telemetry.end_stage("Sequence Chunking", {'sequences': num_sequences})
             checkpoint_manager.mark_stage_completed(
                 state,
                 PipelineStage.CHUNKING,
@@ -271,7 +276,7 @@ def run_prediction(
 
         # Stage 2: Translation (Six-Frame Translation)
         if start_stage <= PipelineStage.TRANSLATION or not checkpoint_manager.can_skip_stage(state, PipelineStage.TRANSLATION):
-            logger.info("=== Stage 2: Six-Frame Translation ===")
+            telemetry.start_stage("Six-Frame Translation")
             checkpoint_manager.mark_stage_started(state, PipelineStage.TRANSLATION)
 
             # Determine whether to use parallel translation
@@ -347,6 +352,11 @@ def run_prediction(
             logger.info(f"Translation complete: processed {sequences_processed:,} sequences in {elapsed_time:.1f}s ({sequences_per_sec:,.0f} seq/s)")
             logger.info(f"Found {sequences_with_orfs:,} sequences with valid ORFs across 6 frames")
 
+            telemetry.end_stage("Six-Frame Translation", {
+                'sequences': sequences_processed,
+                'sequences_with_orfs': sequences_with_orfs,
+                'seq_per_sec': sequences_per_sec
+            })
             checkpoint_manager.mark_stage_completed(
                 state,
                 PipelineStage.TRANSLATION,
@@ -358,7 +368,7 @@ def run_prediction(
         protein_split_dir = output_dir / f"{input_file.stem}_protein"
 
         if start_stage <= PipelineStage.NUCLEOTIDE_SPLITTING or not checkpoint_manager.can_skip_stage(state, PipelineStage.NUCLEOTIDE_SPLITTING):
-            logger.info("=== Stage 3: Nucleotide File Splitting ===")
+            telemetry.start_stage("Nucleotide File Splitting")
             checkpoint_manager.mark_stage_started(state, PipelineStage.NUCLEOTIDE_SPLITTING)
 
             from virnucpro.utils.file_utils import split_fasta_file
@@ -390,6 +400,7 @@ def run_prediction(
                 prefix="output"
             )
 
+            telemetry.end_stage("Nucleotide File Splitting", {'files': len(nucleotide_files)})
             checkpoint_manager.mark_stage_completed(
                 state,
                 PipelineStage.NUCLEOTIDE_SPLITTING,
@@ -397,11 +408,13 @@ def run_prediction(
             )
         else:
             # Load from checkpoint
+            telemetry.start_stage("Nucleotide File Splitting")
             nucleotide_files = [Path(f) for f in state['stages'][PipelineStage.NUCLEOTIDE_SPLITTING.name]['outputs']['nucleotide_files']]
+            telemetry.end_stage("Nucleotide File Splitting", {'skipped': True, 'reason': 'checkpoint'})
 
         # Stage 4: Protein File Splitting
         if start_stage <= PipelineStage.PROTEIN_SPLITTING or not checkpoint_manager.can_skip_stage(state, PipelineStage.PROTEIN_SPLITTING):
-            logger.info("=== Stage 4: Protein File Splitting ===")
+            telemetry.start_stage("Protein File Splitting")
             checkpoint_manager.mark_stage_started(state, PipelineStage.PROTEIN_SPLITTING)
 
             from virnucpro.utils.file_utils import split_fasta_file
@@ -432,6 +445,7 @@ def run_prediction(
                 prefix="output"
             )
 
+            telemetry.end_stage("Protein File Splitting", {'files': len(protein_files)})
             checkpoint_manager.mark_stage_completed(
                 state,
                 PipelineStage.PROTEIN_SPLITTING,
@@ -439,11 +453,13 @@ def run_prediction(
             )
         else:
             # Load from checkpoint
+            telemetry.start_stage("Protein File Splitting")
             protein_files = [Path(f) for f in state['stages'][PipelineStage.PROTEIN_SPLITTING.name]['outputs']['protein_files']]
+            telemetry.end_stage("Protein File Splitting", {'skipped': True, 'reason': 'checkpoint'})
 
         # Stage 5: Nucleotide Feature Extraction (DNABERT-S)
         if start_stage <= PipelineStage.NUCLEOTIDE_FEATURES or not checkpoint_manager.can_skip_stage(state, PipelineStage.NUCLEOTIDE_FEATURES):
-            logger.info("=== Stage 5: Nucleotide Feature Extraction (DNABERT-S) ===")
+            telemetry.start_stage("DNABERT-S Feature Extraction")
             checkpoint_manager.mark_stage_started(state, PipelineStage.NUCLEOTIDE_FEATURES)
 
             nucleotide_feature_files = []
@@ -627,6 +643,9 @@ def run_prediction(
                         pbar.update(1)
                         pbar.set_postfix_str(f"Current: {nuc_file.name}")
 
+            telemetry.end_stage("DNABERT-S Feature Extraction", {
+                'files': len(nucleotide_feature_files)
+            })
             checkpoint_manager.mark_stage_completed(
                 state,
                 PipelineStage.NUCLEOTIDE_FEATURES,
@@ -634,11 +653,13 @@ def run_prediction(
             )
         else:
             # Load from checkpoint
+            telemetry.start_stage("DNABERT-S Feature Extraction")
             nucleotide_feature_files = [Path(f) for f in state['stages'][PipelineStage.NUCLEOTIDE_FEATURES.name]['outputs']['nucleotide_features']]
+            telemetry.end_stage("DNABERT-S Feature Extraction", {'skipped': True, 'reason': 'checkpoint'})
 
         # Stage 6: Protein Feature Extraction
         if start_stage <= PipelineStage.PROTEIN_FEATURES or not checkpoint_manager.can_skip_stage(state, PipelineStage.PROTEIN_FEATURES):
-            logger.info("=== Stage 6: Protein Feature Extraction ===")
+            telemetry.start_stage("ESM-2 Feature Extraction")
             checkpoint_manager.mark_stage_started(state, PipelineStage.PROTEIN_FEATURES)
 
             if use_v2_architecture and parallel:
@@ -914,6 +935,10 @@ def run_prediction(
                     f"v1.0 ESM-2 complete: {len(protein_feature_files)} files in {esm_v1_elapsed:.1f}s"
                 )
 
+            telemetry.end_stage("ESM-2 Feature Extraction", {
+                'files': len(protein_feature_files),
+                'architecture': 'v2.0' if use_v2_architecture and parallel else 'v1.0'
+            })
             checkpoint_manager.mark_stage_completed(
                 state,
                 PipelineStage.PROTEIN_FEATURES,
@@ -921,14 +946,16 @@ def run_prediction(
             )
         else:
             # Load from checkpoint
+            telemetry.start_stage("ESM-2 Feature Extraction")
             protein_feature_files = [Path(f) for f in state['stages'][PipelineStage.PROTEIN_FEATURES.name]['outputs']['protein_features']]
             failed_files = []
+            telemetry.end_stage("ESM-2 Feature Extraction", {'skipped': True, 'reason': 'checkpoint'})
 
         # Stage 7: Feature Merging
         merged_dir = output_dir / f"{input_file.stem}_merged"
 
         if start_stage <= PipelineStage.FEATURE_MERGING or not checkpoint_manager.can_skip_stage(state, PipelineStage.FEATURE_MERGING):
-            logger.info("=== Stage 7: Feature Merging ===")
+            telemetry.start_stage("Feature Merging")
             checkpoint_manager.mark_stage_started(state, PipelineStage.FEATURE_MERGING)
 
             from virnucpro.pipeline.features import merge_features
@@ -969,6 +996,7 @@ def run_prediction(
 
             logger.info(f"Merged {len(merged_feature_files)} feature files")
 
+            telemetry.end_stage("Feature Merging", {'files': len(merged_feature_files)})
             checkpoint_manager.mark_stage_completed(
                 state,
                 PipelineStage.FEATURE_MERGING,
@@ -976,13 +1004,15 @@ def run_prediction(
             )
         else:
             # Load from checkpoint
+            telemetry.start_stage("Feature Merging")
             merged_feature_files = [Path(f) for f in state['stages'][PipelineStage.FEATURE_MERGING.name]['outputs']['merged_files']]
+            telemetry.end_stage("Feature Merging", {'skipped': True, 'reason': 'checkpoint'})
 
         # Stage 8: Prediction
         prediction_results_file = merged_dir / 'prediction_results.txt'
 
         if start_stage <= PipelineStage.PREDICTION or not checkpoint_manager.can_skip_stage(state, PipelineStage.PREDICTION):
-            logger.info("=== Stage 8: Model Prediction ===")
+            telemetry.start_stage("Model Prediction")
             checkpoint_manager.mark_stage_started(state, PipelineStage.PREDICTION)
 
             from virnucpro.pipeline.predictor import predict_sequences
@@ -1003,6 +1033,7 @@ def run_prediction(
                 for seq_id, prediction, score_0, score_1 in predictions:
                     f.write(f"{seq_id}\t{prediction}\t{score_0}\t{score_1}\n")
 
+            telemetry.end_stage("Model Prediction", {'predictions': len(predictions)})
             checkpoint_manager.mark_stage_completed(
                 state,
                 PipelineStage.PREDICTION,
@@ -1013,7 +1044,7 @@ def run_prediction(
         consensus_results_file = merged_dir / 'prediction_results_highestscore.csv'
 
         if start_stage <= PipelineStage.CONSENSUS or not checkpoint_manager.can_skip_stage(state, PipelineStage.CONSENSUS):
-            logger.info("=== Stage 9: Consensus Scoring ===")
+            telemetry.start_stage("Consensus Scoring")
             checkpoint_manager.mark_stage_started(state, PipelineStage.CONSENSUS)
 
             from virnucpro.pipeline.predictor import compute_consensus
@@ -1040,11 +1071,15 @@ def run_prediction(
             ])
             consensus_df.to_csv(consensus_results_file, sep='\t', index=False)
 
+            telemetry.end_stage("Consensus Scoring", {'consensus_sequences': len(consensus)})
             checkpoint_manager.mark_stage_completed(
                 state,
                 PipelineStage.CONSENSUS,
                 {'consensus_file': str(consensus_results_file)}
             )
+
+        # Log pipeline summary before cleanup
+        telemetry.log_summary()
 
         # Final: Cleanup if requested
         if cleanup_intermediate:
