@@ -1,0 +1,38 @@
+.planning/phases/10.2-flashattention-scoring-divergence/10.2-RESEARCH.md
+  b7472e746e5233cc 1-592
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "0e235d2d4be2ba95d41c2a87942dfb102b98732b",
+  "prompts": {
+    "b7472e746e5233cc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d0324b05-437c-4dd4-b1c3-4c4aa14dbfc2",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 592,
+      "total_deletions": 0,
+      "accepted_lines": 592,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/2b243cee05d85cb39d20d791aa0b8fe721256ed2a398daeafd2ce1b9a7a85f8f"
+    },
+    "e67f94d44fd863ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5b76bfd5-44ff-44f2-abec-04fb5ea1adff",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 29,
+      "total_deletions": 8,
+      "accepted_lines": 29,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/e77f98dc3d6537ceac6664205946823b635dea988dc88d6356a3f771388cb52e"
+    }
+  }
+}
