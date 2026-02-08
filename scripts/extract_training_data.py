@@ -46,6 +46,101 @@ class ExtractionError(Exception):
     pass
 
 
+def patch_dnabert_s_triton():
+    """
+    Runtime patch for DNABERT-S flash attention Triton API compatibility.
+
+    Patches deprecated trans_b parameter in tl.dot() calls.
+    Required for PyTorch 2.9 + Triton compatibility.
+
+    Background: DNABERT-S's flash_attn_triton.py uses `tl.dot(q, k, trans_b=True)`
+    which was deprecated in newer Triton versions. PyTorch 2.9 ships with Triton that
+    removed this parameter. The fix replaces it with `tl.dot(q, tl.trans(k))` which
+    is mathematically equivalent.
+
+    TODO: Replace with forked model in Phase 5 maintenance cycle.
+
+    Returns:
+        bool: True if patch was applied or already present, False if patch failed
+
+    Raises:
+        ExtractionError: if model cannot be downloaded or patched
+    """
+    import glob
+    import re
+
+    logger.info("Applying DNABERT-S Triton compatibility patch...")
+
+    # Find the cached model code
+    cache_pattern = os.path.expanduser(
+        "~/.cache/huggingface/modules/transformers_modules/*/flash_attn_triton.py"
+    )
+    files = glob.glob(cache_pattern)
+
+    if not files:
+        # Model not downloaded yet - trigger download then patch
+        logger.info("DNABERT-S not in cache, downloading model...")
+        from transformers import AutoConfig
+
+        try:
+            AutoConfig.from_pretrained(
+                "zhihan1996/DNABERT-S",
+                trust_remote_code=True,
+                revision="d2f90f5"  # Pin revision for reproducibility
+            )
+        except Exception as e:
+            raise ExtractionError(f"Failed to download DNABERT-S model: {str(e)}")
+
+        files = glob.glob(cache_pattern)
+
+    if not files:
+        raise ExtractionError(
+            f"Cannot find DNABERT-S flash_attn_triton.py in cache: {cache_pattern}"
+        )
+
+    patched_count = 0
+    for filepath in files:
+        # Only patch DNABERT-S files (not other models that might use flash attention)
+        if "DNABERT-S" not in filepath and "dnabert" not in filepath.lower():
+            continue
+
+        with open(filepath, 'r') as f:
+            content = f.read()
+
+        # Check if already patched
+        if 'tl.trans(k)' in content and 'trans_b=True' not in content:
+            logger.info(f"Already patched: {filepath}")
+            patched_count += 1
+            continue
+
+        # Apply patch: replace trans_b parameter with tl.trans()
+        original = content
+
+        # Pattern 1: tl.dot(q, k, trans_b=True) - lowercase variables
+        content = re.sub(
+            r'tl\.dot\(([qQ]),\s*([kK]),\s*trans_b=True\)',
+            r'tl.dot(\1, tl.trans(\2))',
+            content
+        )
+
+        if content != original:
+            try:
+                with open(filepath, 'w') as f:
+                    f.write(content)
+                patched_count += 1
+                logger.info(f"Patched: {filepath}")
+            except Exception as e:
+                raise ExtractionError(f"Failed to write patched file {filepath}: {str(e)}")
+        else:
+            logger.warning(f"No trans_b=True pattern found in {filepath}")
+
+    if patched_count == 0:
+        raise ExtractionError("Failed to apply Triton patch - no files were patched")
+
+    logger.info(f"Triton patch applied to {patched_count} file(s)")
+    return True
+
+
 def split_identified_files(data_dir='./data/', sequences_per_file=10000):
     """
     Split monolithic identified FASTA files into 10,000-sequence chunks.
@@ -297,50 +392,22 @@ def extract_dnabert_all(viral_nucleotide_files, host_nucleotide_files):
 
     logger.info(f"Extracting DNABERT-S embeddings for {total_files} nucleotide files")
 
-    # Load DNABERT-S model once
-    from transformers import AutoTokenizer, AutoConfig
-    import glob
-    import re
+    # Apply Triton compatibility patch before loading DNABERT-S
+    patch_dnabert_s_triton()
 
-    # Pre-download model files to trigger caching
-    logger.info("Downloading DNABERT-S model files...")
-    config = AutoConfig.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
+    # Load DNABERT-S model
+    from transformers import AutoTokenizer
 
-    # Patch DNABERT-S's flash attention code for Triton compatibility
-    # The model's flash_attn_triton.py uses deprecated trans_b parameter
-    cache_dir = os.path.expanduser("~/.cache/huggingface/modules/transformers_modules")
-    flash_attn_files = glob.glob(f"{cache_dir}/**/flash_attn_triton.py", recursive=True)
-
-    patched = False
-    for flash_file in flash_attn_files:
-        if "DNABERT-S" in flash_file:
-            with open(flash_file, 'r') as f:
-                content = f.read()
-
-            # Replace deprecated tl.dot(..., trans_b=True) with tl.trans(k) in tl.dot(q, ...)
-            # Old: qk += tl.dot(q, k, trans_b=True)
-            # New: qk += tl.dot(q, tl.trans(k))
-            if "trans_b=True" in content:
-                logger.info(f"Patching deprecated Triton API in {flash_file}")
-                content = re.sub(
-                    r'tl\.dot\(([^,]+),\s*([^,]+),\s*trans_b=True\)',
-                    r'tl.dot(\1, tl.trans(\2))',
-                    content
-                )
-                with open(flash_file, 'w') as f:
-                    f.write(content)
-                logger.info("Flash attention Triton code patched successfully")
-                patched = True
-                break
-
-    if not patched:
-        logger.warning("Could not find DNABERT-S flash_attn_triton.py to patch - may fail on first sequence")
-
-    # Load tokenizer and model
-    tokenizer = AutoTokenizer.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
+    logger.info("Loading DNABERT-S model...")
+    tokenizer = AutoTokenizer.from_pretrained(
+        "zhihan1996/DNABERT-S",
+        trust_remote_code=True,
+        revision="d2f90f5"
+    )
     model = AutoModel.from_pretrained(
         "zhihan1996/DNABERT-S",
-        trust_remote_code=True
+        trust_remote_code=True,
+        revision="d2f90f5"
     )
     model.cuda()
     model.eval()
