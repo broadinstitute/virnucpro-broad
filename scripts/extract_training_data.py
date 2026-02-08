@@ -302,13 +302,16 @@ def extract_dnabert_all(viral_nucleotide_files, host_nucleotide_files):
     import glob
     import re
 
-    tokenizer = AutoTokenizer.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
+    # Pre-download model files to trigger caching
+    logger.info("Downloading DNABERT-S model files...")
+    config = AutoConfig.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
 
     # Patch DNABERT-S's flash attention code for Triton compatibility
     # The model's flash_attn_triton.py uses deprecated trans_b parameter
     cache_dir = os.path.expanduser("~/.cache/huggingface/modules/transformers_modules")
     flash_attn_files = glob.glob(f"{cache_dir}/**/flash_attn_triton.py", recursive=True)
 
+    patched = False
     for flash_file in flash_attn_files:
         if "DNABERT-S" in flash_file:
             with open(flash_file, 'r') as f:
@@ -327,8 +330,14 @@ def extract_dnabert_all(viral_nucleotide_files, host_nucleotide_files):
                 with open(flash_file, 'w') as f:
                     f.write(content)
                 logger.info("Flash attention Triton code patched successfully")
+                patched = True
                 break
 
+    if not patched:
+        logger.warning("Could not find DNABERT-S flash_attn_triton.py to patch - may fail on first sequence")
+
+    # Load tokenizer and model
+    tokenizer = AutoTokenizer.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
     model = AutoModel.from_pretrained(
         "zhihan1996/DNABERT-S",
         trust_remote_code=True
