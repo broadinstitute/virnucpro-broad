@@ -17,20 +17,20 @@ Requirements for initial FastESM2_650 migration experiment. Each maps to roadmap
 
 ### Feature Extraction
 
-- [ ] **FEAT-01**: New extract_fast_esm() function implemented using HuggingFace AutoModel API
-- [ ] **FEAT-02**: FastESM2_650 tokenizer correctly processes protein sequences
-- [ ] **FEAT-03**: Mean-pooled embeddings extracted from last_hidden_state (1280-dim output)
-- [ ] **FEAT-04**: Batch processing maintained with configurable batch size
-- [ ] **FEAT-05**: GPU acceleration working (model and tensors on correct device)
-- [ ] **FEAT-06**: Feature extraction outputs saved to .pt files in same format as ESM2 pipeline
+- [x] **FEAT-01**: New extract_fast_esm() function implemented using HuggingFace AutoModel API
+- [x] **FEAT-02**: FastESM2_650 tokenizer correctly processes protein sequences
+- [x] **FEAT-03**: Mean-pooled embeddings extracted from last_hidden_state (1280-dim output)
+- [x] **FEAT-04**: Batch processing maintained with configurable batch size
+- [x] **FEAT-05**: GPU acceleration working (model and tensors on correct device)
+- [x] **FEAT-06**: Feature extraction outputs saved to .pt files in same format as ESM2 pipeline
 
 ### Dimension Compatibility
 
-- [ ] **DIM-01**: merge_data() function produces 1664-dim concatenated features (384 DNA + 1280 protein)
-- [ ] **DIM-02**: Dimension validation assertions added at merge points to catch mismatches
-- [ ] **DIM-03**: MLPClassifier updated with input_dim=1664 (changed from 2944)
-- [ ] **DIM-04**: Checkpoint metadata includes embedding model type and dimensions
-- [ ] **DIM-05**: Old ESM2 3B checkpoints cannot be accidentally loaded with FastESM2 pipeline (namespace protection)
+- [x] **DIM-01**: merge_data() function produces 2048-dim concatenated features (768 DNA + 1280 protein)
+- [x] **DIM-02**: Dimension validation assertions added at merge points to catch mismatches
+- [x] **DIM-03**: MLPClassifier updated with input_dim=2048 (changed from 3328)
+- [x] **DIM-04**: Checkpoint metadata includes embedding model type and dimensions
+- [x] **DIM-05**: Old ESM2 3B checkpoints cannot be accidentally loaded with FastESM2 pipeline (namespace protection)
 
 ### Model Training
 
@@ -99,11 +99,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FEAT-04 | Phase 2 | Complete |
 | FEAT-05 | Phase 2 | Complete |
 | FEAT-06 | Phase 2 | Complete |
-| DIM-01 | Phase 3 | Pending |
-| DIM-02 | Phase 3 | Pending |
-| DIM-03 | Phase 3 | Pending |
-| DIM-04 | Phase 3 | Pending |
-| DIM-05 | Phase 3 | Pending |
+| DIM-01 | Phase 3 | Complete |
+| DIM-02 | Phase 3 | Complete |
+| DIM-03 | Phase 3 | Complete |
+| DIM-04 | Phase 3 | Complete |
+| DIM-05 | Phase 3 | Complete |
 | TRAIN-01 | Phase 4 | Pending |
 | TRAIN-02 | Phase 5 | Pending |
 | TRAIN-03 | Phase 5 | Pending |
