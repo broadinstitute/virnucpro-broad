@@ -529,6 +529,92 @@ class TestFP16PackedEquivalence:
         assert mean_boundary_sim > 0.99, f"Boundary mean similarity {mean_boundary_sim:.4f} < 0.99"
         assert min_boundary_sim > 0.95, f"Boundary min similarity {min_boundary_sim:.4f} < 0.95"
 
+    def test_packed_fp16_precision_alignment(self, esm_model_fp16):
+        """Validate packed forward path precision matches standard ESM-2 forward for FP16.
+
+        This test verifies the precision alignment fix that:
+        1. Uses esm.modules.gelu instead of torch.nn.functional.gelu for consistent FP16 behavior
+        2. Computes RoPE using position_ids.to(inv_freq.dtype) matching ESM-2's RotaryEmbedding
+
+        The test compares packed forward output to standard forward output with tight
+        tolerances (cosine similarity >0.999) to catch precision regressions.
+
+        Note: This test requires script mode execution for proper tensor handling.
+        """
+        model_fp16, batch_converter = esm_model_fp16
+        device = model_fp16.device
+
+        sequences = [
+            ("align1", "MKTAYIAKQRQISFVKS"),
+            ("align2", "VLSPADKTNVKAAWGKVGAH"),
+            ("align3", "MVHLTPEEKSAVTALWGKV"),
+            ("align4", "DERKH" * 5),
+            ("align5", "AILVFMWP" * 4),
+        ]
+
+        labels, strs, tokens = batch_converter(sequences)
+        tokens = tokens.to(device)
+
+        with torch.no_grad():
+            out_unpacked = model_fp16(tokens, repr_layers=[36])
+        emb_unpacked = out_unpacked['representations'][36]
+
+        input_ids_list = []
+        for i in range(len(sequences)):
+            seq_tokens = tokens[i]
+            eos_idx = (seq_tokens == 2).nonzero(as_tuple=True)[0]
+            if len(eos_idx) > 0:
+                end_idx = eos_idx[0].item() + 1
+            else:
+                end_idx = len(seq_tokens)
+            input_ids_list.append(seq_tokens[:end_idx])
+
+        input_ids = torch.cat(input_ids_list)
+        cu_seqlens = torch.zeros(len(sequences) + 1, dtype=torch.int32, device=device)
+        cu_seqlens[0] = 0
+        for i, ids in enumerate(input_ids_list):
+            cu_seqlens[i + 1] = cu_seqlens[i] + len(ids)
+        max_seqlen = max(len(ids) for ids in input_ids_list)
+
+        with torch.no_grad():
+            out_packed = model_fp16.forward_packed(
+                input_ids=input_ids,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+                repr_layers=[36]
+            )
+        emb_packed = out_packed['representations'][36]
+
+        packed_offset = 0
+        similarities = []
+        max_abs_diffs = []
+        for i, seq_len in enumerate([len(ids) for ids in input_ids_list]):
+            emb_u = emb_unpacked[i, 1:seq_len]
+            emb_p = emb_packed[packed_offset+1:packed_offset+seq_len]
+
+            sim = F.cosine_similarity(emb_u.float(), emb_p.float(), dim=-1).mean().item()
+            similarities.append(sim)
+
+            abs_diff = (emb_u.float() - emb_p.float()).abs()
+            max_abs_diff = abs_diff.max().item()
+            max_abs_diffs.append(max_abs_diff)
+
+            packed_offset += seq_len
+
+        mean_sim = sum(similarities) / len(similarities)
+        min_sim = min(similarities)
+        max_diff = max(max_abs_diffs)
+
+        print(f"\nFP16 Precision Alignment Validation:")
+        print(f"  Mean cosine similarity: {mean_sim:.6f}")
+        print(f"  Min cosine similarity: {min_sim:.6f}")
+        print(f"  Max absolute difference: {max_diff:.6e}")
+        print(f"  Per-sequence similarities: {[f'{s:.6f}' for s in similarities]}")
+
+        assert mean_sim > 0.999, f"Mean similarity {mean_sim:.6f} < 0.999 (precision alignment issue)"
+        assert min_sim > 0.995, f"Min similarity {min_sim:.6f} < 0.995 (precision alignment issue)"
+        assert max_diff < 1e-3, f"Max absolute difference {max_diff:.6e} >= 1e-3 (precision regression)"
+
 
 
 class TestFP16NumericalStability:

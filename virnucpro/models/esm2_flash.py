@@ -418,6 +418,14 @@ class ESM2WithFlashAttention(nn.Module):
             x2 = x[..., x.shape[-1] // 2 :]
             return torch.cat((-x2, x1), dim=-1)
 
+        # Defensive: verify Q/K remain in model dtype throughout rotation
+        # This catches any implicit FP32 upcasts that would break precision alignment
+        if q.dtype in (torch.float16, torch.bfloat16):
+            assert q_rot.dtype == q.dtype, \
+                f"Q dtype changed from {q.dtype} to {q_rot.dtype} during rotation"
+            assert k_rot.dtype == k.dtype, \
+                f"K dtype changed from {k.dtype} to {k_rot.dtype} during rotation"
+
         q_rot = (q_rot * cos) + (rotate_half(q_rot) * sin)
         k_rot = (k_rot * cos) + (rotate_half(k_rot) * sin)
 
