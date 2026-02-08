@@ -1,0 +1,26 @@
+virnucpro/cli/predict.py
+  98380e91183da839 62-64,112,261-262,268-272
+tests/integration/test_prediction_divergence.py
+  98380e91183da839 502-618
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "51adb2457b98fb9718645eb5c82c53c6f6badc35",
+  "prompts": {
+    "98380e91183da839": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b742b59-5abc-4043-80c3-10f15ab4de65",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 129,
+      "total_deletions": 1,
+      "accepted_lines": 129,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/0b713fb30250afaef0341ce5702d8240e63dc9546f630a08034b84d8ae3e2a76"
+    }
+  }
+}
