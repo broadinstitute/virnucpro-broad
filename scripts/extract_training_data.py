@@ -32,7 +32,7 @@ from transformers import AutoModel
 # Add project root to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from units import extract_fast_esm, merge_data, validate_merge_inputs, PROTEIN_DIM, MERGED_DIM
+from units import extract_fast_esm, extract_DNABERT_S, merge_data, validate_merge_inputs, PROTEIN_DIM, MERGED_DIM, split_fasta_file
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,6 +44,48 @@ logger = logging.getLogger(__name__)
 class ExtractionError(Exception):
     """Raised when extraction fails."""
     pass
+
+
+def split_identified_files(data_dir='./data/', sequences_per_file=10000):
+    """
+    Split monolithic identified FASTA files into 10,000-sequence chunks.
+
+    This step is required before extraction. The make_train_dataset_300.py script
+    creates monolithic *identified_nucleotide.fa and *identified_protein.fa files,
+    but the extraction pipeline needs them split into chunks for parallel processing.
+
+    Args:
+        data_dir: directory containing identified FASTA files
+        sequences_per_file: number of sequences per split file (default: 10000)
+    """
+    logger.info(f"Splitting identified FASTA files into {sequences_per_file}-sequence chunks")
+
+    # Find all identified FASTA files
+    identified_files = []
+    for root, dirs, filenames in os.walk(data_dir):
+        for filename in filenames:
+            if filename.endswith('identified_nucleotide.fa') or filename.endswith('identified_protein.fa'):
+                identified_files.append(os.path.join(root, filename))
+
+    logger.info(f"Found {len(identified_files)} identified FASTA files to split")
+
+    # Split each file
+    for input_file in tqdm(identified_files, desc="Splitting files"):
+        # Create output directory by replacing .fa with /
+        output_dir = input_file.replace('.fa', '/')
+
+        # Skip if already split (directory exists and has files)
+        if os.path.exists(output_dir):
+            split_files = [f for f in os.listdir(output_dir) if f.endswith('.fa')]
+            if len(split_files) > 0:
+                logger.debug(f"Skipping {input_file} - already split")
+                continue
+
+        # Split the file
+        split_fasta_file(input_file, output_dir, sequences_per_file)
+        logger.info(f"Split {input_file} into {output_dir}")
+
+    logger.info("File splitting complete")
 
 
 def discover_training_data(data_dir='./data/'):
@@ -239,9 +281,102 @@ def save_checkpoint(checkpoint_path, completed_files, started_at):
         json.dump(checkpoint, f, indent=2)
 
 
+def extract_dnabert_all(viral_nucleotide_files, host_nucleotide_files):
+    """
+    Extract DNABERT-S embeddings for all nucleotide files.
+
+    Args:
+        viral_nucleotide_files: list of viral nucleotide FASTA paths
+        host_nucleotide_files: list of host nucleotide FASTA paths
+
+    Returns:
+        dict: extraction statistics
+    """
+    all_nucleotide_files = viral_nucleotide_files + host_nucleotide_files
+    total_files = len(all_nucleotide_files)
+
+    logger.info(f"Extracting DNABERT-S embeddings for {total_files} nucleotide files")
+
+    # Load DNABERT-S model once
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
+    model = AutoModel.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
+    model.cuda()
+    model.eval()
+
+    logger.info("DNABERT-S model loaded successfully")
+
+    # Track statistics
+    stats = {
+        'total_files': total_files,
+        'files_processed': 0,
+        'files_skipped': 0,
+        'total_time': 0
+    }
+
+    # Process each file with progress bar
+    with tqdm(total=total_files, desc="Extracting DNABERT-S") as pbar:
+        for nucleotide_file in all_nucleotide_files:
+            output_file = f'{nucleotide_file.split(".fa")[0]}_DNABERT_S.pt'
+
+            # Skip if already exists
+            if os.path.exists(output_file):
+                stats['files_skipped'] += 1
+                pbar.update(1)
+                continue
+
+            # Extract embeddings
+            try:
+                start_time = datetime.now()
+
+                extract_DNABERT_S(
+                    input_file=nucleotide_file,
+                    out_file=output_file,
+                    model_loaded=True,
+                    tokenizer=tokenizer,
+                    model=model
+                )
+
+                elapsed = (datetime.now() - start_time).total_seconds()
+
+                # Update statistics
+                stats['files_processed'] += 1
+                stats['total_time'] += elapsed
+
+                logger.info(
+                    f"[{stats['files_processed'] + stats['files_skipped']}/{total_files}] "
+                    f"Extracted {nucleotide_file} ({elapsed:.1f}s)"
+                )
+
+                pbar.update(1)
+
+            except Exception as e:
+                logger.error(f"Failed to extract {nucleotide_file}: {str(e)}")
+                logger.error(f"Error type: {type(e).__name__}")
+                import traceback
+                logger.error(f"Traceback:\n{traceback.format_exc()}")
+                raise ExtractionError(
+                    f"DNABERT-S extraction failed for {nucleotide_file}. "
+                    f"Error: {str(e)}"
+                )
+
+    # Calculate averages
+    if stats['files_processed'] > 0:
+        stats['avg_time_per_file'] = stats['total_time'] / stats['files_processed']
+    else:
+        stats['avg_time_per_file'] = 0
+
+    logger.info(
+        f"DNABERT-S extraction complete: {stats['files_processed']} processed, "
+        f"{stats['files_skipped']} skipped"
+    )
+
+    return stats
+
+
 def validate_prerequisites(viral_files, sampled_host_files):
     """
-    Verify DNABERT-S embeddings exist and CUDA is available.
+    Verify CUDA is available.
 
     Args:
         viral_files: dict with 'nucleotide' list
@@ -257,28 +392,6 @@ def validate_prerequisites(viral_files, sampled_host_files):
         raise ExtractionError("CUDA is not available. This script requires GPU support.")
 
     logger.info(f"CUDA available: {torch.cuda.get_device_name(0)}")
-
-    # Check DNABERT-S embeddings exist
-    all_nucleotide_files = viral_files['nucleotide'] + sampled_host_files['nucleotide']
-    missing_files = []
-
-    for nucleotide_file in all_nucleotide_files:
-        dnabert_file = f'{nucleotide_file.split(".fa")[0]}_DNABERT_S.pt'
-        if not os.path.exists(dnabert_file):
-            missing_files.append(dnabert_file)
-
-    if missing_files:
-        logger.error(f"Missing {len(missing_files)} DNABERT-S embedding files:")
-        for f in missing_files[:10]:  # Show first 10
-            logger.error(f"  - {f}")
-        if len(missing_files) > 10:
-            logger.error(f"  ... and {len(missing_files) - 10} more")
-        raise ExtractionError(
-            f"Missing DNABERT-S embeddings. Run DNABERT-S extraction first. "
-            f"Missing {len(missing_files)} files."
-        )
-
-    logger.info("All DNABERT-S embeddings present")
 
 
 def extract_all(viral_protein_files, host_protein_files, model, tokenizer, checkpoint_path):
@@ -563,20 +676,31 @@ def main():
     start_time = datetime.now()
 
     try:
-        # Step 1: Discover training data
-        logger.info("Step 1: Discovering training data...")
+        # Step 1: Split identified FASTA files into chunks
+        logger.info("Step 1: Splitting identified FASTA files...")
+        split_identified_files('./data/', sequences_per_file=10000)
+
+        # Step 2: Discover training data
+        logger.info("Step 2: Discovering training data...")
         viral_files, host_files = discover_training_data('./data/')
 
-        # Step 2: Sample host files to match viral count
-        logger.info("Step 2: Sampling host files...")
+        # Step 3: Sample host files to match viral count
+        logger.info("Step 3: Sampling host files...")
         sampled_host_files = sample_host_files(viral_files, host_files)
 
-        # Step 3: Validate prerequisites
-        logger.info("Step 3: Validating prerequisites...")
+        # Step 4: Validate prerequisites
+        logger.info("Step 4: Validating prerequisites...")
         validate_prerequisites(viral_files, sampled_host_files)
 
-        # Step 4: Load FastESM2_650 model
-        logger.info("Step 4: Loading FastESM2_650 model...")
+        # Step 5: Extract DNABERT-S embeddings
+        logger.info("Step 5: Extracting DNABERT-S embeddings...")
+        dnabert_stats = extract_dnabert_all(
+            viral_files['nucleotide'],
+            sampled_host_files['nucleotide']
+        )
+
+        # Step 6: Load FastESM2_650 model
+        logger.info("Step 6: Loading FastESM2_650 model...")
         model = AutoModel.from_pretrained(
             "Synthyra/FastESM2_650",
             trust_remote_code=True,
@@ -585,8 +709,8 @@ def main():
         tokenizer = model.tokenizer
         logger.info("Model loaded successfully")
 
-        # Step 5: Extract protein embeddings
-        logger.info("Step 5: Extracting protein embeddings...")
+        # Step 7: Extract protein embeddings
+        logger.info("Step 7: Extracting protein embeddings...")
         checkpoint_path = './data/.extraction_checkpoint.json'
         extraction_stats = extract_all(
             viral_files['protein'],
@@ -596,12 +720,12 @@ def main():
             checkpoint_path
         )
 
-        # Step 6: Merge embeddings
-        logger.info("Step 6: Merging DNABERT-S and protein embeddings...")
+        # Step 8: Merge embeddings
+        logger.info("Step 8: Merging DNABERT-S and protein embeddings...")
         merge_stats = merge_all(viral_files, sampled_host_files)
 
-        # Step 7: Validate all outputs
-        logger.info("Step 7: Validating extracted embeddings...")
+        # Step 9: Validate all outputs
+        logger.info("Step 9: Validating extracted embeddings...")
         validation_stats = validate_all('./data/')
 
         # Calculate total time
@@ -612,14 +736,26 @@ def main():
         logger.info("EXTRACTION COMPLETE")
         logger.info("=" * 80)
         logger.info(f"Total time: {total_time:.1f}s ({total_time/60:.1f} minutes)")
-        logger.info(f"Files processed: {extraction_stats['files_processed']}")
-        logger.info(f"Files skipped (already exist): {extraction_stats['files_skipped']}")
-        logger.info(f"Total sequences: {extraction_stats['total_sequences']}")
-        logger.info(f"Average time per file: {extraction_stats['avg_time_per_file']:.1f}s")
-        logger.info(f"Average time per sequence: {extraction_stats['avg_time_per_sequence']:.3f}s")
-        logger.info(f"Viral files merged: {merge_stats['viral_merged']}")
-        logger.info(f"Host files merged: {merge_stats['host_merged']}")
-        logger.info(f"Validation: {validation_stats['esm_files']} ESM files, {validation_stats['merged_files']} merged files")
+        logger.info("")
+        logger.info("DNABERT-S Extraction:")
+        logger.info(f"  Files processed: {dnabert_stats['files_processed']}")
+        logger.info(f"  Files skipped: {dnabert_stats['files_skipped']}")
+        logger.info(f"  Avg time per file: {dnabert_stats['avg_time_per_file']:.1f}s")
+        logger.info("")
+        logger.info("FastESM2_650 Extraction:")
+        logger.info(f"  Files processed: {extraction_stats['files_processed']}")
+        logger.info(f"  Files skipped: {extraction_stats['files_skipped']}")
+        logger.info(f"  Total sequences: {extraction_stats['total_sequences']}")
+        logger.info(f"  Avg time per file: {extraction_stats['avg_time_per_file']:.1f}s")
+        logger.info(f"  Avg time per sequence: {extraction_stats['avg_time_per_sequence']:.3f}s")
+        logger.info("")
+        logger.info("Merging:")
+        logger.info(f"  Viral files merged: {merge_stats['viral_merged']}")
+        logger.info(f"  Host files merged: {merge_stats['host_merged']}")
+        logger.info("")
+        logger.info("Validation:")
+        logger.info(f"  {validation_stats['esm_files']} ESM files, {validation_stats['merged_files']} merged files")
+        logger.info(f"  {validation_stats['total_sequences']} total sequences, all dimensions correct")
         logger.info("=" * 80)
 
         # Clean up checkpoint on success
