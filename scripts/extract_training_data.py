@@ -298,12 +298,17 @@ def extract_dnabert_all(viral_nucleotide_files, host_nucleotide_files):
     logger.info(f"Extracting DNABERT-S embeddings for {total_files} nucleotide files")
 
     # Load DNABERT-S model once
-    from transformers import AutoTokenizer
+    from transformers import AutoTokenizer, AutoConfig
     tokenizer = AutoTokenizer.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
+
+    # Load config and explicitly disable flash attention
+    config = AutoConfig.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
+    config.use_flash_attn = False  # Disable flash attention for GB10 Triton compatibility
+
     model = AutoModel.from_pretrained(
         "zhihan1996/DNABERT-S",
-        trust_remote_code=True,
-        attn_implementation="eager"  # Disable flash attention for GB10 compatibility
+        config=config,
+        trust_remote_code=True
     )
     model.cuda()
     model.eval()
