@@ -1,0 +1,26 @@
+virnucpro/models/esm2_flash.py
+  98380e91183da839 169,185-189,206-214,460,462-464,466-469
+tests/unit/test_esm2_packed.py
+  98380e91183da839 22,29-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "848eae2ce5d8b668819f2a148ada3d741c0dfc07",
+  "prompts": {
+    "98380e91183da839": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b742b59-5abc-4043-80c3-10f15ab4de65",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 31,
+      "total_deletions": 6,
+      "accepted_lines": 30,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/0b713fb30250afaef0341ce5702d8240e63dc9546f630a08034b84d8ae3e2a76"
+    }
+  }
+}
