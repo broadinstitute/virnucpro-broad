@@ -6,7 +6,7 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 
 **Core value:** Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs and automatically queue batches, reducing sample processing time from 45+ hours to under 10 hours.
 
-**Current focus:** Phase 10.2 - FlashAttention Scoring Divergence Resolution (inserted, urgent)
+**Current focus:** Phase 10 - Performance Validation & Tuning (next phase)
 
 ## Current Position
 

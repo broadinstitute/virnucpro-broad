@@ -240,8 +240,8 @@ Discovered during Phase 10 planning: Phases 5-9 built v2.0 async architecture bu
 **Plans:** 2 plans in 2 waves
 
 Plans:
-- [ ] 10.2-01-PLAN.md — Prediction-level divergence quantification test
-- [ ] 10.2-02-PLAN.md — V1.0-compatible attention fallback and CLI integration
+- [x] 10.2-01-PLAN.md — Prediction-level divergence quantification test
+- [x] 10.2-02-PLAN.md — V1.0-compatible attention fallback and CLI integration
 
 **Details:**
 v2.0 predictions diverge from v1.0 baseline: 70.3% matching at 1e-3 tolerance, 96% at 1e-2. Root cause investigation found multiple bugs (EOS in mean pooling, missing token dropout rescaling, wrong GELU function) which were fixed, but a fundamental difference remains: v1.0 uses manual torch.bmm attention with FP16 accumulation, while v2.0 uses FlashAttention varlen with FP32 accumulation. Earlier Phase 6 testing (cosine similarity >0.999) validated packed vs unpacked equivalence, but that compared FlashAttention-to-FlashAttention — not FlashAttention-to-bmm. The downstream MLP classifier was trained on v1.0 (bmm) embeddings, so matching v1.0 output is required for correct predictions.
@@ -265,7 +265,7 @@ Phases execute in numeric order: 5 → 6 → 7 → 8 → 9 → 10 → 10.1 → 1
 | 9. Checkpointing Integration | v2.0 | 7/7 | Complete | 2026-02-06 |
 | 10. Performance Validation & Tuning | v2.0 | 0/5 | Pending | - |
 | 10.1. CLI Integration for v2.0 Architecture | v2.0 | 4/4 | Complete | 2026-02-06 |
-| 10.2. FlashAttention Scoring Divergence | v2.0 | 0/2 | Planned | - |
+| 10.2. FlashAttention Scoring Divergence | v2.0 | 2/2 | Complete | 2026-02-08 |
 
 ---
-*Last updated: 2026-02-07 - Phase 10.2 inserted (FlashAttention divergence resolution)*
+*Last updated: 2026-02-08 - Phase 10.2 complete (FlashAttention divergence resolved, v2.0 validated)*
