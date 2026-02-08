@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 ## Current Position
 
 Phase: 3 of 5 (Dimension Compatibility)
-Plan: 1 of TBD in current phase
+Plan: 2 of 3 in current phase
 Status: In progress
-Last activity: 2026-02-08 - Completed 03-01-PLAN.md (Dimension validation infrastructure)
+Last activity: 2026-02-08 - Completed 03-02-PLAN.md (MLPClassifier dimension migration)
 
-Progress: [█████░░░░░] ~50%
+Progress: [█████░░░░░] ~55%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5
-- Average duration: 7.2 min
-- Total execution time: 0.6 hours
+- Total plans completed: 6
+- Average duration: 6.3 min
+- Total execution time: 0.63 hours
 
 **By Phase:**
 
@@ -29,11 +29,11 @@ Progress: [█████░░░░░] ~50%
 |-------|-------|-------|----------|
 | 01 - Environment Setup | 2 | 25 min | 12.5 min |
 | 02 - Feature Extraction Pipeline | 2 | 9 min | 4.5 min |
-| 03 - Dimension Compatibility | 1 | 2 min | 2 min |
+| 03 - Dimension Compatibility | 2 | 5 min | 2.5 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-02 (18m), 02-01 (4m), 02-02 (5m), 03-01 (2m)
-- Trend: Phase 3 started - fast execution for infrastructure setup
+- Last 5 plans: 02-01 (4m), 02-02 (5m), 03-01 (2.5m), 03-02 (3m)
+- Trend: Phase 3 Wave 2 complete - consistent fast execution for dimension updates
 
 *Updated after each plan completion*
 
@@ -75,13 +75,20 @@ Recent decisions affecting current work:
 - Critical path validation always runs — merge_data() inputs/outputs are critical integration points; must validate even when VALIDATE_DIMS=false
 - DimensionError exception pattern — Structured attributes (expected_dim, actual_dim, tensor_name, location) for standardized error reporting
 
+**From 03-02 execution:**
+- MLPClassifier.forward() validates input dimensions on every forward pass — Critical path validation independent of VALIDATE_DIMS setting catches mismatches before hidden layer computation
+- Checkpoint filename convention model_fastesm650.pth — Distinguishes from old ESM2 3B checkpoints (model.pth)
+- Feature filename convention *_fastesm.pt — Namespaces FastESM2 outputs separately from old *_ESM.pt files
+- Checkpoint version 2.0.0 for breaking changes — Major version bump indicates dimension incompatibility, triggers rejection with migration guidance
+- State dict loading pattern with metadata-driven instantiation — Enables dimension validation before loading weights
+
 ### Pending Todos
 
 None yet.
 
 ### Blockers/Concerns
 
-**Critical dimension change:** ✓ RESOLVED - 1280-dim embeddings validated in 02-02. Combined feature vector: 768 (DNABERT-S) + 1280 (FastESM2_650) = 2048 dimensions. Model retraining required in Phase 4.
+**Critical dimension change:** ✓ RESOLVED - 1280-dim embeddings validated in 02-02. Combined feature vector: 768 (DNABERT-S) + 1280 (FastESM2_650) = 2048 dimensions. Dimension validation infrastructure complete (03-01). MLPClassifier updated to 2048-dim with checkpoint versioning (03-02). Model retraining required in Phase 4.
 
 **PyTorch 2.5+ requirement:** ✓ RESOLVED - PyTorch 2.9.0a0 with CUDA 13.0 support via NVIDIA container (01-02, upgraded from 2.5.1 for GB10 support)
 
@@ -91,10 +98,10 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-08 04:03 UTC
-Stopped at: Completed 03-01-PLAN.md (Dimension validation infrastructure)
+Last session: 2026-02-08 04:10 UTC
+Stopped at: Completed 03-02-PLAN.md (MLPClassifier dimension migration)
 Resume file: None
-Next action: Continue Phase 3 - Update model dimensions and checkpoint validation
+Next action: Continue Phase 3 - Integration testing (03-03)
 
 Config:
 {
