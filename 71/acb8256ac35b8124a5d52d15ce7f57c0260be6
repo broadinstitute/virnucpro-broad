@@ -1,0 +1,30 @@
+.planning/phases/10-performance-validation-&-tuning**---end-to-end-benchmarking/10-03-PLAN.md
+  cb6df5598d55af8d 5-8,12-18,20-27,31,33,35,48-50,56-57,59-198,201-205,207-237,243-250,254-258
+.planning/ROADMAP.md
+  cb6df5598d55af8d 186,188,193-200,202,205-207,266,271
+.planning/phases/10-performance-validation-&-tuning**---end-to-end-benchmarking/10-01-PLAN.md
+  cb6df5598d55af8d 8-9,14-16,18-23,25-28,32,34,36,48,55-56,58-97,100,102,106-107,109-206,209,211,217-221,225-229
+.planning/phases/10-performance-validation-&-tuning**---end-to-end-benchmarking/10-02-PLAN.md
+  cb6df5598d55af8d 7-8,12-18,20-23,27,29,31,44-46,52-53,55-107,110-113,115-198,204-209,213-216
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "71acb8256ac35b8124a5d52d15ce7f57c0260be6",
+  "prompts": {
+    "cb6df5598d55af8d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d04946f9-082d-4155-80bc-ea2cb7b3f20f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 735,
+      "total_deletions": 17,
+      "accepted_lines": 735,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/b271943265883290a55e117f72ee31038569e434145ff12be8a92be4d9c950da"
+    }
+  }
+}
