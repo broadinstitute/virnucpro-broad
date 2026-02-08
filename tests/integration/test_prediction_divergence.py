@@ -499,3 +499,120 @@ class TestPredictionLevelDivergence:
             logger.info(f"  Match: {'✓' if class_metrics['label_match'] else '✗'}")
 
         logger.info("\nTest complete.")
+
+
+@pytest.mark.gpu
+@pytest.mark.slow
+class TestV1CompatiblePath:
+    """Validate that v1_compatible=True produces identical output to forward()."""
+
+    def test_v1_compatible_matches_standard(self, esm_model, test_sequences):
+        """
+        Verify v1_compatible path produces embeddings identical to standard forward().
+
+        This test validates that when v1_compatible=True is set, the packed forward
+        path delegates to standard attention (torch.bmm with FP16 accumulation) and
+        produces embeddings nearly identical to the standard forward() path.
+
+        Purpose: Ensure the v1.0 compatibility mode works as intended, providing a
+        safety valve for production workloads that require exact v1.0 reproduction.
+        """
+        model, batch_converter = esm_model
+        device = torch.device("cuda:0")
+
+        logger.info("=" * 80)
+        logger.info("V1-COMPATIBLE PATH VALIDATION TEST")
+        logger.info("=" * 80)
+        logger.info(f"Testing {len(test_sequences)} sequences")
+        logger.info(f"Model: {model}")
+
+        num_layers = len(model.model.layers)
+        cosine_sims = []
+        max_abs_diffs = []
+
+        # Test each sequence individually
+        with torch.no_grad():
+            for seq_id, seq_str in test_sequences:
+                # 1. Standard forward path (v1.0)
+                labels, strs, tokens = batch_converter([(seq_id, seq_str)])
+                tokens = tokens.to(device)
+                output_standard = model.forward(tokens, repr_layers=[num_layers])
+
+                # Extract mean-pooled embedding (skip BOS at position 0, exclude EOS)
+                seq_len = min(len(seq_str), 1022)
+                embedding_standard = output_standard['representations'][num_layers][0, 1:seq_len + 1].mean(dim=0)
+                embedding_standard = embedding_standard.float().cpu()
+
+                # 2. Packed forward path with v1_compatible=True
+                # Remove padding from tokens
+                seq_tokens = tokens[0]  # Shape: [seq_len_with_padding]
+                padding_mask = seq_tokens == 1  # padding_idx=1
+                if padding_mask.any():
+                    first_pad_idx = padding_mask.nonzero(as_tuple=True)[0][0].item()
+                    seq_tokens = seq_tokens[:first_pad_idx]
+
+                # Create packed inputs
+                input_ids = seq_tokens.to(device)
+                cu_seqlens = torch.tensor([0, len(seq_tokens)], dtype=torch.int32, device=device)
+                max_seqlen = len(seq_tokens)
+
+                # Call forward_packed with v1_compatible=True
+                output_v1_compat = model.forward_packed(
+                    input_ids=input_ids,
+                    cu_seqlens=cu_seqlens,
+                    max_seqlen=max_seqlen,
+                    repr_layers=[num_layers],
+                    v1_compatible=True  # Use standard attention
+                )
+
+                # Extract mean-pooled embedding (skip BOS at position 0, skip EOS at position len-1)
+                packed_repr = output_v1_compat['representations'][num_layers]
+                embedding_v1_compat = packed_repr[1:-1].mean(dim=0)
+                embedding_v1_compat = embedding_v1_compat.float().cpu()
+
+                # 3. Compare embeddings
+                cos_sim = F.cosine_similarity(
+                    embedding_standard.unsqueeze(0),
+                    embedding_v1_compat.unsqueeze(0),
+                    dim=1
+                ).item()
+
+                max_abs_diff = (embedding_standard - embedding_v1_compat).abs().max().item()
+
+                cosine_sims.append(cos_sim)
+                max_abs_diffs.append(max_abs_diff)
+
+                logger.info(f"{seq_id}: cosine={cos_sim:.6f}, max_abs_diff={max_abs_diff:.6f}")
+
+        # Aggregate results
+        min_cosine = min(cosine_sims)
+        mean_cosine = sum(cosine_sims) / len(cosine_sims)
+        mean_abs_diff = sum(max_abs_diffs) / len(max_abs_diffs)
+        max_abs_diff_overall = max(max_abs_diffs)
+
+        logger.info("\n" + "=" * 80)
+        logger.info("RESULTS")
+        logger.info("=" * 80)
+        logger.info(f"Cosine Similarity:")
+        logger.info(f"  Min:  {min_cosine:.6f}")
+        logger.info(f"  Mean: {mean_cosine:.6f}")
+        logger.info(f"Max Absolute Difference:")
+        logger.info(f"  Mean: {mean_abs_diff:.6f}")
+        logger.info(f"  Max:  {max_abs_diff_overall:.6f}")
+
+        # Assertions: v1_compatible path should be MUCH closer to standard forward
+        # than FlashAttention path (which was 0.999999-1.0 in Plan 01)
+        # Here we expect near-perfect match since both use standard attention
+        assert min_cosine > 0.999, (
+            f"Min cosine similarity {min_cosine:.6f} <= 0.999. "
+            f"v1_compatible path should match standard forward() very closely."
+        )
+
+        assert max_abs_diff_overall < 0.001, (
+            f"Max absolute difference {max_abs_diff_overall:.6f} >= 0.001. "
+            f"v1_compatible path should produce nearly identical embeddings to standard forward()."
+        )
+
+        logger.info("\n✓ v1_compatible path matches standard forward() (cosine > 0.999, max_abs_diff < 0.001)")
+        logger.info("  This confirms the v1.0 compatibility mode works as intended.")
+        logger.info("=" * 80)

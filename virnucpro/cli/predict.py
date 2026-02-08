@@ -59,6 +59,9 @@ logger = logging.getLogger('virnucpro.cli.predict')
 @click.option('--v1-fallback',
               is_flag=True,
               help='Use v1.0 multi-worker architecture for ESM-2 instead of v2.0 async DataLoader')
+@click.option('--v1-attention',
+              is_flag=True,
+              help='Use v1.0-compatible standard attention for ESM-2 (exact match, 2-3x slower)')
 @click.option('--gpus',
               type=str,
               default=None,
@@ -106,7 +109,7 @@ logger = logging.getLogger('virnucpro.cli.predict')
 def predict(ctx, input_file, model_type, model_path, expected_length,
             output_dir, device, batch_size, num_workers,
             keep_intermediate, resume, force, no_progress,
-            dnabert_batch_size, parallel, v1_fallback, gpus, esm_batch_size, threads, verbose,
+            dnabert_batch_size, parallel, v1_fallback, v1_attention, gpus, esm_batch_size, threads, verbose,
             skip_checkpoint_validation, force_resume, dataloader_workers, pin_memory,
             expandable_segments, cache_clear_interval, cuda_streams, persistent_models):
     """
@@ -255,10 +258,18 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
             logger.info("Architecture: v2.0 hybrid")
             logger.info("  ESM-2 embedding: v2.0 (async DataLoader + sequence packing)")
             logger.info("  DNABERT-S embedding: v1.0 (fast enough, v2.0 planned for v2.1)")
+            if v1_attention:
+                logger.info("  ESM-2 attention: v1.0-compatible standard attention (FP16 accumulation, slower)")
         elif v1_fallback:
             logger.info("Architecture: v1.0 (--v1-fallback, all stages use legacy multi-worker)")
         else:
             logger.info("Architecture: v1.0 (single-GPU or non-parallel mode)")
+
+        # Set v1.0 attention compatibility mode via environment variable
+        if v1_attention:
+            import os
+            os.environ['VIRNUCPRO_V1_ATTENTION'] = 'true'
+            logger.info("V1.0 attention compatibility: enabled (VIRNUCPRO_V1_ATTENTION=true)")
 
         # Construct RuntimeConfig when v2.0 is active
         runtime_config = None
