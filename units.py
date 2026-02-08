@@ -2,12 +2,97 @@ from Bio import SeqIO
 from tqdm import tqdm
 import os
 import logging
+import datetime
 
 import torch
 from transformers import AutoTokenizer, AutoModel
 # fair-esm removed - extract_esm() deprecated, replaced by extract_fast_esm() in Phase 2
 
 logger = logging.getLogger(__name__)
+
+# Configuration toggle for dimension validation
+VALIDATE_DIMS = os.getenv('VALIDATE_DIMS', 'true').lower() == 'true'
+
+# Dimension constants - FastESM2_650 migration
+DNA_DIM = 768       # DNABERT-S embedding dimension (unchanged)
+PROTEIN_DIM = 1280  # FastESM2_650 embedding dimension (was 2560 for ESM2 3B)
+MERGED_DIM = 2048   # DNA_DIM + PROTEIN_DIM (was 3328)
+
+# Checkpoint versioning
+CHECKPOINT_VERSION = "2.0.0"  # Breaking change from 1.x (ESM2 3B)
+
+
+class DimensionError(Exception):
+    """Raised when tensor dimensions don't match expected values."""
+
+    def __init__(self, expected_dim, actual_dim, tensor_name=None, location=None):
+        self.expected_dim = expected_dim
+        self.actual_dim = actual_dim
+        self.tensor_name = tensor_name or "unknown"
+        self.location = location or "unknown"
+
+        message = (
+            f"Dimension mismatch at {self.location}: "
+            f"Expected {self.expected_dim}-dim {self.tensor_name}, "
+            f"got {self.actual_dim}-dim"
+        )
+        super().__init__(message)
+
+
+def validate_protein_embeddings(proteins, data):
+    """
+    Validate protein embedding dimensions after extraction.
+    Optional check (respects VALIDATE_DIMS setting).
+    """
+    if not VALIDATE_DIMS:
+        return
+
+    for protein, embedding in zip(proteins, data):
+        if embedding.shape != (PROTEIN_DIM,):
+            raise DimensionError(
+                expected_dim=PROTEIN_DIM,
+                actual_dim=embedding.shape[0] if embedding.dim() == 1 else embedding.shape[-1],
+                tensor_name=f"protein_embedding[{protein}]",
+                location="extract_fast_esm() output"
+            )
+
+
+def validate_merge_inputs(nucleotide_tensor, protein_tensor, seq_id):
+    """
+    Validate merge_data() input dimensions.
+    Critical path - always runs regardless of VALIDATE_DIMS.
+    """
+    # DNA dimension check
+    if nucleotide_tensor.shape != (DNA_DIM,):
+        raise DimensionError(
+            expected_dim=DNA_DIM,
+            actual_dim=nucleotide_tensor.shape[0],
+            tensor_name=f"dna_embedding[{seq_id}]",
+            location="merge_data() input validation"
+        )
+
+    # Protein dimension check
+    if protein_tensor.shape != (PROTEIN_DIM,):
+        raise DimensionError(
+            expected_dim=PROTEIN_DIM,
+            actual_dim=protein_tensor.shape[0],
+            tensor_name=f"protein_embedding[{seq_id}]",
+            location="merge_data() input validation"
+        )
+
+
+def validate_merged_output(merged_tensor, seq_id):
+    """
+    Validate merge_data() output dimensions.
+    Critical path - always runs.
+    """
+    if merged_tensor.shape != (MERGED_DIM,):
+        raise DimensionError(
+            expected_dim=MERGED_DIM,
+            actual_dim=merged_tensor.shape[0],
+            tensor_name=f"merged_features[{seq_id}]",
+            location="merge_data() output"
+        )
 
 def split_fasta_chunk(input_file, output_file, chunk_size):
     with open(output_file, 'w') as out_handle:
@@ -262,18 +347,21 @@ def get_batch_indices(sequence_lengths, toks_per_batch=2048):
 
     return batches
 
-def validate_embeddings(proteins, data, expected_dim=1280):
+def validate_embeddings(proteins, data, expected_dim=None):
     """
     Validates embedding dimensions, NaN, and Inf values.
 
     Args:
         proteins: list of protein labels
         data: list of embedding tensors
-        expected_dim: expected embedding dimension
+        expected_dim: expected embedding dimension (defaults to PROTEIN_DIM)
 
     Returns:
         list of error strings (empty list if all valid)
     """
+    if expected_dim is None:
+        expected_dim = PROTEIN_DIM
+
     errors = []
 
     for protein, embedding in zip(proteins, data):
@@ -473,11 +561,11 @@ def split_fasta_file(input_file, output_dir, sequences_per_file):
         current_output_file.close()
 
 def merge_data(DNABERT_S_data, ESM_data, merged_file, data_type = None):
-    
+
     DNABERT_S_outfile = torch.load(DNABERT_S_data)
     ESM_outfile = torch.load(ESM_data)
 
-    
+
     nucleotide_data_dict = {}
     protein_data_dict = {}
 
@@ -487,13 +575,20 @@ def merge_data(DNABERT_S_data, ESM_data, merged_file, data_type = None):
         nucleotide_data_dict[nucleotide] = torch.tensor(data['mean_representation'])
     for protein, data in zip(ESM_outfile['proteins'], ESM_outfile['data']):
         protein_data_dict[protein] = data
-    
+
     for item in DNABERT_S_outfile['nucleotide']:
         if item in protein_data_dict and item in nucleotide_data_dict:
             protein_data = protein_data_dict[item]
             nucleotide_data = nucleotide_data_dict[item]
 
+            # Critical path validation - always runs
+            validate_merge_inputs(nucleotide_data, protein_data, item)
+
             merged_feature = torch.cat((nucleotide_data, protein_data), dim=-1)
+
+            # Validate output
+            validate_merged_output(merged_feature, item)
+
             merged_data.append(merged_feature)
         else:
             print(f"Warning: {item} not found in both datasets")
