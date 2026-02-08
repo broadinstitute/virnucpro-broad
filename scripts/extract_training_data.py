@@ -71,10 +71,14 @@ def patch_dnabert_s_triton():
 
     logger.info("Applying DNABERT-S Triton compatibility patch...")
 
-    # Try multiple cache locations (host vs Docker)
+    # Try multiple cache locations (host vs Docker, transformers_modules vs models cache)
     cache_patterns = [
+        # Transformers modules cache (older behavior)
         os.path.expanduser("~/.cache/huggingface/modules/transformers_modules/*/flash_attn_triton.py"),
         "/root/.cache/huggingface/modules/transformers_modules/*/flash_attn_triton.py",
+        # Model snapshots cache (current behavior with trust_remote_code)
+        os.path.expanduser("~/.cache/huggingface/models--zhihan1996--DNABERT-S/snapshots/*/flash_attn_triton.py"),
+        "/root/.cache/huggingface/models--zhihan1996--DNABERT-S/snapshots/*/flash_attn_triton.py",
     ]
 
     files = []
