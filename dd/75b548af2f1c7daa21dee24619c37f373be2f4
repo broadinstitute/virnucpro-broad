@@ -1,0 +1,28 @@
+.planning/phases/10.2-flashattention-scoring-divergence/10.2-02-PLAN.md
+  b7472e746e5233cc 1-207
+.planning/phases/10.2-flashattention-scoring-divergence/10.2-01-PLAN.md
+  b7472e746e5233cc 1-134
+.planning/ROADMAP.md
+  b7472e746e5233cc 240,243-244,268
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "dd75b548af2f1c7daa21dee24619c37f373be2f4",
+  "prompts": {
+    "b7472e746e5233cc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d0324b05-437c-4dd4-b1c3-4c4aa14dbfc2",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 345,
+      "total_deletions": 3,
+      "accepted_lines": 345,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/a49f887c768fb9ed79c7e2100ab89ee933225c6a243fe929faa431aace0563b9"
+    }
+  }
+}
