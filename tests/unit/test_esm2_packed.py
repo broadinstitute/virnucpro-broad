@@ -19,12 +19,16 @@ def test_forward_packed_signature():
     params = list(sig.parameters.keys())
 
     # Verify required parameters
-    assert params == ['self', 'input_ids', 'cu_seqlens', 'max_seqlen', 'repr_layers'], \
+    assert params == ['self', 'input_ids', 'cu_seqlens', 'max_seqlen', 'repr_layers', 'v1_compatible'], \
         f"Expected signature mismatch. Got: {params}"
 
     # Verify repr_layers has default value
     assert sig.parameters['repr_layers'].default is not inspect.Parameter.empty, \
         "repr_layers should have default value"
+
+    # Verify v1_compatible has default value of False
+    assert sig.parameters['v1_compatible'].default is False, \
+        "v1_compatible should default to False"
 
 
 def test_forward_packed_method_exists():

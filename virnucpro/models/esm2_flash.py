@@ -166,6 +166,7 @@ class ESM2WithFlashAttention(nn.Module):
         cu_seqlens: torch.Tensor,
         max_seqlen: int,
         repr_layers: Optional[list] = None,
+        v1_compatible: bool = False,
     ) -> dict:
         """
         Forward pass for packed sequences using FlashAttention varlen.
@@ -181,6 +182,11 @@ class ESM2WithFlashAttention(nn.Module):
                         the starting index of a sequence in input_ids
             max_seqlen: Maximum sequence length in batch
             repr_layers: Layer indices to return representations for (default: [36])
+            v1_compatible: If True, use standard attention (torch.bmm with FP16 accumulation)
+                instead of FlashAttention varlen (FP32 accumulation). Produces embeddings
+                identical to v1.0 pipeline. Sacrifices packing throughput (2-3x slower)
+                but ensures exact numerical compatibility with v1.0-trained classifier.
+                Default: False (use FlashAttention for maximum throughput).
 
         Returns:
             Dictionary with 'representations' key containing layer outputs
@@ -196,6 +202,16 @@ class ESM2WithFlashAttention(nn.Module):
         """
         if repr_layers is None:
             repr_layers = [36]  # Default to final layer for ESM-2 3B
+
+        # Check environment variable for v1.0 compatibility mode
+        import os
+        if os.environ.get('VIRNUCPRO_V1_ATTENTION', '').lower() == 'true':
+            v1_compatible = True
+
+        # If v1.0 compatibility requested, use standard attention path
+        if v1_compatible:
+            logger.info("Using v1.0-compatible standard attention path (FP16 accumulation, slower)")
+            return self._forward_packed_fallback(input_ids, cu_seqlens, max_seqlen, repr_layers)
 
         # Check FlashAttention availability - use fallback if not available
         if not FLASH_ATTN_AVAILABLE:
@@ -441,11 +457,16 @@ class ESM2WithFlashAttention(nn.Module):
         repr_layers: Optional[list] = None,
     ) -> dict:
         """
-        Fallback forward pass for packed sequences when FlashAttention unavailable.
+        Fallback forward pass for packed sequences using standard attention.
 
-        This method unpacks the 1D input_ids to 2D padded format, runs the standard
-        forward pass, and repacks the output. Less efficient than FlashAttention varlen
-        but ensures correctness on systems without flash-attn (e.g., older GPUs, CI).
+        This method serves two purposes:
+        1. Fallback when FlashAttention is unavailable (older GPUs, CI)
+        2. V1.0 compatibility mode when explicitly requested (v1_compatible=True)
+
+        Unpacks the 1D input_ids to 2D padded format, runs standard forward()
+        (torch.bmm with FP16 accumulation), and repacks the output. Less efficient
+        than FlashAttention varlen (2-3x slower) but ensures exact numerical
+        compatibility with v1.0 pipeline for production validation.
 
         Args:
             input_ids: 1D tensor of concatenated token IDs [total_tokens]
