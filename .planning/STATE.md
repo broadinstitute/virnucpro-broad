@@ -6,23 +6,23 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 
 **Core value:** Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs and automatically queue batches, reducing sample processing time from 45+ hours to under 10 hours.
 
-**Current focus:** Phase 10 - Performance Validation & Tuning (next phase)
+**Current focus:** Phase 10 - Performance Validation & Tuning
 
 ## Current Position
 
-Phase: 10.2 (FlashAttention Scoring Divergence Resolution) - INSERTED AFTER PHASE 10.1
-Plan: 2 of 2 in phase
-Status: PHASE COMPLETE
-Last activity: 2026-02-08 — Completed 10.2-02-PLAN.md
+Phase: 10 (Performance Validation & Tuning)
+Plan: 1 of 3 in phase
+Status: In progress
+Last activity: 2026-02-08 — Completed 10-01-PLAN.md
 
-Progress: [█████████░] 90/90 plans (v1.0: 34/34 complete, v2.0: 56/56)
+Progress: [█████████░] 91/93 plans (v1.0: 34/34 complete, v2.0: 57/59)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 90 (v1.0: 34, v2.0: 56)
+- Total plans completed: 91 (v1.0: 34, v2.0: 57)
 - Average duration: 3.4 min
-- Total execution time: 5.1 hours
+- Total execution time: 5.3 hours
 
 **By Phase:**
 
@@ -40,10 +40,11 @@ Progress: [█████████░] 90/90 plans (v1.0: 34/34 complete, v2
 | 9 | 7 (complete) | 40 min | 5.7 min |
 | 10.1 | 4 (complete) | 14 min | 3.5 min |
 | 10.2 | 2 (complete) | 9 min | 4.5 min |
+| 10 | 1/3 | 13 min | 13 min |
 
 **Recent Trend:**
-- Last 5 plans: ~3.5 min average
-- Trend: Phase 10.2 COMPLETE - v2.0 FlashAttention validated (100% label agreement), v1_compatible fallback available, Phase 10 benchmarks ready
+- Last 5 plans: ~5.4 min average
+- Trend: Phase 10 started - pipeline telemetry instrumented for all 9 stages
 
 *Updated after each plan completion*
 
@@ -177,6 +178,8 @@ Recent decisions affecting current work:
 - **v2.0 FlashAttention validated (10.2-01)**: Prediction-level test shows 100% label agreement between v1.0 and v2.0 attention paths - divergence is cosmetic, does not affect predictions
 - **v1_compatible parameter as safety valve (10.2-02)**: forward_packed() accepts v1_compatible parameter (default False) for exact v1.0 embedding reproduction - enables production validation and debugging without requiring v1.0 fallback
 - **VIRNUCPRO_V1_ATTENTION env var (10.2-02)**: Environment variable overrides v1_compatible parameter for runtime control without code changes - follows VIRNUCPRO_DISABLE_PACKING pattern
+- **Telemetry via logging only (10-01)**: PipelineTelemetry outputs all timing data through virnucpro logging system - no JSON files, consistent with project logging conventions
+- **Additive instrumentation (10-01)**: Pipeline telemetry wraps stages without modifying any existing logic, checkpoint handling, or error paths
 
 ### Pending Todos
 
@@ -256,7 +259,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 10.2-02-PLAN.md (v1.0-compatible attention fallback)
+Stopped at: Completed 10-01-PLAN.md (pipeline telemetry instrumentation)
 Resume file: None
 
-**Next step:** Resume Phase 10 - Performance benchmarks (v1.0 vs v2.0 comparison)
+**Next step:** Phase 10 Plan 02 - End-to-end benchmarking with per-stage timing breakdown
