@@ -300,7 +300,11 @@ def extract_dnabert_all(viral_nucleotide_files, host_nucleotide_files):
     # Load DNABERT-S model once
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
-    model = AutoModel.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
+    model = AutoModel.from_pretrained(
+        "zhihan1996/DNABERT-S",
+        trust_remote_code=True,
+        attn_implementation="eager"  # Disable flash attention for GB10 compatibility
+    )
     model.cuda()
     model.eval()
 
