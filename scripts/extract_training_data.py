@@ -299,15 +299,38 @@ def extract_dnabert_all(viral_nucleotide_files, host_nucleotide_files):
 
     # Load DNABERT-S model once
     from transformers import AutoTokenizer, AutoConfig
+    import glob
+    import re
+
     tokenizer = AutoTokenizer.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
 
-    # Load config and explicitly disable flash attention
-    config = AutoConfig.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
-    config.use_flash_attn = False  # Disable flash attention for GB10 Triton compatibility
+    # Patch DNABERT-S's flash attention code for Triton compatibility
+    # The model's flash_attn_triton.py uses deprecated trans_b parameter
+    cache_dir = os.path.expanduser("~/.cache/huggingface/modules/transformers_modules")
+    flash_attn_files = glob.glob(f"{cache_dir}/**/flash_attn_triton.py", recursive=True)
+
+    for flash_file in flash_attn_files:
+        if "DNABERT-S" in flash_file:
+            with open(flash_file, 'r') as f:
+                content = f.read()
+
+            # Replace deprecated tl.dot(..., trans_b=True) with tl.trans(k) in tl.dot(q, ...)
+            # Old: qk += tl.dot(q, k, trans_b=True)
+            # New: qk += tl.dot(q, tl.trans(k))
+            if "trans_b=True" in content:
+                logger.info(f"Patching deprecated Triton API in {flash_file}")
+                content = re.sub(
+                    r'tl\.dot\(([^,]+),\s*([^,]+),\s*trans_b=True\)',
+                    r'tl.dot(\1, tl.trans(\2))',
+                    content
+                )
+                with open(flash_file, 'w') as f:
+                    f.write(content)
+                logger.info("Flash attention Triton code patched successfully")
+                break
 
     model = AutoModel.from_pretrained(
         "zhihan1996/DNABERT-S",
-        config=config,
         trust_remote_code=True
     )
     model.cuda()
