@@ -71,11 +71,15 @@ def patch_dnabert_s_triton():
 
     logger.info("Applying DNABERT-S Triton compatibility patch...")
 
-    # Find the cached model code
-    cache_pattern = os.path.expanduser(
-        "~/.cache/huggingface/modules/transformers_modules/*/flash_attn_triton.py"
-    )
-    files = glob.glob(cache_pattern)
+    # Try multiple cache locations (host vs Docker)
+    cache_patterns = [
+        os.path.expanduser("~/.cache/huggingface/modules/transformers_modules/*/flash_attn_triton.py"),
+        "/root/.cache/huggingface/modules/transformers_modules/*/flash_attn_triton.py",
+    ]
+
+    files = []
+    for pattern in cache_patterns:
+        files.extend(glob.glob(pattern))
 
     if not files:
         # Model not downloaded yet - trigger download then patch
@@ -90,11 +94,20 @@ def patch_dnabert_s_triton():
         except Exception as e:
             raise ExtractionError(f"Failed to download DNABERT-S model: {str(e)}")
 
-        files = glob.glob(cache_pattern)
+        # Try finding files again
+        for pattern in cache_patterns:
+            files.extend(glob.glob(pattern))
 
     if not files:
+        # Debug: show what's actually in the cache
+        for base in ["~/.cache/huggingface/modules/transformers_modules", "/root/.cache/huggingface/modules/transformers_modules"]:
+            expanded = os.path.expanduser(base)
+            if os.path.exists(expanded):
+                logger.error(f"Cache directory exists: {expanded}")
+                logger.error(f"Contents: {os.listdir(expanded)}")
+
         raise ExtractionError(
-            f"Cannot find DNABERT-S flash_attn_triton.py in cache: {cache_pattern}"
+            f"Cannot find DNABERT-S flash_attn_triton.py in cache. Tried: {cache_patterns}"
         )
 
     patched_count = 0
