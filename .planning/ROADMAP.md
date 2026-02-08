@@ -183,28 +183,28 @@ Plans:
 
 ### Phase 10: Performance Validation & Tuning
 
-**Goal**: Pipeline meets <10h target with >70% GPU utilization (adjusted per user decision)
+**Goal**: Full pipeline meets time targets on real 1M subset with correctness validation against v1.0
 
-**Depends on**: Phase 9
+**Depends on**: Phase 9, Phase 10.1, Phase 10.2
 
 **Requirements**: PERF-01, PERF-02, PERF-03, PERF-04, PERF-05
 
 **Success Criteria** (what must be TRUE):
-  1. End-to-end pipeline completes one sample in <10 hours on 2 GPUs (typical hardware)
-  2. GPU utilization >70% during embedding steps (validated via nvitop)
-  3. Linear GPU scaling verified (2x GPUs = 1.9x+ speedup, 95% efficiency)
-  4. Telemetry logs tokens/sec, packing efficiency, and I/O wait time per batch
-  5. Packing efficiency >90% maintained on production workloads
-  6. v2.0 achieves >=4.0x speedup over v1.0 baseline
+  1. Full pipeline completes 1M subset in <1 hour on 1x RTX 4090
+  2. Full pipeline completes 1M subset in <30 minutes on 2x RTX 4090
+  3. GPU utilization >80% during embedding steps
+  4. Linear GPU scaling verified (2x GPUs = 1.9x+ speedup, 95% efficiency)
+  5. Telemetry logs tokens/sec, packing efficiency, I/O wait per batch, per-stage timing
+  6. Packing efficiency >90% maintained on production workloads
+  7. v2.0 achieves >=4.0x speedup over v1.0 baseline (3.5h on 2x 4090)
+  8. >=99% consensus label agreement with v1.0 predictions
 
-**Plans**: 5 plans in 3 waves
+**Plans**: 3 plans in 3 waves
 
 Plans:
-- [ ] 10-01-PLAN.md — TelemetryLogger and InferenceProgressReporter
-- [ ] 10-02-PLAN.md — Production workload benchmark with PERF requirements validation
-- [ ] 10-03-PLAN.md — v2.0 multi-GPU scaling validation (2-GPU 1.9x requirement)
-- [ ] 10-04-PLAN.md — DataLoader and packing parameter sweep
-- [ ] 10-05-PLAN.md — v1.0 vs v2.0 speedup comparison and human verification
+- [ ] 10-01-PLAN.md — Per-stage timing instrumentation and pipeline summary block
+- [ ] 10-02-PLAN.md — 1x RTX 4090 full pipeline benchmark + correctness validation
+- [ ] 10-03-PLAN.md — 2x RTX 4090 benchmark + scaling/speedup analysis + final report
 
 ### Phase 10.1: CLI Integration for v2.0 Architecture (INSERTED)
 
@@ -263,9 +263,9 @@ Phases execute in numeric order: 5 → 6 → 7 → 8 → 9 → 10 → 10.1 → 1
 | 7. Multi-GPU Coordination | v2.0 | 8/8 | Complete | 2026-02-05 |
 | 8. FP16 Precision Validation | v2.0 | 4/5 | Complete | 2026-02-05 |
 | 9. Checkpointing Integration | v2.0 | 7/7 | Complete | 2026-02-06 |
-| 10. Performance Validation & Tuning | v2.0 | 0/5 | Pending | - |
+| 10. Performance Validation & Tuning | v2.0 | 0/3 | In Progress | - |
 | 10.1. CLI Integration for v2.0 Architecture | v2.0 | 4/4 | Complete | 2026-02-06 |
 | 10.2. FlashAttention Scoring Divergence | v2.0 | 2/2 | Complete | 2026-02-08 |
 
 ---
-*Last updated: 2026-02-08 - Phase 10.2 complete (FlashAttention divergence resolved, v2.0 validated)*
+*Last updated: 2026-02-08 - Phase 10 replanned (3 plans in 3 waves)*
