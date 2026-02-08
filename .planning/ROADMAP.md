@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Environment Setup** - Establish FastESM2-compatible environment with PyTorch 2.5+ and SDPA support
 - [x] **Phase 2: Feature Extraction Pipeline** - Implement FastESM2_650 protein embedding extraction with HuggingFace API
-- [ ] **Phase 3: Dimension Compatibility** - Update downstream code for 1280-dim embeddings and 1664-dim merged features
+- [ ] **Phase 3: Dimension Compatibility** - Update downstream code for 2048-dim merged features (768 DNA + 1280 protein) with validation at merge points
 - [ ] **Phase 4: Training Data Preparation** - Re-extract all training data with FastESM2_650 embeddings
 - [ ] **Phase 5: Model Training & Validation** - Train new MLP classifier and validate performance against baseline
 
@@ -54,19 +54,21 @@ Plans:
 - [x] 02-02-PLAN.md -- End-to-end extraction test with sample sequences and human verification
 
 ### Phase 3: Dimension Compatibility
-**Goal**: All downstream code updated for 1664-dim merged features with validation at merge points
+**Goal**: All downstream code updated for 2048-dim merged features (768 DNA + 1280 protein) with validation at merge points
 **Depends on**: Phase 2
 **Requirements**: DIM-01, DIM-02, DIM-03, DIM-04, DIM-05
 **Success Criteria** (what must be TRUE):
-  1. merge_data() function produces 1664-dim concatenated features (384 DNA + 1280 protein)
+  1. merge_data() function produces 2048-dim concatenated features (768 DNA + 1280 protein)
   2. Dimension validation assertions added at merge points catch mismatches before training
-  3. MLPClassifier updated with input_dim=1664 parameter
+  3. MLPClassifier updated with input_dim=2048 parameter
   4. Checkpoint metadata includes embedding model type (fastesm650) and dimensions for version tracking
   5. Old ESM2 3B checkpoints cannot be loaded with FastESM2 pipeline (namespace protection prevents silent failures)
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 03-01: TBD
+- [ ] 03-01-PLAN.md -- Add DimensionError, constants, validation functions, and update merge_data() with dimension validation
+- [ ] 03-02-PLAN.md -- Update MLPClassifier dimensions, checkpoint metadata, prediction pipeline, and namespace protection
+- [ ] 03-03-PLAN.md -- Integration test validating all DIM-01 through DIM-05 requirements
 
 ### Phase 4: Training Data Preparation
 **Goal**: All training data re-extracted with FastESM2_650 embeddings and validated for dimension correctness
@@ -75,7 +77,7 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. All training data re-extracted using extract_fast_esm() function
   2. Extracted .pt files validated to contain exactly 1280-dim protein embeddings
-  3. Merged features validated to be 1664-dim (384 + 1280)
+  3. Merged features validated to be 2048-dim (768 + 1280)
   4. Extraction completes without errors or dimension mismatches
   5. Data ready for MLP training with correct input dimensions
 **Plans**: TBD
@@ -88,7 +90,7 @@ Plans:
 **Depends on**: Phase 4
 **Requirements**: TRAIN-02, TRAIN-03, TRAIN-04, TRAIN-05, TEST-01, TEST-02, TEST-03, TEST-04, TEST-05, TEST-06
 **Success Criteria** (what must be TRUE):
-  1. New MLP classifier trained from scratch on 1664-dim features with training metrics logged
+  1. New MLP classifier trained from scratch on 2048-dim features with training metrics logged
   2. Training pipeline validates input dimensions before starting (prevents silent failures)
   3. New model checkpoint saved with clear naming (model_fastesm650.pth)
   4. Test dataset created from random sample of existing data
@@ -105,12 +107,12 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Environment Setup | 2/2 | Complete | 2026-02-07 |
 | 2. Feature Extraction Pipeline | 2/2 | Complete | 2026-02-07 |
-| 3. Dimension Compatibility | 0/TBD | Not started | - |
+| 3. Dimension Compatibility | 0/3 | Not started | - |
 | 4. Training Data Preparation | 0/TBD | Not started | - |
 | 5. Model Training & Validation | 0/TBD | Not started | - |
