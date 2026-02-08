@@ -85,8 +85,7 @@ def patch_dnabert_s_triton():
         try:
             AutoConfig.from_pretrained(
                 "zhihan1996/DNABERT-S",
-                trust_remote_code=True,
-                revision="d2f90f5"  # Pin revision for reproducibility
+                trust_remote_code=True
             )
         except Exception as e:
             raise ExtractionError(f"Failed to download DNABERT-S model: {str(e)}")
@@ -401,13 +400,11 @@ def extract_dnabert_all(viral_nucleotide_files, host_nucleotide_files):
     logger.info("Loading DNABERT-S model...")
     tokenizer = AutoTokenizer.from_pretrained(
         "zhihan1996/DNABERT-S",
-        trust_remote_code=True,
-        revision="d2f90f5"
+        trust_remote_code=True
     )
     model = AutoModel.from_pretrained(
         "zhihan1996/DNABERT-S",
-        trust_remote_code=True,
-        revision="d2f90f5"
+        trust_remote_code=True
     )
     model.cuda()
     model.eval()
