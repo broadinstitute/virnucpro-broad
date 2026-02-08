@@ -2,6 +2,7 @@
 
 import click
 import sys
+import os
 from pathlib import Path
 import logging
 
@@ -170,6 +171,11 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
                 "--model-path is required when using --model-type custom"
             )
 
+        if v1_attention and v1_fallback:
+            raise click.BadParameter(
+                "--v1-attention and --v1-fallback cannot be used together"
+            )
+
         # Set defaults from config
         if not expected_length:
             expected_length = 300 if model_type == '300' else 500
@@ -267,7 +273,6 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
 
         # Set v1.0 attention compatibility mode via environment variable
         if v1_attention:
-            import os
             os.environ['VIRNUCPRO_V1_ATTENTION'] = 'true'
             logger.info("V1.0 attention compatibility: enabled (VIRNUCPRO_V1_ATTENTION=true)")
 

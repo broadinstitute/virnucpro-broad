@@ -25,6 +25,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 import logging
+import os
 from typing import List, Tuple, Dict, Any
 
 logger = logging.getLogger('virnucpro.tests.integration.prediction_divergence')
@@ -540,7 +541,7 @@ class TestV1CompatiblePath:
 
                 # Extract mean-pooled embedding (skip BOS at position 0, exclude EOS)
                 seq_len = min(len(seq_str), 1022)
-                embedding_standard = output_standard['representations'][num_layers][0, 1:seq_len + 1].mean(dim=0)
+                embedding_standard = output_standard['representations'][num_layers][0, 1:seq_len].mean(dim=0)
                 embedding_standard = embedding_standard.float().cpu()
 
                 # 2. Packed forward path with v1_compatible=True
@@ -616,3 +617,7 @@ class TestV1CompatiblePath:
         logger.info("\n✓ v1_compatible path matches standard forward() (cosine > 0.999, max_abs_diff < 0.001)")
         logger.info("  This confirms the v1.0 compatibility mode works as intended.")
         logger.info("=" * 80)
+
+    def teardown_method(self):
+        os.environ.pop('VIRNUCPRO_V1_ATTENTION', None)
+
