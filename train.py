@@ -10,6 +10,8 @@ import random
 from tqdm import tqdm
 from torch.optim.lr_scheduler import StepLR
 from sklearn.metrics import roc_auc_score
+from units import DimensionError, DNA_DIM, PROTEIN_DIM, MERGED_DIM, CHECKPOINT_VERSION
+import datetime
 
 random.seed(42)
 class FileBatchDataset(Dataset):
@@ -81,6 +83,7 @@ class MLPClassifier(nn.Module):
     def __init__(self, input_dim, hidden_dim, num_class):
         super(MLPClassifier, self).__init__()
 
+        self.input_dim = input_dim
         self.hidden_layer = nn.Linear(input_dim, hidden_dim)
         self.bn1 = nn.BatchNorm1d(hidden_dim)
 
@@ -94,6 +97,14 @@ class MLPClassifier(nn.Module):
         nn.init.xavier_uniform_(self.output_layer.weight)
 
     def forward(self, x):
+        # Critical path validation - always runs
+        if x.shape[-1] != self.input_dim:
+            raise DimensionError(
+                expected_dim=self.input_dim,
+                actual_dim=x.shape[-1],
+                tensor_name="model_input",
+                location="MLPClassifier.forward()"
+            )
         x = self.hidden_layer(x)
         x = self.bn1(x)
         x = F.relu(x)
@@ -101,8 +112,8 @@ class MLPClassifier(nn.Module):
         x = self.output_layer(x)
         return x
 
-       
-input_dim = 3328
+
+input_dim = MERGED_DIM
 hidden_dim = 512
 num_class = 2
 mlp_model = MLPClassifier(input_dim, hidden_dim, num_class)
@@ -141,6 +152,35 @@ class EarlyStopping:
                 return True
         return False
 
+def save_checkpoint_with_metadata(model, optimizer, epoch, best_loss, filepath='model_fastesm650.pth'):
+    """
+    Save checkpoint with metadata including version, model type, and dimensions.
+    """
+    metadata = {
+        'checkpoint_version': CHECKPOINT_VERSION,
+        'model_type': 'fastesm650',
+        'huggingface_model_id': 'Synthyra/FastESM2_650',
+        'dna_dim': DNA_DIM,
+        'protein_dim': PROTEIN_DIM,
+        'merged_dim': MERGED_DIM,
+        'input_dim': MERGED_DIM,
+        'hidden_dim': 512,
+        'num_class': 2,
+        'training_date': datetime.datetime.now().isoformat(),
+        'pytorch_version': torch.__version__
+    }
+
+    checkpoint = {
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'best_loss': best_loss,
+        'metadata': metadata
+    }
+
+    torch.save(checkpoint, filepath)
+    print(f"Checkpoint saved to {filepath} with metadata (version {CHECKPOINT_VERSION})")
+
 def train_model(model, optimizer, train_loader, test_loader, num_epochs=200, log_file='MLP_log.txt', patience=5):
     early_stopping = EarlyStopping(patience=patience)
     for epoch in range(num_epochs):
@@ -165,7 +205,7 @@ def train_model(model, optimizer, train_loader, test_loader, num_epochs=200, log
         val_loss, accuracy, precision, recall, f1, auc = test_model(model, test_loader, log_file)
 
         if early_stopping(val_loss, model):
-            torch.save(model, 'model.pth')
+            save_checkpoint_with_metadata(model, optimizer, epoch, early_stopping.best_score)
             break
 
         if scheduler:
