@@ -1,0 +1,24 @@
+tests/integration/test_prediction_divergence.py
+  98380e91183da839 1-501
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "ce6a3c94f828660f9a7ec21d6bee09f4a75b4016",
+  "prompts": {
+    "98380e91183da839": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b742b59-5abc-4043-80c3-10f15ab4de65",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 501,
+      "total_deletions": 0,
+      "accepted_lines": 501,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/5c98d0c98f32adf112a90e755f4454cf4e6713b367a6c258532dfa78b65bb216"
+    }
+  }
+}
