@@ -1,76 +1,83 @@
 # Phase 10: Performance Validation & Tuning - Context
 
-**Gathered:** 2026-02-06
+**Gathered:** 2026-02-08 (updated from 2026-02-06)
 **Status:** Ready for planning
 
 <domain>
 ## Phase Boundary
 
-End-to-end benchmarking and optimization to ensure the pipeline meets the <10 hour target with >80% GPU utilization. This phase validates that all previous work (async DataLoader, sequence packing, multi-GPU, FP16, checkpointing) delivers the 4.5× speedup target. Focus is on measurement, bottleneck identification, and parameter tuning - NOT adding new capabilities.
+End-to-end benchmarking proving the v2.0 pipeline meets performance targets on 2x RTX 4090 hardware, with telemetry logging for production monitoring. This phase validates that all previous work (async DataLoader, sequence packing, multi-GPU, FP16, checkpointing, FlashAttention) delivers the required speedup. Focus is on measurement, correctness validation, and parameter tuning - NOT adding new capabilities.
 
 </domain>
 
 <decisions>
 ## Implementation Decisions
 
-### Benchmark Scope and Methodology
-- **Primary workload:** Real production sample (actual viral nucleotide data from pipeline)
-- **Sample count:** Single full run (6M sequences) for target validation + smaller subset runs for profiling/tuning
-- **Profiling depth:** Detailed profiling including DataLoader wait times, packing efficiency, GPU utilization per batch - full diagnostics
-- **Baseline comparison:** Yes - run same workload on v1.0 to measure actual speedup achieved (validates 4.5× claim)
+### Benchmark Workload
+- **Dataset:** subset_1M sample (USA-MA-Broad_MGH-22989, ~600K sequences after translation)
+- **Full pipeline:** Run end-to-end from FASTA input to prediction_results (translate + DNABERT-S + ESM-2 + predict), not just ESM-2 isolation
+- **Attention mode:** FlashAttention (v2.0 default path) — no --v1-attention benchmarks
+- **GPU configurations:** Two benchmark runs:
+  1. 1x RTX 4090 (single-GPU baseline)
+  2. 2x RTX 4090 (multi-GPU scaling validation)
+- **GPU auto-detection:** Use whatever GPUs are available — no hardcoded GPU count
 
 ### Success Criteria and Thresholds
-- **Time target:** <10 hours is a HARD REQUIREMENT - must hit target or keep tuning
-- **GPU utilization:** 70%+ is acceptable (some overhead inevitable, strict 80% not required)
-- **Packing efficiency:** Must maintain 90%+ efficiency (core to performance, below 90% indicates problem)
-- **Multi-GPU scaling:** 2 GPUs = 1.9x+ speedup (95% efficiency) - near-perfect scaling expected
-- **All criteria must be met:** Time, GPU utilization, packing efficiency, and scaling all required for phase completion
+- **Time targets (HARD):**
+  - 1x 4090: <1 hour for the 1M subset
+  - 2x 4090: <30 minutes for the 1M subset
+- **GPU utilization:** >80% during embedding steps
+- **Packing efficiency:** >90% maintained on production workloads
+- **Multi-GPU scaling:** 2x GPUs = 1.9x+ speedup (95% efficiency)
+- **Speedup over v1.0:** >=4.0x (v1.0 baseline: ~3.5 hours on 2x 4090)
+- **Correctness:** >=99% consensus label agreement with v1.0 output, score deviance within acceptable range
+- **All criteria must be met** for phase completion
 
-### Tuning Priorities and Approach
-- **Priority order:** Biggest bottleneck first - profile-guided optimization regardless of category
-- **Tuning budget:** Moderate - keep tuning parameters until <10h target met
-- **Tuning scope:** All parameters in scope:
-  - DataLoader parameters (num_workers, prefetch_factor, batch size)
-  - Packing parameters (buffer size, token budget, thresholds)
-  - Checkpoint parameters (frequency, async write tuning)
-  - CUDA parameters (stream config, memory allocation)
-- **Code changes:** If hitting target requires code changes (not just parameters), document for follow-up Phase 10.1 - this phase is measurement and parameter tuning only
+### v1.0 Baseline Method
+- **Known timing:** v1.0 takes ~3.5 hours on 2x RTX 4090 for the 1M subset
+- **No re-run required:** Use known v1.0 timing for speedup calculation
+- **Correctness comparison:** Compare v2.0 predictions against existing v1.0 output files (using compare_virnucpro_outputs.py pattern)
 
 ### Telemetry and Observability
-- **Metrics captured:** All categories during production runs:
-  - Throughput metrics (sequences/sec, tokens/sec per batch and overall)
-  - Packing efficiency (token utilization, padding waste per batch)
-  - I/O wait times (DataLoader queue state, batch arrival timing)
-  - GPU metrics (utilization, memory usage, stream sync overhead)
-- **Reporting format:** Real-time progress bars showing throughput, GPU util, packing efficiency - live feedback during runs
-- **Data persistence:** Both detailed JSON logs (per-batch metrics) AND summary reports (aggregated statistics)
-- **Metric granularity:** Per-batch metrics in detailed JSON, windowed aggregates in summary report - both captured
+- **Metrics captured (standard set):**
+  - Throughput: tokens/sec, sequences/sec
+  - Packing efficiency: token utilization per batch
+  - I/O wait: DataLoader queue state, batch arrival timing
+  - GPU: utilization %, memory usage
+  - Per-stage timing breakdown
+- **Output:** Log file only (no separate JSON file) — integrated with virnucpro logging
+- **Live progress:** Rich progress bar (tqdm/rich) showing sequences processed, ETA, tokens/sec
+- **Final summary:** Print a clear summary block after pipeline completion with key metrics (wall time, throughput, packing efficiency, GPU util)
 
 ### Claude's Discretion
 - Specific progress bar layout and formatting
-- Exact JSON schema for telemetry logs
-- Summary report format (table vs YAML vs other)
-- Choice of visualization if plotting metrics post-run
+- Exact log format for telemetry lines
+- Summary block formatting
+- DataLoader/packing parameter sweep methodology
+- Which parameters to tune and in what order
 
 </decisions>
 
 <specifics>
 ## Specific Ideas
 
-- **Typical hardware:** 2 GPUs (not 4) - scaling tests should focus on 2-GPU efficiency
-- **Production workload:** ~6M sequences per sample - use real data for most realistic validation
-- **v1.0 comparison important:** Want to validate the 4.5× speedup claim with actual measurements
+- **Hardware:** 2x RTX 4090 (not A100) — benchmarks must work on this hardware
+- **v1.0 timing known:** 3.5 hours on 2x 4090 for 1M subset — no need to re-run
+- **Correctness already characterized:** Phase 10.2 found 99.87% consensus label agreement, 0.13% mismatches all borderline. Benchmark should re-validate this.
+- **Production data paths:**
+  - v1.0 output: `/data/Broad_Viral_Respiratory/data/in/raw/full/USA-MA-Broad_MGH-22989-2024.lNDM_F11.HLWLWDRX5.1.hs_depleted.subset_1M_merged/`
+  - v2.0 output: `/tmp/new_virnucpro_out/USA-MA-Broad_MGH-22989-2024.lNDM_F11.HLWLWDRX5.1.hs_depleted.subset_1M_merged/`
 
 </specifics>
 
 <deferred>
 ## Deferred Ideas
 
-None - discussion stayed within phase scope (measurement, profiling, parameter tuning).
+None — discussion stayed within phase scope.
 
 </deferred>
 
 ---
 
 *Phase: 10-performance-validation-tuning*
-*Context gathered: 2026-02-06*
+*Context gathered: 2026-02-08*
