@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Environment Setup** - Establish FastESM2-compatible environment with PyTorch 2.5+ and SDPA support
 - [x] **Phase 2: Feature Extraction Pipeline** - Implement FastESM2_650 protein embedding extraction with HuggingFace API
 - [x] **Phase 3: Dimension Compatibility** - Update downstream code for 2048-dim merged features (768 DNA + 1280 protein) with validation at merge points
-- [ ] **Phase 4: Training Data Preparation** - Re-extract all training data with FastESM2_650 embeddings
+- [x] **Phase 4: Training Data Preparation** - Re-extract all training data with FastESM2_650 embeddings
 - [ ] **Phase 5: Model Training & Validation** - Train new MLP classifier and validate performance against baseline
 
 ## Phase Details
@@ -83,8 +83,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 04-01-PLAN.md -- Create extract_training_data.py with auto-discovery, resume, progress, and validation
-- [ ] 04-02-PLAN.md -- Run extraction in Docker and verify results (checkpoint:human-verify)
+- [x] 04-01-PLAN.md -- Create extract_training_data.py with auto-discovery, resume, progress, and validation
+- [x] 04-02-PLAN.md -- Run extraction in Docker and verify results (checkpoint:human-verify)
 
 ### Phase 5: Model Training & Validation
 **Goal**: New MLP classifier trained on FastESM2 embeddings with performance validated against ESM2 3B baseline
@@ -115,5 +115,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 1. Environment Setup | 2/2 | Complete | 2026-02-07 |
 | 2. Feature Extraction Pipeline | 2/2 | Complete | 2026-02-07 |
 | 3. Dimension Compatibility | 3/3 | Complete | 2026-02-08 |
-| 4. Training Data Preparation | 0/TBD | Not started | - |
+| 4. Training Data Preparation | 2/2 | Complete | 2026-02-09 |
 | 5. Model Training & Validation | 0/TBD | Not started | - |

@@ -34,7 +34,7 @@ Requirements for initial FastESM2_650 migration experiment. Each maps to roadmap
 
 ### Model Training
 
-- [ ] **TRAIN-01**: All training data re-extracted with FastESM2_650 embeddings
+- [x] **TRAIN-01**: All training data re-extracted with FastESM2_650 embeddings
 - [ ] **TRAIN-02**: New MLP classifier trained from scratch on 1664-dim features
 - [ ] **TRAIN-03**: Training pipeline validates input dimensions before starting
 - [ ] **TRAIN-04**: New model checkpoint saved with clear naming (e.g., model_fastesm650.pth)
@@ -104,7 +104,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DIM-03 | Phase 3 | Complete |
 | DIM-04 | Phase 3 | Complete |
 | DIM-05 | Phase 3 | Complete |
-| TRAIN-01 | Phase 4 | Pending |
+| TRAIN-01 | Phase 4 | Complete |
 | TRAIN-02 | Phase 5 | Pending |
 | TRAIN-03 | Phase 5 | Pending |
 | TRAIN-04 | Phase 5 | Pending |
