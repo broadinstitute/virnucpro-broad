@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-06)
 
 **Core value:** Fast, accurate viral sequence classification on large datasets - enabling researchers to process thousands of sequences in minutes instead of hours while maintaining reliable classification performance.
-**Current focus:** Phase 4 - Training Data Preparation
+**Current focus:** Phase 5 - Model Training and Validation
 
 ## Current Position
 
-Phase: 4 of 5 (Training Data Preparation)
-Plan: 2 of 2 in current phase
-Status: Phase complete
-Last activity: 2026-02-09 - Completed 04-02-PLAN.md (Run extraction and verify results)
+Phase: 5 of 5 (Model Training and Validation)
+Plan: 1 of 3 in current phase
+Status: In progress
+Last activity: 2026-02-09 - Completed 05-01-PLAN.md (Test Set Splitting and Training Script)
 
-Progress: [████████░░] ~80%
+Progress: [█████████░] ~90%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 9
-- Average duration: 6.4 min
-- Total execution time: 0.96 hours
+- Total plans completed: 10
+- Average duration: 6.0 min
+- Total execution time: 1.01 hours
 
 **By Phase:**
 
@@ -31,10 +31,11 @@ Progress: [████████░░] ~80%
 | 02 - Feature Extraction Pipeline | 2 | 9 min | 4.5 min |
 | 03 - Dimension Compatibility | 3 | 8 min | 2.7 min |
 | 04 - Training Data Preparation | 2 | 21 min | 10.5 min |
+| 05 - Model Training and Validation | 1 | 3 min | 3.0 min |
 
 **Recent Trend:**
-- Last 5 plans: 03-02 (3m), 03-03 (3m), 04-01 (2m), 04-02 (19m)
-- Trend: Phase 4 execution plan longer due to full dataset extraction (2M sequences)
+- Last 5 plans: 03-03 (3m), 04-01 (2m), 04-02 (19m), 05-01 (3m)
+- Trend: Script creation plans consistently fast (2-3 min)
 
 *Updated after each plan completion*
 
@@ -101,6 +102,14 @@ Recent decisions affecting current work:
 - Docker cache path search strategy — Check multiple locations (transformers_modules, model snapshots, host vs container paths) to handle environment variability
 - Full dataset extraction completed — 201 merged files (105 viral + 96 host), 2M sequences, all validated for correct dimensions
 
+**From 05-01 execution:**
+- Test set: 10% stratified split with fixed seed 42 — Reproducible train/test separation using sklearn.model_selection.train_test_split
+- Symlinks instead of file copies in test_set directory — Saves disk space while maintaining clean separation
+- Validation split: 10% of training data for early stopping — Nested split (train/test for evaluation, train→train/val for early stopping)
+- Early stopping patience: 7 epochs — Higher than original 5 to allow exploration with new FastESM2 embeddings
+- Metadata-driven training: script reads train/test file lists from JSON — Guarantees exact reproducibility regardless of directory state
+- Duplicated classes from train.py to avoid module-level execution — FileBatchDataset, MLPClassifier, EarlyStopping, save_checkpoint_with_metadata copied to train_fastesm.py
+
 ### Pending Todos
 
 None yet.
@@ -117,10 +126,10 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-09 04:19 UTC
-Stopped at: Completed 04-02-PLAN.md (Run extraction and verify results)
+Last session: 2026-02-09 14:57 UTC
+Stopped at: Completed 05-01-PLAN.md (Test Set Splitting and Training Script)
 Resume file: None
-Next action: Plan Phase 5 - Model Training and Evaluation
+Next action: Continue Phase 5 - Execute training and evaluation plans
 
 Config:
 {
