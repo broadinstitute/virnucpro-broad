@@ -1,0 +1,32 @@
+.planning/STATE.md
+  cb6df5598d55af8d 5,7,9,13-15,17,284,287
+.planning/milestones/v2.0-ROADMAP.md
+  cb6df5598d55af8d 1-192
+.planning/PROJECT.md
+  cb6df5598d55af8d 5,9,11,13,15-21,23-28,30-33,59,63,65-74,76,82-83,89,96-98,100-104,109-111,118-121,123-129,132
+.planning/MILESTONES.md
+  cb6df5598d55af8d 3-31
+.planning/milestones/v2.0-REQUIREMENTS.md
+  cb6df5598d55af8d 1-140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "36813fda3de2f417b339d9b69abb86f47b683077",
+  "prompts": {
+    "cb6df5598d55af8d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d04946f9-082d-4155-80bc-ea2cb7b3f20f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 433,
+      "total_deletions": 64,
+      "accepted_lines": 433,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/20b4092b6943bd46edd3140c3ed3417e9593a209d834371f141acc4626f28c63"
+    }
+  }
+}
