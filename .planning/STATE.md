@@ -12,8 +12,8 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 
 Phase: 10 (Performance Validation & Tuning)
 Plan: 2 of 3 in phase
-Status: In progress (checkpoint pending user review)
-Last activity: 2026-02-08 — Completed 10-02-PLAN.md
+Status: In progress
+Last activity: 2026-02-09 — Completed 10-02-PLAN.md (checkpoint approved)
 
 Progress: [█████████░] 92/93 plans (v1.0: 34/34 complete, v2.0: 58/59)
 
@@ -181,7 +181,9 @@ Recent decisions affecting current work:
 - **Telemetry via logging only (10-01)**: PipelineTelemetry outputs all timing data through virnucpro logging system - no JSON files, consistent with project logging conventions
 - **Additive instrumentation (10-01)**: Pipeline telemetry wraps stages without modifying any existing logic, checkpoint handling, or error paths
 - **v1.0 reference model mismatch (10-02)**: v1.0 reference used 300_model.pth, v2.0 defaults to 500_model.pth - model mismatch not embedding divergence. Per-frame agreement 99.82% with same model
-- **GPU utilization 60-80% (10-02)**: GPU utilization during ESM-2 below 80% target despite full DataLoader queue - batch size variance and measurement granularity contribute to dips
+- **GPU utilization 60-80% (10-02)**: GPU utilization during ESM-2 below 80% target despite full DataLoader queue - batch size variance and measurement granularity contribute to dips. Assessment deferred to 2x GPU benchmark (10-03)
+- **Use -m 300 for v1.0 comparison (10-02)**: Plan 03 must use `-m 300` explicitly to match v1.0 reference model (300_model.pth) for fair correctness comparison
+- **Parameter sweep deferred (10-02)**: Token budget and prefetch_factor tuning deferred - proceed directly to 2x GPU benchmark first
 
 ### Pending Todos
 
@@ -260,16 +262,18 @@ None yet.
 
 **Phase 10 (Performance Validation & Tuning):** In progress
 - ✅ Pipeline telemetry instrumented (10-01)
-- ✅ 1x RTX 4090 benchmark: 53m 20s (under 1-hour target) (10-02)
+- ✅ 1x RTX 4090 benchmark: 53m 20s (under 1-hour target) (10-02) -- checkpoint approved
   - v2.0 correctness validated: 99.82% per-frame agreement with same model
   - ESM-2: 321 seq/s, 16.5K tokens/s, ~358% packing efficiency
   - Model mismatch discovered: v1.0 used 300_model, v2.0 defaults to 500_model
-- Pending: 2x RTX 4090 benchmark (10-03)
+  - GPU utilization 60-80% -- assessment deferred to 2x GPU run
+  - User decision: Proceed to 2x GPU, use `-m 300`, parameter sweep deferred
+- Pending: 2x RTX 4090 benchmark (10-03) -- use `-m 300` explicitly
 
 ## Session Continuity
 
-Last session: 2026-02-08
-Stopped at: Completed 10-02-PLAN.md (checkpoint pending user review)
+Last session: 2026-02-09
+Stopped at: Completed 10-02-PLAN.md (checkpoint approved)
 Resume file: None
 
-**Next step:** Phase 10 Plan 03 - 2x RTX 4090 multi-GPU scaling benchmark
+**Next step:** Phase 10 Plan 03 - 2x RTX 4090 multi-GPU scaling benchmark (use `-m 300` for v1.0 comparison)
