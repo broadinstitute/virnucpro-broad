@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 ## Current Position
 
 Phase: 4 of 5 (Training Data Preparation)
-Plan: 1 of 1 in current phase
-Status: In progress
-Last activity: 2026-02-08 - Completed 04-01-PLAN.md (Training data extraction script)
+Plan: 2 of 2 in current phase
+Status: Phase complete
+Last activity: 2026-02-09 - Completed 04-02-PLAN.md (Run extraction and verify results)
 
-Progress: [███████░░░] ~70%
+Progress: [████████░░] ~80%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 8
-- Average duration: 5.3 min
-- Total execution time: 0.70 hours
+- Total plans completed: 9
+- Average duration: 6.4 min
+- Total execution time: 0.96 hours
 
 **By Phase:**
 
@@ -30,11 +30,11 @@ Progress: [███████░░░] ~70%
 | 01 - Environment Setup | 2 | 25 min | 12.5 min |
 | 02 - Feature Extraction Pipeline | 2 | 9 min | 4.5 min |
 | 03 - Dimension Compatibility | 3 | 8 min | 2.7 min |
-| 04 - Training Data Preparation | 1 | 2 min | 2.0 min |
+| 04 - Training Data Preparation | 2 | 21 min | 10.5 min |
 
 **Recent Trend:**
-- Last 5 plans: 03-01 (2.5m), 03-02 (3m), 03-03 (3m), 04-01 (2m)
-- Trend: Maintaining efficient execution pace
+- Last 5 plans: 03-02 (3m), 03-03 (3m), 04-01 (2m), 04-02 (19m)
+- Trend: Phase 4 execution plan longer due to full dataset extraction (2M sequences)
 
 *Updated after each plan completion*
 
@@ -94,13 +94,20 @@ Recent decisions affecting current work:
 - Post-extraction validation suite — Validates all outputs for dimension correctness (1280-dim proteins, 2048-dim merged) before declaring success
 - Single-command extraction workflow — Replaces manual multi-step process from features_extract.py with automated script
 
+**From 04-02 execution:**
+- Runtime Triton patch for DNABERT-S PyTorch 2.9 compatibility — trans_b parameter deprecated in newer Triton; patch replaces tl.dot(q, k, trans_b=True) with tl.dot(q, tl.trans(k))
+- Preprocessing step required before extraction — make_train_dataset_300.py splits raw FASTA files into processable chunks
+- Generic pattern matching for Triton patch — Regex-based approach handles all trans_b variations uniformly instead of targeted replacements
+- Docker cache path search strategy — Check multiple locations (transformers_modules, model snapshots, host vs container paths) to handle environment variability
+- Full dataset extraction completed — 201 merged files (105 viral + 96 host), 2M sequences, all validated for correct dimensions
+
 ### Pending Todos
 
 None yet.
 
 ### Blockers/Concerns
 
-**Critical dimension change:** ✓ RESOLVED - Phase 3 complete. 1280-dim embeddings validated (02-02). Combined feature vector: 768 (DNABERT-S) + 1280 (FastESM2_650) = 2048 dimensions. Dimension validation infrastructure (03-01). MLPClassifier updated with checkpoint versioning (03-02). Integration test validates all requirements (03-03). Model retraining required in Phase 4.
+**Critical dimension change:** ✓ RESOLVED - Phase 3 complete, Phase 4 complete. 1280-dim embeddings validated (02-02). Combined feature vector: 768 (DNABERT-S) + 1280 (FastESM2_650) = 2048 dimensions. Dimension validation infrastructure (03-01). MLPClassifier updated with checkpoint versioning (03-02). Integration test validates all requirements (03-03). Training data extracted and validated (04-02): 201 files, 2M sequences, all dimensions correct.
 
 **PyTorch 2.5+ requirement:** ✓ RESOLVED - PyTorch 2.9.0a0 with CUDA 13.0 support via NVIDIA container (01-02, upgraded from 2.5.1 for GB10 support)
 
@@ -110,10 +117,10 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-08 06:16 UTC
-Stopped at: Completed 04-01-PLAN.md (Training data extraction script)
+Last session: 2026-02-09 04:19 UTC
+Stopped at: Completed 04-02-PLAN.md (Run extraction and verify results)
 Resume file: None
-Next action: Execute training data extraction or plan Phase 5 - Model Training and Evaluation
+Next action: Plan Phase 5 - Model Training and Evaluation
 
 Config:
 {
