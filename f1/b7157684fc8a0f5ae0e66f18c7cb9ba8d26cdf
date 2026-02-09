@@ -1,0 +1,26 @@
+.planning/phases/10-performance-validation-&-tuning**---end-to-end-benchmarking/10-03-SUMMARY.md
+  cb6df5598d55af8d 1-225
+.planning/STATE.md
+  cb6df5598d55af8d 14-16,18,23-25,43,46-47,187-190,267,272-280,285,288
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "f1b7157684fc8a0f5ae0e66f18c7cb9ba8d26cdf",
+  "prompts": {
+    "cb6df5598d55af8d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d04946f9-082d-4155-80bc-ea2cb7b3f20f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 252,
+      "total_deletions": 18,
+      "accepted_lines": 251,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/e6054f00974773eff4d7aff2c70b7717a9573ef4f06846d4422f0789744f5714"
+    }
+  }
+}
