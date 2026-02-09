@@ -638,7 +638,7 @@ def merge_all(viral_files, sampled_host_files):
         # Get folders from first viral file
         sample_nucleotide = viral_files['nucleotide'][0]
         viral_nucleotide_folder = os.path.dirname(sample_nucleotide)
-        viral_protein_folder = viral_nucleotide_folder.replace('identified_nucleotide/', 'identified_protein/')
+        viral_protein_folder = viral_nucleotide_folder.replace('identified_nucleotide', 'identified_protein')
 
         dnabert_files = [
             f for f in os.listdir(viral_nucleotide_folder)
