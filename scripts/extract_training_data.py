@@ -125,8 +125,8 @@ def patch_dnabert_s_triton():
         with open(filepath, 'r') as f:
             content = f.read()
 
-        # Check if already patched
-        if 'tl.trans(k)' in content and 'trans_b=True' not in content:
+        # Check if already fully patched
+        if 'trans_b=True' not in content:
             logger.info(f"Already patched: {filepath}")
             patched_count += 1
             continue
@@ -134,14 +134,15 @@ def patch_dnabert_s_triton():
         # Apply patch: replace trans_b parameter with tl.trans()
         original = content
 
-        # Pattern 1: tl.dot(q, k, trans_b=True) - lowercase variables
+        # Generic pattern: tl.dot(X, Y, trans_b=True) -> tl.dot(X, tl.trans(Y))
+        # Matches any variable names, not just q/k
         content = re.sub(
-            r'tl\.dot\(([qQ]),\s*([kK]),\s*trans_b=True\)',
+            r'tl\.dot\(([^,]+),\s*([^,]+),\s*trans_b=True\)',
             r'tl.dot(\1, tl.trans(\2))',
             content
         )
 
-        if content != original:
+        if content != original and 'trans_b=True' not in content:
             try:
                 with open(filepath, 'w') as f:
                     f.write(content)
