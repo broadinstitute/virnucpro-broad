@@ -100,10 +100,12 @@ Plans:
   7. Speed benchmark shows 2x improvement on real-world sample sequences
   8. Manual testing workflow validated end-to-end (user can run predictions)
   9. Both ESM2 3B and FastESM2_650 pipelines available for side-by-side comparison
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 05-01: TBD
+- [ ] 05-01-PLAN.md -- Create test set splitting script and enhanced training script for FastESM2 MLP
+- [ ] 05-02-PLAN.md -- Create evaluation/comparison and speed benchmarking scripts
+- [ ] 05-03-PLAN.md -- Execute full pipeline in Docker and verify results (checkpoint:human-verify)
 
 ## Progress
 
@@ -116,4 +118,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 2. Feature Extraction Pipeline | 2/2 | Complete | 2026-02-07 |
 | 3. Dimension Compatibility | 3/3 | Complete | 2026-02-08 |
 | 4. Training Data Preparation | 2/2 | Complete | 2026-02-09 |
-| 5. Model Training & Validation | 0/TBD | Not started | - |
+| 5. Model Training & Validation | 0/3 | Not started | - |
