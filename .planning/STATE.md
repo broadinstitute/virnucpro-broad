@@ -2,20 +2,19 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-02)
+See: .planning/PROJECT.md (updated 2026-02-09)
 
-**Core value:** Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs and automatically queue batches, reducing sample processing time from 45+ hours to under 10 hours.
+**Core value:** Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs with async DataLoader and sequence packing, delivering 6.2x speedup over v1.0 baseline.
 
-**Current focus:** Phase 10 - Performance Validation & Tuning
+**Current focus:** Planning next milestone
 
 ## Current Position
 
-Phase: 10 (Performance Validation & Tuning)
-Plan: 3 of 3 in phase (complete)
-Status: Phase complete — all plans executed, checkpoint approved
-Last activity: 2026-02-09 — Phase 10 approved, v2.0 milestone complete
+Milestone: v2.0 complete (shipped 2026-02-09)
+Status: Between milestones — ready for /gsd:new-milestone
+Last activity: 2026-02-09 — v2.0 milestone archived
 
-Progress: [██████████] 93/93 plans (v1.0: 34/34 complete, v2.0: 59/59)
+Progress: [██████████] 93/93 plans across v1.0 + v2.0
 
 ## Performance Metrics
 
@@ -282,7 +281,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Phase 10 approved, v2.0 milestone complete
+Stopped at: v2.0 milestone archived
 Resume file: None
 
-**Next step:** Run /gsd:complete-milestone to archive v2.0 milestone.
+**Next step:** Run /gsd:new-milestone to start next milestone (v2.1 or v3.0).
