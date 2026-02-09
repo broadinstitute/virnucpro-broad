@@ -11,18 +11,18 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 10 (Performance Validation & Tuning)
-Plan: 2 of 3 in phase
-Status: In progress
-Last activity: 2026-02-09 — Completed 10-02-PLAN.md (checkpoint approved)
+Plan: 3 of 3 in phase (checkpoint pending)
+Status: Phase complete (pending checkpoint approval)
+Last activity: 2026-02-09 — Completed 10-03-PLAN.md (checkpoint pending)
 
-Progress: [█████████░] 92/93 plans (v1.0: 34/34 complete, v2.0: 58/59)
+Progress: [██████████] 93/93 plans (v1.0: 34/34 complete, v2.0: 59/59)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 92 (v1.0: 34, v2.0: 58)
-- Average duration: 4.1 min
-- Total execution time: 6.3 hours
+- Total plans completed: 93 (v1.0: 34, v2.0: 59)
+- Average duration: 4.2 min
+- Total execution time: 7.1 hours
 
 **By Phase:**
 
@@ -40,11 +40,11 @@ Progress: [█████████░] 92/93 plans (v1.0: 34/34 complete, v2
 | 9 | 7 (complete) | 40 min | 5.7 min |
 | 10.1 | 4 (complete) | 14 min | 3.5 min |
 | 10.2 | 2 (complete) | 9 min | 4.5 min |
-| 10 | 2/3 | 75 min | 37.5 min |
+| 10 | 3/3 (complete) | 120 min | 40 min |
 
 **Recent Trend:**
-- Last 5 plans: ~17 min average (includes 62-min benchmark run)
-- Trend: Phase 10 benchmarks running - 1x GPU benchmark complete (53m pipeline, 62m total plan)
+- Last 5 plans: ~25 min average (includes 62-min and 45-min benchmark runs)
+- Trend: Phase 10 benchmarks complete - all 93 plans executed
 
 *Updated after each plan completion*
 
@@ -184,6 +184,10 @@ Recent decisions affecting current work:
 - **GPU utilization 60-80% (10-02)**: GPU utilization during ESM-2 below 80% target despite full DataLoader queue - batch size variance and measurement granularity contribute to dips. Assessment deferred to 2x GPU benchmark (10-03)
 - **Use -m 300 for v1.0 comparison (10-02)**: Plan 03 must use `-m 300` explicitly to match v1.0 reference model (300_model.pth) for fair correctness comparison
 - **Parameter sweep deferred (10-02)**: Token budget and prefetch_factor tuning deferred - proceed directly to 2x GPU benchmark first
+- **ESM-2 scales near-ideally (10-03)**: 1.87x with 2 GPUs (93.7% efficiency) - async DataLoader + stride-based sharding delivers excellent multi-GPU scaling
+- **DNABERT-S v1.0 bin-packing bottleneck (10-03)**: v1.0 architecture runs 4% slower with 2 GPUs vs 1 GPU due to coordination overhead - v2.1 should port DNABERT-S to v2.0
+- **GPU utilization metric misleading (10-03)**: 65-80% utilization with queue always full and stable throughput - nvidia-smi doesn't accurately reflect compute saturation for variable-batch workloads
+- **v2.0 achieves primary project goal (10-03)**: 6.2x speedup over v1.0 (3.5h to 34min) - exceeds 4.0x target significantly
 
 ### Pending Todos
 
@@ -260,20 +264,25 @@ None yet.
   - Provides safety valve for exact v1.0 embedding reproduction when needed
 - **Blocker removed:** v2.0 FlashAttention validated, v1_compatible fallback available, Phase 10 benchmarks ready
 
-**Phase 10 (Performance Validation & Tuning):** In progress
+**Phase 10 (Performance Validation & Tuning):** ✅ COMPLETE (pending checkpoint approval)
 - ✅ Pipeline telemetry instrumented (10-01)
-- ✅ 1x RTX 4090 benchmark: 53m 20s (under 1-hour target) (10-02) -- checkpoint approved
+- ✅ 1x RTX 4090 benchmark: 53m 20s (under 1-hour target) (10-02)
   - v2.0 correctness validated: 99.82% per-frame agreement with same model
   - ESM-2: 321 seq/s, 16.5K tokens/s, ~358% packing efficiency
-  - Model mismatch discovered: v1.0 used 300_model, v2.0 defaults to 500_model
-  - GPU utilization 60-80% -- assessment deferred to 2x GPU run
-  - User decision: Proceed to 2x GPU, use `-m 300`, parameter sweep deferred
-- Pending: 2x RTX 4090 benchmark (10-03) -- use `-m 300` explicitly
+- ✅ 2x RTX 4090 benchmark: 33m 44s (10-03) -- checkpoint pending
+  - v2.0 achieves 6.2x speedup over v1.0 (target: >=4.0x) -- PASS
+  - ESM-2 scaling: 1.87x (93.7% efficiency) -- near-ideal
+  - DNABERT-S scaling: 0.96x -- v1.0 bin-packing architecture bottleneck
+  - Overall scaling: 1.58x (target: >=1.9x) -- limited by DNABERT-S
+  - Correctness: 99.87% consensus agreement with v1.0 -- PASS
+  - **4 of 7 criteria met**: timing (1x), speedup (v1.0), correctness, packing
+  - **3 criteria not met**: timing (2x), overall scaling, GPU utilization
+  - Primary project goal achieved: 3.5h to 34min = 6.2x speedup
 
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 10-02-PLAN.md (checkpoint approved)
+Stopped at: Completed 10-03-PLAN.md (checkpoint pending approval)
 Resume file: None
 
-**Next step:** Phase 10 Plan 03 - 2x RTX 4090 multi-GPU scaling benchmark (use `-m 300` for v1.0 comparison)
+**Next step:** Await checkpoint approval for 10-03 Phase 10 validation report. If approved, Phase 10 and project are complete.
