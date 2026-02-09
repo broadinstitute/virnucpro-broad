@@ -6,6 +6,10 @@ This script trains the MLP classifier using only the training split (excluding t
 with early stopping, detailed per-epoch logging, and checkpoint saving with metadata.
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import argparse
 import random
 import time

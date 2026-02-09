@@ -9,11 +9,13 @@ against ESM2 3B baseline with strict threshold validation (<5% accuracy drop).
 Generates both terminal summary and markdown validation report.
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import argparse
 import json
 import os
-import sys
-from pathlib import Path
 from datetime import datetime
 
 import torch
