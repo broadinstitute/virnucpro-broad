@@ -8,6 +8,18 @@ A performance optimization project for VirNucPro, a viral nucleotide prediction 
 
 Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs with async DataLoader and sequence packing, delivering 6.2x speedup over v1.0 baseline.
 
+## Current Milestone: v2.5 Model Optimizations Round 2
+
+**Goal:** Port DNABERT-S to v2.0 async architecture, add configurable ESM-2 model selection, and apply targeted performance optimizations from the v2.0 review.
+
+**Target features:**
+- DNABERT-S v2.0 port (async DataLoader + sequence packing, eliminate 0.96x scaling bottleneck)
+- Configurable ESM-2 model selection (650M, 3B, custom model paths via CLI)
+- Quick wins from optimization review (env var caching, deque, combined .to()/half())
+- torch.compile integration (optional model compilation)
+- Vectorized operations (position IDs, embedding extraction)
+- Code quality cleanup (env var centralization, duplicate code extraction, oversized function refactoring)
+
 ## Current State
 
 **Shipped:** v2.0 Async Architecture + Sequence Packing (2026-02-09)
@@ -129,4 +141,4 @@ Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs wit
 | FlashAttention divergence is cosmetic | 100% label agreement despite minor embedding differences | ✓ Good - v1_compatible fallback available |
 
 ---
-*Last updated: 2026-02-09 after v2.0 milestone*
+*Last updated: 2026-02-09 after v2.5 milestone started*

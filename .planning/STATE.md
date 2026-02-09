@@ -6,15 +6,16 @@ See: .planning/PROJECT.md (updated 2026-02-09)
 
 **Core value:** Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs with async DataLoader and sequence packing, delivering 6.2x speedup over v1.0 baseline.
 
-**Current focus:** Planning next milestone
+**Current focus:** Defining requirements for v2.5
 
 ## Current Position
 
-Milestone: v2.0 complete (shipped 2026-02-09)
-Status: Between milestones — ready for /gsd:new-milestone
-Last activity: 2026-02-09 — v2.0 milestone archived
+Milestone: v2.5 Model Optimizations Round 2
+Phase: Not started (defining requirements)
+Status: Defining requirements
+Last activity: 2026-02-09 — Milestone v2.5 started
 
-Progress: [██████████] 93/93 plans across v1.0 + v2.0
+Progress: [░░░░░░░░░░] 0/? plans (v2.5)
 
 ## Performance Metrics
 
@@ -281,7 +282,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: v2.0 milestone archived
+Stopped at: Defining v2.5 requirements
 Resume file: None
 
-**Next step:** Run /gsd:new-milestone to start next milestone (v2.1 or v3.0).
+**Next step:** Define requirements, then create roadmap.
