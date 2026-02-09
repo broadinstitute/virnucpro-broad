@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 ## Current Position
 
 Phase: 5 of 5 (Model Training and Validation)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: In progress
-Last activity: 2026-02-09 - Completed 05-01-PLAN.md (Test Set Splitting and Training Script)
+Last activity: 2026-02-09 - Completed 05-02-PLAN.md (Evaluation and Speed Benchmarking)
 
-Progress: [█████████░] ~90%
+Progress: [█████████░] ~93%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 10
-- Average duration: 6.0 min
-- Total execution time: 1.01 hours
+- Total plans completed: 11
+- Average duration: 5.8 min
+- Total execution time: 1.07 hours
 
 **By Phase:**
 
@@ -31,11 +31,11 @@ Progress: [█████████░] ~90%
 | 02 - Feature Extraction Pipeline | 2 | 9 min | 4.5 min |
 | 03 - Dimension Compatibility | 3 | 8 min | 2.7 min |
 | 04 - Training Data Preparation | 2 | 21 min | 10.5 min |
-| 05 - Model Training and Validation | 1 | 3 min | 3.0 min |
+| 05 - Model Training and Validation | 2 | 7 min | 3.5 min |
 
 **Recent Trend:**
-- Last 5 plans: 03-03 (3m), 04-01 (2m), 04-02 (19m), 05-01 (3m)
-- Trend: Script creation plans consistently fast (2-3 min)
+- Last 5 plans: 04-01 (2m), 04-02 (19m), 05-01 (3m), 05-02 (4m)
+- Trend: Script creation plans consistently fast (3-4 min)
 
 *Updated after each plan completion*
 
@@ -110,6 +110,12 @@ Recent decisions affecting current work:
 - Metadata-driven training: script reads train/test file lists from JSON — Guarantees exact reproducibility regardless of directory state
 - Duplicated classes from train.py to avoid module-level execution — FileBatchDataset, MLPClassifier, EarlyStopping, save_checkpoint_with_metadata copied to train_fastesm.py
 
+**From 05-02 execution:**
+- Optional baseline comparison via --baseline-metrics flag — Old ESM2 3B features overwritten in Phase 4, direct re-evaluation impossible; supports JSON file or inline JSON for historical metrics
+- Benchmark scope: embedding extraction only — Speedup claim specifically about protein embedding (FastESM2 vs ESM2), not full pipeline
+- GPU synchronization protocol: torch.cuda.synchronize() + time.perf_counter() with warmup — Essential for accurate GPU timing; async operations invalidate CPU timers without synchronization
+- Dual execution paths: Path A (with baseline) for comparison + threshold validation, Path B (standalone) for FastESM2-only metrics — Flexible evaluation works with or without historical data
+
 ### Pending Todos
 
 None yet.
@@ -126,10 +132,10 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-09 14:57 UTC
-Stopped at: Completed 05-01-PLAN.md (Test Set Splitting and Training Script)
+Last session: 2026-02-09 14:58 UTC
+Stopped at: Completed 05-02-PLAN.md (Evaluation and Speed Benchmarking)
 Resume file: None
-Next action: Continue Phase 5 - Execute training and evaluation plans
+Next action: Continue Phase 5 - Execute remaining plans (05-03 if exists) or conclude project
 
 Config:
 {
