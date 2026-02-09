@@ -11,18 +11,18 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ## Current Position
 
 Phase: 10 (Performance Validation & Tuning)
-Plan: 1 of 3 in phase
-Status: In progress
-Last activity: 2026-02-08 — Completed 10-01-PLAN.md
+Plan: 2 of 3 in phase
+Status: In progress (checkpoint pending user review)
+Last activity: 2026-02-08 — Completed 10-02-PLAN.md
 
-Progress: [█████████░] 91/93 plans (v1.0: 34/34 complete, v2.0: 57/59)
+Progress: [█████████░] 92/93 plans (v1.0: 34/34 complete, v2.0: 58/59)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 91 (v1.0: 34, v2.0: 57)
-- Average duration: 3.4 min
-- Total execution time: 5.3 hours
+- Total plans completed: 92 (v1.0: 34, v2.0: 58)
+- Average duration: 4.1 min
+- Total execution time: 6.3 hours
 
 **By Phase:**
 
@@ -40,11 +40,11 @@ Progress: [█████████░] 91/93 plans (v1.0: 34/34 complete, v2
 | 9 | 7 (complete) | 40 min | 5.7 min |
 | 10.1 | 4 (complete) | 14 min | 3.5 min |
 | 10.2 | 2 (complete) | 9 min | 4.5 min |
-| 10 | 1/3 | 13 min | 13 min |
+| 10 | 2/3 | 75 min | 37.5 min |
 
 **Recent Trend:**
-- Last 5 plans: ~5.4 min average
-- Trend: Phase 10 started - pipeline telemetry instrumented for all 9 stages
+- Last 5 plans: ~17 min average (includes 62-min benchmark run)
+- Trend: Phase 10 benchmarks running - 1x GPU benchmark complete (53m pipeline, 62m total plan)
 
 *Updated after each plan completion*
 
@@ -180,6 +180,8 @@ Recent decisions affecting current work:
 - **VIRNUCPRO_V1_ATTENTION env var (10.2-02)**: Environment variable overrides v1_compatible parameter for runtime control without code changes - follows VIRNUCPRO_DISABLE_PACKING pattern
 - **Telemetry via logging only (10-01)**: PipelineTelemetry outputs all timing data through virnucpro logging system - no JSON files, consistent with project logging conventions
 - **Additive instrumentation (10-01)**: Pipeline telemetry wraps stages without modifying any existing logic, checkpoint handling, or error paths
+- **v1.0 reference model mismatch (10-02)**: v1.0 reference used 300_model.pth, v2.0 defaults to 500_model.pth - model mismatch not embedding divergence. Per-frame agreement 99.82% with same model
+- **GPU utilization 60-80% (10-02)**: GPU utilization during ESM-2 below 80% target despite full DataLoader queue - batch size variance and measurement granularity contribute to dips
 
 ### Pending Todos
 
@@ -256,10 +258,18 @@ None yet.
   - Provides safety valve for exact v1.0 embedding reproduction when needed
 - **Blocker removed:** v2.0 FlashAttention validated, v1_compatible fallback available, Phase 10 benchmarks ready
 
+**Phase 10 (Performance Validation & Tuning):** In progress
+- ✅ Pipeline telemetry instrumented (10-01)
+- ✅ 1x RTX 4090 benchmark: 53m 20s (under 1-hour target) (10-02)
+  - v2.0 correctness validated: 99.82% per-frame agreement with same model
+  - ESM-2: 321 seq/s, 16.5K tokens/s, ~358% packing efficiency
+  - Model mismatch discovered: v1.0 used 300_model, v2.0 defaults to 500_model
+- Pending: 2x RTX 4090 benchmark (10-03)
+
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 10-01-PLAN.md (pipeline telemetry instrumentation)
+Stopped at: Completed 10-02-PLAN.md (checkpoint pending user review)
 Resume file: None
 
-**Next step:** Phase 10 Plan 02 - End-to-end benchmarking with per-stage timing breakdown
+**Next step:** Phase 10 Plan 03 - 2x RTX 4090 multi-GPU scaling benchmark
