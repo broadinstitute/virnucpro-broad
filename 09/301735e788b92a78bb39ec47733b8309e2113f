@@ -1,0 +1,34 @@
+.planning/ROADMAP.md
+  ba5bc070883412ed 90-94,224
+.planning/phases/11-code-quality-foundations/11-05-PLAN.md
+  ba5bc070883412ed 1-197
+.planning/phases/11-code-quality-foundations/11-01-PLAN.md
+  ba5bc070883412ed 1-118
+.planning/phases/11-code-quality-foundations/11-04-PLAN.md
+  ba5bc070883412ed 1-170
+.planning/phases/11-code-quality-foundations/11-03-PLAN.md
+  ba5bc070883412ed 1-182
+.planning/phases/11-code-quality-foundations/11-02-PLAN.md
+  ba5bc070883412ed 1-141
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "09301735e788b92a78bb39ec47733b8309e2113f",
+  "prompts": {
+    "ba5bc070883412ed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b11aa06e-0f44-4ed5-8075-10c1a1d7fe95",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 815,
+      "total_deletions": 7,
+      "accepted_lines": 814,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/8702a07334e41ff336cb5e569d44dd26e5c1e3fe6d16fa15b0e78bd469c413f2"
+    }
+  }
+}
