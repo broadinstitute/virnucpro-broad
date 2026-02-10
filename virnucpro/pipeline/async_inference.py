@@ -786,6 +786,49 @@ class AsyncInferenceRunner:
             result = self.process_batch(batch)
             yield result
 
+    def _finalize(self, processing_start_time: float) -> None:
+        """Finalize inference run: checkpoint, shutdown, sync, and log stats.
+
+        Called in finally block to ensure cleanup happens even on error.
+
+        Args:
+            processing_start_time: Time when processing started (from perf_counter)
+        """
+        # Final checkpoint (after loop completion)
+        if self._checkpointing_enabled and self._ckpt_embeddings:
+            try:
+                self._write_checkpoint("final")
+            except Exception as e:
+                logger.error(f"Final checkpoint write failed: {e}. Data may be lost.")
+
+        # Wait for all async checkpoint writes to complete
+        if self._checkpointing_enabled and self.writer is not None:
+            try:
+                self.writer.wait_all(timeout=300)
+                self.writer.shutdown()
+                logger.info("All checkpoint writes completed")
+            except Exception as e:
+                logger.error(f"Error during checkpoint writer shutdown: {e}")
+
+        # Synchronize streams before stopping
+        self.stream_processor.synchronize()
+        stats = self.monitor.stop_monitoring()
+
+        throughput = self.monitor.get_throughput()
+        dl_stats = self.monitor.get_dataloader_statistics()
+
+        logger.info(
+            f"Async inference complete: {self._total_sequences} sequences, "
+            f"{throughput.get('sequences_per_sec', 0):.1f} seq/s, "
+            f"{throughput.get('tokens_per_sec', 0):.0f} tokens/s"
+        )
+        if dl_stats:
+            logger.info(
+                f"DataLoader stats: avg_wait={dl_stats.get('avg_wait_time_ms', 0):.1f}ms, "
+                f"max_wait={dl_stats.get('max_wait_time_ms', 0):.1f}ms, "
+                f"packing_efficiency={dl_stats.get('packing_efficiency', 0):.2%}"
+            )
+
     def run(
         self,
         dataloader: DataLoader,
@@ -926,41 +969,8 @@ class AsyncInferenceRunner:
             # Flush collator buffer (handles last <buffer_size sequences)
             yield from self._flush_collator(collator)
 
-            # Final checkpoint (after loop completion)
-            if self._checkpointing_enabled and self._ckpt_embeddings:
-                try:
-                    self._write_checkpoint("final")
-                except Exception as e:
-                    logger.error(f"Final checkpoint write failed: {e}. Data may be lost.")
-
         finally:
-            # Wait for all async checkpoint writes to complete
-            if self._checkpointing_enabled and self.writer is not None:
-                try:
-                    self.writer.wait_all(timeout=300)
-                    self.writer.shutdown()
-                    logger.info("All checkpoint writes completed")
-                except Exception as e:
-                    logger.error(f"Error during checkpoint writer shutdown: {e}")
-
-            # Synchronize streams before stopping
-            self.stream_processor.synchronize()
-            stats = self.monitor.stop_monitoring()
-
-            throughput = self.monitor.get_throughput()
-            dl_stats = self.monitor.get_dataloader_statistics()
-
-            logger.info(
-                f"Async inference complete: {self._total_sequences} sequences, "
-                f"{throughput.get('sequences_per_sec', 0):.1f} seq/s, "
-                f"{throughput.get('tokens_per_sec', 0):.0f} tokens/s"
-            )
-            if dl_stats:
-                logger.info(
-                    f"DataLoader stats: avg_wait={dl_stats.get('avg_wait_time_ms', 0):.1f}ms, "
-                    f"max_wait={dl_stats.get('max_wait_time_ms', 0):.1f}ms, "
-                    f"packing_efficiency={dl_stats.get('packing_efficiency', 0):.2%}"
-                )
+            self._finalize(processing_start_time)
 
     def _write_checkpoint(self, reason: str) -> None:
         """Write checkpoint to disk asynchronously.
