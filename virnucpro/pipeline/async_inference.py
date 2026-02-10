@@ -530,6 +530,59 @@ class AsyncInferenceRunner:
         # Check if collator is stateful (has buffer-based packing)
         return getattr(collator, 'enable_packing', False)
 
+    def _resume_checkpoints(self, force_restart: bool) -> Optional[InferenceResult]:
+        """Resume from checkpoints if available.
+
+        Args:
+            force_restart: If True, ignore checkpoints and start fresh
+
+        Returns:
+            InferenceResult with resumed data if available, None otherwise
+
+        Side effects:
+            Updates self._ckpt_embeddings, self._ckpt_ids, self._ckpt_batch_idx
+        """
+        if not self._checkpointing_enabled or force_restart:
+            return None
+
+        resumed_ids, resumed_embs, resume_batch_idx, corrupted_sequence_ids = resume_from_checkpoints(
+            self.checkpoint_dir,
+            self.rank,
+            force_restart,
+            self.manifest
+        )
+
+        # Handle corrupted sequences
+        if corrupted_sequence_ids:
+            logger.warning(
+                f"Checkpoint corruption detected: {len(corrupted_sequence_ids)} sequences need reprocessing "
+                f"(from batches after corruption point)\n"
+            )
+            logger.debug(f"Corrupted sequence IDs (first 10): {corrupted_sequence_ids[:10]}")
+
+        # Yield resumed data if available
+        if resumed_ids:
+            # Store resumed data in accumulators
+            self._ckpt_embeddings = [resumed_embs]
+            self._ckpt_ids = resumed_ids
+            self._ckpt_batch_idx = resume_batch_idx
+
+            logger.info(
+                f"Resuming shard {self.rank}: {len(resumed_ids)} sequences "
+                f"from {resume_batch_idx} checkpoints"
+            )
+
+            # Yield resumed data as InferenceResult (batch_idx=-1 as marker)
+            model_dtype = next(self.model.parameters()).dtype
+            resumed_embeddings_tensor = torch.from_numpy(resumed_embs).to(model_dtype)
+            return InferenceResult(
+                sequence_ids=resumed_ids,
+                embeddings=resumed_embeddings_tensor,
+                batch_idx=-1
+            )
+
+        return None
+
     def run(
         self,
         dataloader: DataLoader,
@@ -575,42 +628,9 @@ class AsyncInferenceRunner:
             )
 
         # Resume from checkpoints if available
-        if self._checkpointing_enabled and not force_restart:
-            resumed_ids, resumed_embs, resume_batch_idx, corrupted_sequence_ids = resume_from_checkpoints(
-                self.checkpoint_dir,
-                self.rank,
-                force_restart,
-                self.manifest
-            )
-
-            # Handle corrupted sequences
-            if corrupted_sequence_ids:
-                logger.warning(
-                    f"Checkpoint corruption detected: {len(corrupted_sequence_ids)} sequences need reprocessing "
-                    f"(from batches after corruption point)\n"
-                )
-                logger.debug(f"Corrupted sequence IDs (first 10): {corrupted_sequence_ids[:10]}")
-
-            # Yield resumed data if available
-            if resumed_ids:
-                # Store resumed data in accumulators
-                self._ckpt_embeddings = [resumed_embs]
-                self._ckpt_ids = resumed_ids
-                self._ckpt_batch_idx = resume_batch_idx
-
-                logger.info(
-                    f"Resuming shard {self.rank}: {len(resumed_ids)} sequences "
-                    f"from {resume_batch_idx} checkpoints"
-                )
-
-                # Yield resumed data as InferenceResult (batch_idx=-1 as marker)
-                model_dtype = next(self.model.parameters()).dtype
-                resumed_embeddings_tensor = torch.from_numpy(resumed_embs).to(model_dtype)
-                yield InferenceResult(
-                    sequence_ids=resumed_ids,
-                    embeddings=resumed_embeddings_tensor,
-                    batch_idx=-1
-                )
+        resumed_result = self._resume_checkpoints(force_restart)
+        if resumed_result:
+            yield resumed_result
 
         # FIX 1: Track inter-batch arrival time (not processing time)
         last_batch_time = time.perf_counter()
