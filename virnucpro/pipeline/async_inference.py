@@ -721,6 +721,41 @@ class AsyncInferenceRunner:
             f"ETA: {eta_str}"
         )
 
+    def _accumulate_and_checkpoint(self, result: InferenceResult) -> None:
+        """Accumulate embeddings and write checkpoint if triggered.
+
+        Args:
+            result: InferenceResult to accumulate
+        """
+        if not self._checkpointing_enabled:
+            return
+
+        # Accumulate embeddings (transfer to CPU before storing)
+        self._ckpt_embeddings.append(result.embeddings.cpu().numpy())
+        self._ckpt_ids.extend(result.sequence_ids)
+
+        # Capture packing stats if available
+        if hasattr(result, 'packing_stats') and result.packing_stats:
+            self._last_packing_stats = result.packing_stats
+        elif hasattr(result, 'metadata') and isinstance(result.metadata, dict):
+            # Extract from metadata if result carries it there
+            packing_info = {}
+            for key in ('packing_efficiency', 'token_count', 'buffer_size', 'token_budget'):
+                if key in result.metadata:
+                    packing_info[key] = result.metadata[key]
+            if packing_info:
+                self._last_packing_stats = packing_info
+
+        # Check trigger
+        should_checkpoint, reason = self.trigger.should_checkpoint(len(result.sequence_ids))
+        if should_checkpoint and reason:
+            try:
+                self._write_checkpoint(reason)
+            except Exception as e:
+                logger.error(f"Checkpoint write failed: {e}. Continuing without checkpoint.")
+            else:
+                self.trigger.reset()
+
     def run(
         self,
         dataloader: DataLoader,
@@ -849,37 +884,12 @@ class AsyncInferenceRunner:
 
                 # Progress callback
                 if progress_callback:
-                    progress_callback(batch_idx, num_sequences)
+                    progress_callback(batch_idx, len(result.sequence_ids))
 
                 yield result
 
                 # Checkpoint trigger (after yield, at batch boundaries)
-                if self._checkpointing_enabled:
-                    # Accumulate embeddings (transfer to CPU before storing)
-                    self._ckpt_embeddings.append(result.embeddings.cpu().numpy())
-                    self._ckpt_ids.extend(result.sequence_ids)
-
-                    # Capture packing stats if available
-                    if hasattr(result, 'packing_stats') and result.packing_stats:
-                        self._last_packing_stats = result.packing_stats
-                    elif hasattr(result, 'metadata') and isinstance(result.metadata, dict):
-                        # Extract from metadata if result carries it there
-                        packing_info = {}
-                        for key in ('packing_efficiency', 'token_count', 'buffer_size', 'token_budget'):
-                            if key in result.metadata:
-                                packing_info[key] = result.metadata[key]
-                        if packing_info:
-                            self._last_packing_stats = packing_info
-
-                    # Check trigger
-                    should_checkpoint, reason = self.trigger.should_checkpoint(len(result.sequence_ids))
-                    if should_checkpoint and reason:
-                        try:
-                            self._write_checkpoint(reason)
-                        except Exception as e:
-                            logger.error(f"Checkpoint write failed: {e}. Continuing without checkpoint.")
-                        else:
-                            self.trigger.reset()
+                self._accumulate_and_checkpoint(result)
 
                 batch_idx += 1
 
