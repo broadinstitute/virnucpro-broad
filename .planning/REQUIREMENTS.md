@@ -65,11 +65,11 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| QUAL-01 | Phase 11 | Pending |
-| QUAL-02 | Phase 11 | Pending |
-| QUAL-03 | Phase 11 | Pending |
-| QUAL-04 | Phase 11 | Pending |
-| QUAL-05 | Phase 11 | Pending |
+| QUAL-01 | Phase 11 | Complete |
+| QUAL-02 | Phase 11 | Complete |
+| QUAL-03 | Phase 11 | Complete |
+| QUAL-04 | Phase 11 | Complete |
+| QUAL-05 | Phase 11 | Complete |
 | ESM-10 | Phase 12 | Pending |
 | ESM-11 | Phase 12 | Pending |
 | ESM-12 | Phase 12 | Pending |

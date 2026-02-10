@@ -6,15 +6,15 @@ See: .planning/PROJECT.md (updated 2026-02-09)
 
 **Core value:** Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs with async DataLoader and sequence packing, delivering 6.2x speedup over v1.0 baseline.
 
-**Current focus:** Phase 11 - Code Quality Foundations (v2.5 roadmap created)
+**Current focus:** Phase 11 complete - Code Quality Foundations established
 
 ## Current Position
 
 Milestone: v2.5 Model Optimizations Round 2
-Phase: 11 of 17 (Code Quality Foundations)
-Plan: 5 of 5 in current phase
-Status: In progress
-Last activity: 2026-02-10 — Completed 11-05-PLAN.md (EnvConfig centralization)
+Phase: 12 of 17 (ESM-2 Model Flexibility)
+Plan: 0 of 4 in current phase
+Status: Ready to plan
+Last activity: 2026-02-10 — Phase 11 verified and complete
 
 Progress: [███░░░░░░░] 5/31 plans (v2.5)
 
