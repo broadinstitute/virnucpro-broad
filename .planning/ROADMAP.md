@@ -84,14 +84,14 @@
   3. gpu_worker() refactored into component helper functions
   4. Queue operations use collections.deque for O(1) popleft performance
   5. All existing tests pass with refactored code (1:1 behavior equivalence)
-**Plans**: 4-5 plans
+**Plans**: 5 plans
 
 Plans:
-- [ ] 11-01: Create core/env_config.py with cached environment variable access
-- [ ] 11-02: Extract duplicate validation/queue code to shared utilities
-- [ ] 11-03: Refactor async_inference.run() into focused methods
-- [ ] 11-04: Refactor gpu_worker() into component functions
-- [ ] 11-05: Replace list-based queues with collections.deque
+- [ ] 11-01-PLAN.md -- Create EnvConfig dataclass with cached factory (TDD)
+- [ ] 11-02-PLAN.md -- Extract duplicate CUDA validation + deque migration
+- [ ] 11-03-PLAN.md -- Refactor async_inference.run() into focused methods
+- [ ] 11-04-PLAN.md -- Refactor gpu_worker() into component functions
+- [ ] 11-05-PLAN.md -- Migrate remaining env var sites + full test validation
 
 #### Phase 12: ESM-2 Model Flexibility
 **Goal**: Configurable ESM-2 model selection (650M, 3B, custom) with auto-detected configuration
@@ -221,7 +221,7 @@ Phases execute in numeric order: 11 → 12 → 13 → 14 → 15 → 16 → 17
 | 10.1. CLI Integration | v2.0 | 4/4 | Complete | 2026-02-09 |
 | 10.2. FlashAttention Divergence | v2.0 | 2/2 | Complete | 2026-02-09 |
 | 10. Performance Validation | v2.0 | 3/3 | Complete | 2026-02-09 |
-| 11. Code Quality Foundations | v2.5 | 0/5 | Not started | - |
+| 11. Code Quality Foundations | v2.5 | 0/5 | Planned | - |
 | 12. ESM-2 Model Flexibility | v2.5 | 0/4 | Not started | - |
 | 13. Performance Quick Wins | v2.5 | 0/3 | Not started | - |
 | 14. Vectorized Operations | v2.5 | 0/3 | Not started | - |
