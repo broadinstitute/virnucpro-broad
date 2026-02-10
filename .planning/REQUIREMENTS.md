@@ -65,34 +65,34 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DNABERT-11 | TBD | Pending |
-| DNABERT-12 | TBD | Pending |
-| DNABERT-13 | TBD | Pending |
-| DNABERT-14 | TBD | Pending |
-| DNABERT-15 | TBD | Pending |
-| DNABERT-16 | TBD | Pending |
-| ESM-10 | TBD | Pending |
-| ESM-11 | TBD | Pending |
-| ESM-12 | TBD | Pending |
-| ESM-13 | TBD | Pending |
-| ESM-14 | TBD | Pending |
-| PERF-10 | TBD | Pending |
-| PERF-11 | TBD | Pending |
-| PERF-12 | TBD | Pending |
-| PERF-13 | TBD | Pending |
-| PERF-14 | TBD | Pending |
-| PERF-15 | TBD | Pending |
-| QUAL-01 | TBD | Pending |
-| QUAL-02 | TBD | Pending |
-| QUAL-03 | TBD | Pending |
-| QUAL-04 | TBD | Pending |
-| QUAL-05 | TBD | Pending |
+| QUAL-01 | Phase 11 | Pending |
+| QUAL-02 | Phase 11 | Pending |
+| QUAL-03 | Phase 11 | Pending |
+| QUAL-04 | Phase 11 | Pending |
+| QUAL-05 | Phase 11 | Pending |
+| ESM-10 | Phase 12 | Pending |
+| ESM-11 | Phase 12 | Pending |
+| ESM-12 | Phase 12 | Pending |
+| ESM-13 | Phase 12 | Pending |
+| ESM-14 | Phase 12 | Pending |
+| PERF-10 | Phase 13 | Pending |
+| PERF-11 | Phase 13 | Pending |
+| PERF-12 | Phase 13 | Pending |
+| PERF-14 | Phase 14 | Pending |
+| PERF-15 | Phase 14 | Pending |
+| PERF-13 | Phase 15 | Pending |
+| DNABERT-11 | Phase 16 | Pending |
+| DNABERT-12 | Phase 16 | Pending |
+| DNABERT-13 | Phase 16 | Pending |
+| DNABERT-14 | Phase 16 | Pending |
+| DNABERT-15 | Phase 16 | Pending |
+| DNABERT-16 | Phase 16 | Pending |
 
 **Coverage:**
 - v2.5 requirements: 22 total
-- Mapped to phases: 0
-- Unmapped: 22 (awaiting roadmap)
+- Mapped to phases: 22/22 (100%)
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-09*
-*Last updated: 2026-02-09 after initial definition*
+*Last updated: 2026-02-09 after v2.5 roadmap creation*

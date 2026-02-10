@@ -6,21 +6,22 @@ See: .planning/PROJECT.md (updated 2026-02-09)
 
 **Core value:** Embedding steps (DNABERT-S and ESM-2) efficiently utilize all available GPUs with async DataLoader and sequence packing, delivering 6.2x speedup over v1.0 baseline.
 
-**Current focus:** Defining requirements for v2.5
+**Current focus:** Phase 11 - Code Quality Foundations (v2.5 roadmap created)
 
 ## Current Position
 
 Milestone: v2.5 Model Optimizations Round 2
-Phase: Not started (defining requirements)
-Status: Defining requirements
-Last activity: 2026-02-09 — Milestone v2.5 started
+Phase: 11 of 17 (Code Quality Foundations)
+Plan: 0 of 5 in current phase
+Status: Ready to plan
+Last activity: 2026-02-09 — v2.5 roadmap created
 
-Progress: [░░░░░░░░░░] 0/? plans (v2.5)
+Progress: [░░░░░░░░░░] 0/31 plans (v2.5)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 93 (v1.0: 34, v2.0: 59)
+- Total plans completed: 93 (v1.0: 34, v2.0: 59, v2.5: 0)
 - Average duration: 4.2 min
 - Total execution time: 7.1 hours
 
@@ -195,94 +196,17 @@ None yet.
 
 ### Blockers/Concerns
 
-**Phase 5 (Async DataLoader Foundation):** ✅ COMPLETE
-- All CUDA safety mechanisms implemented and tested
-- Integration tests validated on GPU server (7/9 pass, 2 expected Phase 6 failures)
-- Phase 6 gate working correctly (packed format raises NotImplementedError)
-
-**Phase 6 (Sequence Packing Integration):** ✅ COMPLETE
-- ✅ GreedyPacker with FFD algorithm and dynamic token budget (06-01)
-- ✅ Position ID generator with boundary reset validation (06-02)
-- ✅ FlashAttention wrapper with dtype/format validation (06-02)
-- ✅ ESM-2 forward_packed method with layer-level FlashAttention (06-03)
-- ✅ Packed inference path wired in AsyncInferenceRunner (06-04)
-- ✅ Embedding extraction for 1D packed format (06-04)
-- ✅ Packing correctness validated via cosine similarity tests (06-05)
-- ✅ Packing efficiency monitoring with two-tier thresholds (06-06)
-- ✅ End-to-end integration tests and human verification (06-07)
-- ✅ Buffer-based packing integration in VarlenCollator (06-08)
-
-**Phase 7 (Multi-GPU Coordination):** ✅ COMPLETE
-- ✅ SequenceIndex with stride distribution and caching (07-01)
-- ✅ IndexBasedDataset for byte-offset sequence reading (07-02)
-- ✅ Per-worker logging infrastructure (07-03)
-- ✅ GPUProcessCoordinator for worker lifecycle (07-04)
-- ✅ HDF5 shard aggregation with validation (07-05)
-- ✅ GPU worker function integration (07-06)
-- ✅ run_multi_gpu_inference orchestration entry point (07-07)
-- ✅ Integration tests + stream sync race condition fix (07-08)
-
-**Phase 8 (FP16 Precision Validation):** ✅ COMPLETE
-- ✅ FP16 precision validation (mean abs diff <0.01, cosine >0.99)
-- ✅ Numerical stability checks (NaN/Inf detection with minimal sync overhead)
-- ✅ FP16 performance benchmarks (454K seq/hour, 6.06GB memory)
-- Note: LayerNorm may have limited dynamic range in FP16 - selective FP32 for specific layers if needed
-
-**Phase 9 (Checkpointing Integration):** ✅ COMPLETE
-- ✅ Checkpoint foundation (CheckpointTrigger, AsyncCheckpointWriter, validation, resume) - 09-01
-- ✅ CheckpointManifest for multi-GPU coordination - 09-02
-- ✅ AsyncInferenceRunner checkpoint integration (batch boundaries, resume, metadata) - 09-03
-- ✅ GPU worker integration (resume, index filtering, SIGTERM, error tiers) - 09-04
-- ✅ Coordinator integration (differentiated retry policies, async monitoring, elastic redistribution) - 09-05
-- ✅ Unit tests for checkpoint components - 09-06
-- ✅ Integration tests and kill+resume validation - 09-07
-- Bug fix: Checkpoint path double-nesting resolved
-- Validation: SIGKILL test with 2000 sequences (200 checkpointed, 1800 resumed, zero duplicates)
-
-**Phase 10.1 (CLI Integration for v2.0 Architecture):** ✅ COMPLETE
-- ✅ Core functionality (Plans 01-02)
-  - CLI routes ESM-2 to v2.0, DNABERT-S stays v1.0 (hybrid architecture)
-  - All 8/8 CLI integration tests passing
-  - Benchmark CLI exposes Phase 10 suites
-  - Migration guide documents hybrid approach
-- ✅ Gap closure complete (Plans 03-04)
-  - Gap 1-3: Telemetry timing for v1.0/v2.0, HDF5→PT regression test (Plan 03)
-  - Gap 4-6: v1.0 checkpoint detection, world_size validation, temp file cleanup (Plan 04)
-  - All 13 CLI tests passing (8 routing + 1 regression + 4 validation)
-- **Ready for Phase 10:** All gaps closed, benchmarks can proceed
-
-**Phase 10.2 (FlashAttention Scoring Divergence Resolution):** ✅ COMPLETE
-- ✅ Prediction-level divergence test (Plan 01)
-  - Test compares v1.0 (standard attention) vs v2.0 (FlashAttention) on 18 sequences
-  - Results: 100% label agreement, cosine similarity 0.999999-1.0
-  - Recommendation: ACCEPT v2.0 - divergence is cosmetic
-  - All bug fixes validated (EOS exclusion, token dropout, GELU, RoPE precision)
-- ✅ V1.0-compatible attention fallback (Plan 02)
-  - Added v1_compatible parameter to forward_packed() (default False)
-  - CLI --v1-attention flag sets VIRNUCPRO_V1_ATTENTION env var
-  - Integration test validates v1_compatible path matches standard forward() (cosine 0.999999-1.0, max abs diff 0.0)
-  - Provides safety valve for exact v1.0 embedding reproduction when needed
-- **Blocker removed:** v2.0 FlashAttention validated, v1_compatible fallback available, Phase 10 benchmarks ready
-
-**Phase 10 (Performance Validation & Tuning):** ✅ COMPLETE (approved 2026-02-09)
-- ✅ Pipeline telemetry instrumented (10-01)
-- ✅ 1x RTX 4090 benchmark: 53m 20s (under 1-hour target) (10-02)
-  - v2.0 correctness validated: 99.82% per-frame agreement with same model
-  - ESM-2: 321 seq/s, 16.5K tokens/s, ~358% packing efficiency
-- ✅ 2x RTX 4090 benchmark: 33m 44s (10-03)
-  - v2.0 achieves 6.2x speedup over v1.0 (target: >=4.0x) -- PASS
-  - ESM-2 scaling: 1.87x (93.7% efficiency) -- near-ideal
-  - DNABERT-S scaling: 0.96x -- v1.0 bin-packing architecture bottleneck
-  - Overall scaling: 1.58x (target: >=1.9x) -- limited by DNABERT-S
-  - Correctness: 99.87% consensus agreement with v1.0 -- PASS
-  - **4 of 7 criteria met**: timing (1x), speedup (v1.0), correctness, packing
-  - **3 criteria not met**: timing (2x), overall scaling, GPU utilization — all trace to DNABERT-S v1.0
-  - Primary project goal achieved: 3.5h to 34min = 6.2x speedup
+**v2.5 roadmap:**
+- 7 phases defined (11-17)
+- 31 total plans estimated
+- All 22 requirements mapped to phases
+- Research flags: Phase 16 (DNABERT-S v2.0 port) needs deeper research during planning
+- Phase 15 (torch.compile) may require experimentation for FlashAttention interaction
 
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Defining v2.5 requirements
+Stopped at: v2.5 roadmap created, ready to plan Phase 11
 Resume file: None
 
-**Next step:** Define requirements, then create roadmap.
+**Next step:** `/gsd:plan-phase 11`
