@@ -29,9 +29,10 @@ import signal
 import logging
 import hashlib
 from pathlib import Path
-from typing import Dict, Any, Set
+from typing import Dict, Any, Set, Optional, Tuple, List
 from multiprocessing import Queue
 
+import numpy as np
 import torch
 import h5py
 
@@ -43,6 +44,407 @@ from virnucpro.data.dataloader_utils import create_async_dataloader
 from virnucpro.pipeline.async_inference import AsyncInferenceRunner
 from virnucpro.utils.precision import should_use_fp16
 from virnucpro.pipeline.checkpoint_writer import resume_from_checkpoints
+
+
+def _extract_checkpoint_config(model_config: Dict, output_dir: Path) -> Dict:
+    """Extract checkpoint configuration from model config.
+
+    Args:
+        model_config: Model configuration dictionary
+        output_dir: Output directory for checkpoints
+
+    Returns:
+        Dict with checkpoint configuration fields:
+        - enable_checkpointing: bool
+        - force_restart: bool
+        - checkpoint_base_dir: Path
+        - checkpoint_seq_threshold: int
+        - checkpoint_time_threshold: float
+        - checkpoint_dir: Optional[Path]
+    """
+    enable_checkpointing = model_config.get('enable_checkpointing', True)
+    force_restart = model_config.get('force_restart', False)
+    checkpoint_base_dir = Path(model_config.get('checkpoint_dir', output_dir / "checkpoints"))
+    checkpoint_seq_threshold = model_config.get('checkpoint_seq_threshold', 10000)
+    checkpoint_time_threshold = model_config.get('checkpoint_time_threshold', 300.0)
+
+    # Pass base checkpoint directory to AsyncInferenceRunner
+    # AsyncInferenceRunner will create shard-specific subdirectory (shard_{rank})
+    checkpoint_dir = checkpoint_base_dir if enable_checkpointing else None
+
+    return {
+        'enable_checkpointing': enable_checkpointing,
+        'force_restart': force_restart,
+        'checkpoint_base_dir': checkpoint_base_dir,
+        'checkpoint_seq_threshold': checkpoint_seq_threshold,
+        'checkpoint_time_threshold': checkpoint_time_threshold,
+        'checkpoint_dir': checkpoint_dir,
+    }
+
+
+def _load_checkpoint_manifest(
+    rank: int,
+    enable_checkpointing: bool,
+    checkpoint_base_dir: Path,
+    logger
+) -> Optional['CheckpointManifest']:
+    """Load checkpoint manifest if available.
+
+    Args:
+        rank: Worker rank
+        enable_checkpointing: Whether checkpointing is enabled
+        checkpoint_base_dir: Base checkpoint directory
+        logger: Logger instance
+
+    Returns:
+        CheckpointManifest instance or None if not available
+    """
+    manifest = None
+    if enable_checkpointing:
+        from virnucpro.pipeline.checkpoint_manifest import CheckpointManifest
+        manifest_path = checkpoint_base_dir / "manifest.json"
+        if manifest_path.exists():
+            manifest = CheckpointManifest(manifest_path)
+            logger.info(f"Rank {rank}: Using checkpoint manifest at {manifest_path}")
+        else:
+            # First run or fresh start - coordinator will create manifest
+            logger.info(f"Rank {rank}: No existing manifest, checkpointing without manifest coordination")
+    return manifest
+
+
+def _resume_from_existing_checkpoints(
+    rank: int,
+    checkpoint_dir: Optional[Path],
+    force_restart: bool,
+    logger
+) -> Tuple[Set[str], Optional[np.ndarray]]:
+    """Resume from existing checkpoints if available.
+
+    Args:
+        rank: Worker rank
+        checkpoint_dir: Checkpoint directory (None if checkpointing disabled)
+        force_restart: If True, ignore existing checkpoints
+        logger: Logger instance
+
+    Returns:
+        Tuple of (resumed_ids set, resumed_embeddings array or None)
+
+    Raises:
+        RuntimeError: If v1.0 checkpoint format detected (incompatible with v2.0)
+    """
+    resumed_ids: Set[str] = set()
+    resumed_embeddings = None
+
+    if checkpoint_dir and not force_restart:
+        # Check for v1.0 checkpoint format (Gap 4: format compatibility)
+        checkpoint_base = Path(checkpoint_dir)
+        if checkpoint_base.exists():
+            # v1.0 uses .done markers; v2.0 uses shard_*/batch_*.pt
+            done_files = list(checkpoint_base.glob("*.done"))
+            shard_dirs = list(checkpoint_base.glob("shard_*"))
+            if done_files and not shard_dirs:
+                raise RuntimeError(
+                    f"v1.0 checkpoint format detected in {checkpoint_base}: "
+                    f"found {len(done_files)} .done marker files but no shard_* directories. "
+                    f"v2.0 cannot resume from v1.0 checkpoints. "
+                    f"Options: (1) Use --v1-fallback to resume with v1.0, "
+                    f"(2) Use --force-resume to start fresh with v2.0, "
+                    f"(3) Delete {checkpoint_base} and re-run."
+                )
+
+        logger.info(f"Rank {rank}: Checking for existing checkpoints in {checkpoint_dir}")
+        resumed_ids_list, resumed_embs, resume_batch_idx, corrupted_ids = resume_from_checkpoints(
+            checkpoint_dir, rank, force_restart
+        )
+
+        if corrupted_ids:
+            logger.warning(
+                f"Rank {rank}: Checkpoint corruption detected - {len(corrupted_ids)} sequences "
+                f"need reprocessing (from batches after corruption point)"
+            )
+            resumed_ids.update(corrupted_ids)
+
+        if resumed_ids_list:
+            resumed_ids.update(resumed_ids_list)
+            resumed_embeddings = resumed_embs  # numpy array
+            logger.info(
+                f"Rank {rank}: Resuming from {len(resumed_ids_list)} checkpoints, "
+                f"{len(resumed_ids)} sequences already processed"
+            )
+
+    return resumed_ids, resumed_embeddings
+
+
+def _load_and_filter_index(
+    rank: int,
+    world_size: int,
+    index_path: Path,
+    resumed_ids: Set[str],
+    logger
+) -> List[int]:
+    """Load sequence index and filter out already-processed sequences.
+
+    Args:
+        rank: Worker rank
+        world_size: Total number of workers
+        index_path: Path to sequence index JSON
+        resumed_ids: Set of sequence IDs already processed
+        logger: Logger instance
+
+    Returns:
+        List of indices assigned to this worker (filtered to exclude resumed)
+    """
+    logger.info(f"Loading index: {index_path}")
+    indices = get_worker_indices(index_path, rank, world_size)
+
+    # Filter out already-processed sequences (prevents duplicates)
+    if resumed_ids:
+        original_count = len(indices)
+        # Load full index to access sequence metadata
+        index_data = load_sequence_index(index_path)
+        sequences = index_data['sequences']
+
+        # Create filtered indices containing only unprocessed sequences
+        filtered_indices = [
+            i for i in indices
+            if sequences[i]['sequence_id'] not in resumed_ids
+        ]
+
+        logger.info(
+            f"Rank {rank}: Filtered index from {original_count} to {len(filtered_indices)} sequences "
+            f"({len(resumed_ids)} already processed)"
+        )
+        indices = filtered_indices
+    else:
+        logger.info(f"Assigned {len(indices)} sequences")
+
+    if not indices:
+        logger.warning(f"Rank {rank}: All sequences already processed, creating empty shard")
+
+    return indices
+
+
+def _load_model(
+    model_config: Dict,
+    device: torch.device,
+    logger
+) -> Tuple[torch.nn.Module, Any]:
+    """Load ESM-2 or DNABERT-S model.
+
+    Args:
+        model_config: Model configuration dictionary
+        device: CUDA device
+        logger: Logger instance
+
+    Returns:
+        Tuple of (model, batch_converter/tokenizer)
+
+    Raises:
+        ValueError: If unsupported model type
+    """
+    model_type = model_config['model_type']
+    logger.info(f"Loading model: {model_type}")
+
+    if model_type == 'esm2':
+        from virnucpro.models.esm2_flash import load_esm2_model
+
+        # Environment variable takes precedence for safety-critical rollback
+        # If VIRNUCPRO_DISABLE_FP16=1 is set, it overrides config
+        if not should_use_fp16():
+            enable_fp16 = False
+        else:
+            enable_fp16 = model_config.get('enable_fp16', True)
+
+        model, batch_converter = load_esm2_model(
+            model_name=model_config.get('model_name', 'esm2_t36_3B_UR50D'),
+            device=str(device),
+            enable_fp16=enable_fp16
+        )
+        logger.info(
+            f"ESM-2 model loaded: {model_config.get('model_name', 'esm2_t36_3B_UR50D')}"
+        )
+    elif model_type == 'dnabert':
+        from virnucpro.models.dnabert_flash import load_dnabert_model
+
+        # Environment variable takes precedence (same as ESM-2)
+        if not should_use_fp16():
+            enable_fp16 = False
+        else:
+            enable_fp16 = model_config.get('enable_fp16', True)
+
+        model, tokenizer = load_dnabert_model(
+            device=str(device),
+            enable_fp16=enable_fp16
+        )
+        # DNABERT uses tokenizer directly, not batch_converter
+        batch_converter = tokenizer
+        logger.info("DNABERT-S model loaded")
+    else:
+        raise ValueError(f"Unsupported model type: {model_type}")
+
+    return model, batch_converter
+
+
+def _save_shard(
+    rank: int,
+    output_dir: Path,
+    all_embeddings: List,
+    all_ids: List[str],
+    resumed_ids: Set[str],
+    resumed_embeddings: Optional[np.ndarray],
+    logger
+) -> Path:
+    """Assemble and save shard HDF5 file.
+
+    Args:
+        rank: Worker rank
+        output_dir: Output directory
+        all_embeddings: List of embedding tensors from inference
+        all_ids: List of sequence IDs from inference
+        resumed_ids: Set of resumed sequence IDs
+        resumed_embeddings: Resumed embeddings array or None
+        logger: Logger instance
+
+    Returns:
+        Path to saved shard file
+    """
+    # Assemble final shard from resumed + new embeddings
+    if resumed_embeddings is not None:
+        logger.info(f"Rank {rank}: Merging {len(resumed_ids)} resumed + {len(all_ids)} new sequences")
+        # Resumed embeddings are numpy, new are torch tensors
+        all_embeddings.insert(0, torch.from_numpy(resumed_embeddings))
+        all_ids = list(resumed_ids) + all_ids
+
+    logger.info(f"Final shard: {len(all_ids)} total sequences")
+
+    # Save shard HDF5
+    shard_path = output_dir / f"shard_{rank}.h5"
+    logger.info(f"Saving shard: {shard_path}")
+
+    with h5py.File(shard_path, 'w') as f:
+        # Stack embeddings and convert to numpy
+        if all_embeddings:
+            embeddings = torch.cat(all_embeddings, dim=0).numpy()
+            f.create_dataset('embeddings', data=embeddings)
+        else:
+            # Empty shard - create empty dataset
+            f.create_dataset('embeddings', shape=(0, 0), dtype='float32')
+
+        # Save sequence IDs with variable-length string dtype
+        dt = h5py.special_dtype(vlen=str)
+        f.create_dataset('sequence_ids', data=all_ids, dtype=dt)
+
+    logger.info(f"Shard saved: {shard_path} ({len(all_ids)} sequences)")
+    return shard_path
+
+
+def _report_error(
+    rank: int,
+    error: Exception,
+    results_queue: Queue,
+    logger
+) -> None:
+    """Categorize and report error to parent process.
+
+    Handles different error types with appropriate status codes:
+    - Numerical instability (NaN/Inf detection)
+    - CUDA OOM
+    - CUDA runtime errors
+    - Generic errors
+
+    Args:
+        rank: Worker rank
+        error: Exception that occurred
+        results_queue: Queue for reporting to parent
+        logger: Logger instance
+
+    Side Effects:
+        - Puts status dict to results_queue
+        - Calls sys.exit(1)
+    """
+    error_str = str(error)
+
+    if isinstance(error, RuntimeError):
+        # Check for numerical instability first (Phase 8 FP16 validation)
+        if "Numerical instability" in error_str:
+            # Extract batch_idx from error message if available
+            # Format: "Numerical instability in batch_{idx}_seqs_{n}: ..."
+            batch_idx = 0  # default
+            try:
+                if "batch_" in error_str:
+                    batch_part = error_str.split("batch_")[1].split("_")[0]
+                    batch_idx = int(batch_part)
+            except (IndexError, ValueError):
+                pass
+
+            logger.error(
+                f"Rank {rank}: NaN/Inf detected in batch {batch_idx}. "
+                f"Error: {error}"
+            )
+            result_status = {
+                "rank": rank,
+                "status": "numerical_instability",
+                "failed_batch": batch_idx,
+                "error": error_str
+            }
+        # Check for OOM (OutOfMemoryError is a RuntimeError subclass)
+        elif 'out of memory' in error_str.lower() or 'oom' in error_str.lower():
+            # OOM: Reduce batch size and retry
+            try:
+                mem_allocated = torch.cuda.memory_allocated(0) / 1e9
+                mem_peak = torch.cuda.max_memory_allocated(0) / 1e9
+                mem_info = f"GPU memory: {mem_allocated:.2f}GB allocated, {mem_peak:.2f}GB peak"
+            except (AttributeError, TypeError):
+                # CUDA mocked or unavailable
+                mem_info = "GPU memory info unavailable"
+
+            logger.error(f"Rank {rank}: CUDA OOM error - {error}\n{mem_info}")
+            result_status = {
+                'rank': rank,
+                'status': 'failed',
+                'error': 'cuda_oom',
+                'error_message': error_str,
+                'retry_recommended': True,
+                'reduce_batch_size': True,
+            }
+        elif 'CUDA' in error_str or 'assert' in error_str.lower():
+            # CUDA error or assertion - likely poison input
+            logger.error(
+                f"Rank {rank}: CUDA runtime error (possible poison input) - {error}"
+            )
+            result_status = {
+                'rank': rank,
+                'status': 'failed',
+                'error': 'cuda_runtime',
+                'error_message': error_str,
+                'retry_recommended': True,
+                'circuit_breaker': True,
+            }
+        else:
+            # Generic runtime error
+            logger.error(f"Rank {rank}: Runtime error - {error}", exc_info=True)
+            result_status = {
+                'rank': rank,
+                'status': 'failed',
+                'error': 'generic_error',
+                'error_message': error_str,
+                'retry_recommended': True,
+            }
+    else:
+        # Unexpected error - full diagnostics
+        logger.error(
+            f"Rank {rank}: Unexpected error during inference",
+            exc_info=True
+        )
+        result_status = {
+            'rank': rank,
+            'status': 'failed',
+            'error': 'generic_error',
+            'error_message': error_str,
+        }
+
+    results_queue.put(result_status)
+    sys.exit(1)
 
 
 def gpu_worker(
@@ -147,142 +549,33 @@ def gpu_worker(
         logger.info(f"CUDA device: {torch.cuda.get_device_name(0)}")
 
         # Step 3: Extract checkpoint configuration
-        enable_checkpointing = model_config.get('enable_checkpointing', True)
-        force_restart = model_config.get('force_restart', False)
-        checkpoint_base_dir = Path(model_config.get('checkpoint_dir', output_dir / "checkpoints"))
-        checkpoint_seq_threshold = model_config.get('checkpoint_seq_threshold', 10000)
-        checkpoint_time_threshold = model_config.get('checkpoint_time_threshold', 300.0)
-
+        ckpt_config = _extract_checkpoint_config(model_config, output_dir)
         logger.info(
-            f"Rank {rank}: Checkpointing enabled={enable_checkpointing}, "
-            f"base_dir={checkpoint_base_dir}, force_restart={force_restart}"
+            f"Rank {rank}: Checkpointing enabled={ckpt_config['enable_checkpointing']}, "
+            f"base_dir={ckpt_config['checkpoint_base_dir']}, force_restart={ckpt_config['force_restart']}"
         )
 
-        # Pass base checkpoint directory to AsyncInferenceRunner
-        # AsyncInferenceRunner will create shard-specific subdirectory (shard_{rank})
-        checkpoint_dir = checkpoint_base_dir if enable_checkpointing else None
-
         # Step 4: Load manifest (if checkpointing enabled)
-        manifest = None
-        if enable_checkpointing:
-            from virnucpro.pipeline.checkpoint_manifest import CheckpointManifest
-            manifest_path = checkpoint_base_dir / "manifest.json"
-            if manifest_path.exists():
-                manifest = CheckpointManifest(manifest_path)
-                logger.info(f"Rank {rank}: Using checkpoint manifest at {manifest_path}")
-            else:
-                # First run or fresh start - coordinator will create manifest
-                logger.info(f"Rank {rank}: No existing manifest, checkpointing without manifest coordination")
+        manifest = _load_checkpoint_manifest(
+            rank,
+            ckpt_config['enable_checkpointing'],
+            ckpt_config['checkpoint_base_dir'],
+            logger
+        )
 
         # Step 5: Resume from checkpoints (before loading index)
-        resumed_ids: Set[str] = set()
-        resumed_embeddings = None
-        if enable_checkpointing and not force_restart:
-            # Check for v1.0 checkpoint format (Gap 4: format compatibility)
-            if checkpoint_dir:
-                checkpoint_base = Path(checkpoint_dir)
-                if checkpoint_base.exists():
-                    # v1.0 uses .done markers; v2.0 uses shard_*/batch_*.pt
-                    done_files = list(checkpoint_base.glob("*.done"))
-                    shard_dirs = list(checkpoint_base.glob("shard_*"))
-                    if done_files and not shard_dirs:
-                        raise RuntimeError(
-                            f"v1.0 checkpoint format detected in {checkpoint_base}: "
-                            f"found {len(done_files)} .done marker files but no shard_* directories. "
-                            f"v2.0 cannot resume from v1.0 checkpoints. "
-                            f"Options: (1) Use --v1-fallback to resume with v1.0, "
-                            f"(2) Use --force-resume to start fresh with v2.0, "
-                            f"(3) Delete {checkpoint_base} and re-run."
-                        )
-
-            logger.info(f"Rank {rank}: Checking for existing checkpoints in {checkpoint_dir}")
-            resumed_ids_list, resumed_embs, resume_batch_idx, corrupted_ids = resume_from_checkpoints(
-                checkpoint_dir, rank, force_restart
-            )
-
-            if corrupted_ids:
-                logger.warning(
-                    f"Rank {rank}: Checkpoint corruption detected - {len(corrupted_ids)} sequences "
-                    f"need reprocessing (from batches after corruption point)"
-                )
-                resumed_ids.update(corrupted_ids)
-
-            if resumed_ids_list:
-                resumed_ids.update(resumed_ids_list)
-                resumed_embeddings = resumed_embs  # numpy array
-                logger.info(
-                    f"Rank {rank}: Resuming from {len(resumed_ids_list)} checkpoints, "
-                    f"{len(resumed_ids)} sequences already processed"
-                )
+        resumed_ids, resumed_embeddings = _resume_from_existing_checkpoints(
+            rank,
+            ckpt_config['checkpoint_dir'],
+            ckpt_config['force_restart'],
+            logger
+        )
 
         # Step 6: Load sequence index and filter out already-processed sequences
-        logger.info(f"Loading index: {index_path}")
-        indices = get_worker_indices(index_path, rank, world_size)
-
-        # Filter out already-processed sequences (prevents duplicates)
-        if resumed_ids:
-            original_count = len(indices)
-            # Load full index to access sequence metadata
-            index_data = load_sequence_index(index_path)
-            sequences = index_data['sequences']
-
-            # Create filtered indices containing only unprocessed sequences
-            filtered_indices = [
-                i for i in indices
-                if sequences[i]['sequence_id'] not in resumed_ids
-            ]
-
-            logger.info(
-                f"Rank {rank}: Filtered index from {original_count} to {len(filtered_indices)} sequences "
-                f"({len(resumed_ids)} already processed)"
-            )
-            indices = filtered_indices
-        else:
-            logger.info(f"Assigned {len(indices)} sequences")
-
-        if not indices:
-            logger.warning(f"Rank {rank}: All sequences already processed, creating empty shard")
+        indices = _load_and_filter_index(rank, world_size, index_path, resumed_ids, logger)
 
         # Step 7: Load model
-        model_type = model_config['model_type']
-        logger.info(f"Loading model: {model_type}")
-
-        if model_type == 'esm2':
-            from virnucpro.models.esm2_flash import load_esm2_model
-
-            # Environment variable takes precedence for safety-critical rollback
-            # If VIRNUCPRO_DISABLE_FP16=1 is set, it overrides config
-            if not should_use_fp16():
-                enable_fp16 = False
-            else:
-                enable_fp16 = model_config.get('enable_fp16', True)
-
-            model, batch_converter = load_esm2_model(
-                model_name=model_config.get('model_name', 'esm2_t36_3B_UR50D'),
-                device=str(device),
-                enable_fp16=enable_fp16
-            )
-            logger.info(
-                f"ESM-2 model loaded: {model_config.get('model_name', 'esm2_t36_3B_UR50D')}"
-            )
-        elif model_type == 'dnabert':
-            from virnucpro.models.dnabert_flash import load_dnabert_model
-
-            # Environment variable takes precedence (same as ESM-2)
-            if not should_use_fp16():
-                enable_fp16 = False
-            else:
-                enable_fp16 = model_config.get('enable_fp16', True)
-
-            model, tokenizer = load_dnabert_model(
-                device=str(device),
-                enable_fp16=enable_fp16
-            )
-            # DNABERT uses tokenizer directly, not batch_converter
-            batch_converter = tokenizer
-            logger.info("DNABERT-S model loaded")
-        else:
-            raise ValueError(f"Unsupported model type: {model_type}")
+        model, batch_converter = _load_model(model_config, device, logger)
 
         # Step 8: Create dataset and dataloader
         logger.info("Creating dataset and dataloader")
@@ -305,16 +598,16 @@ def gpu_worker(
         logger.info("Starting inference")
         runner = AsyncInferenceRunner(
             model, device,
-            checkpoint_dir=checkpoint_dir if enable_checkpointing else None,
+            checkpoint_dir=ckpt_config['checkpoint_dir'],
             rank=rank,
-            checkpoint_seq_threshold=checkpoint_seq_threshold,
-            checkpoint_time_threshold=checkpoint_time_threshold,
+            checkpoint_seq_threshold=ckpt_config['checkpoint_seq_threshold'],
+            checkpoint_time_threshold=ckpt_config['checkpoint_time_threshold'],
             manifest=manifest,
             input_fingerprint=input_fingerprint,
         )
 
         # Step 11: Register SIGTERM handler for spot preemption (after runner creation to avoid race)
-        if enable_checkpointing:
+        if ckpt_config['enable_checkpointing']:
             def sigterm_handler(signum, frame):
                 logger.warning(f"Rank {rank}: SIGTERM received (spot preemption), saving emergency checkpoint")
                 if runner and runner._checkpointing_enabled:
@@ -342,121 +635,25 @@ def gpu_worker(
 
         logger.info(f"Inference complete: {len(all_ids)} new sequences")
 
-        # Step 13: Assemble final shard from resumed + new embeddings
-        if resumed_embeddings is not None:
-            logger.info(f"Rank {rank}: Merging {len(resumed_ids)} resumed + {len(all_ids)} new sequences")
-            # Resumed embeddings are numpy, new are torch tensors
-            all_embeddings.insert(0, torch.from_numpy(resumed_embeddings))
-            all_ids = list(resumed_ids) + all_ids
+        # Step 13: Save shard
+        shard_path = _save_shard(
+            rank, output_dir, all_embeddings, all_ids,
+            resumed_ids, resumed_embeddings, logger
+        )
 
-        logger.info(f"Final shard: {len(all_ids)} total sequences")
-
-        # Step 14: Save shard HDF5
-        shard_path = output_dir / f"shard_{rank}.h5"
-        logger.info(f"Saving shard: {shard_path}")
-
-        with h5py.File(shard_path, 'w') as f:
-            # Stack embeddings and convert to numpy
-            if all_embeddings:
-                embeddings = torch.cat(all_embeddings, dim=0).numpy()
-                f.create_dataset('embeddings', data=embeddings)
-            else:
-                # Empty shard - create empty dataset
-                f.create_dataset('embeddings', shape=(0, 0), dtype='float32')
-
-            # Save sequence IDs with variable-length string dtype
-            dt = h5py.special_dtype(vlen=str)
-            f.create_dataset('sequence_ids', data=all_ids, dtype=dt)
-
-        logger.info(f"Shard saved: {shard_path} ({len(all_ids)} sequences)")
-
-        # Step 15: Report success
+        # Step 14: Report success
+        # Calculate total sequences from shard (resumed + new)
+        total_sequences = len(resumed_ids) + len(all_ids)
         result_status = {
             'rank': rank,
             'status': 'complete',
             'shard_path': str(shard_path),
-            'num_sequences': len(all_ids),
-            'checkpointing_enabled': enable_checkpointing,
+            'num_sequences': total_sequences,
+            'checkpointing_enabled': ckpt_config['enable_checkpointing'],
             'resumed_sequences': len(resumed_ids) if resumed_ids else 0,
         }
         results_queue.put(result_status)
         logger.info(f"Worker {rank} completed successfully")
 
-    except RuntimeError as e:
-        error_str = str(e)
-
-        # Check for numerical instability first (Phase 8 FP16 validation)
-        if "Numerical instability" in error_str:
-            # Log which sequences failed for debugging
-            logger.error(
-                f"Rank {rank}: NaN/Inf detected in batch {batch_idx}. "
-                f"Error: {e}"
-            )
-            # Report failure to orchestrator
-            result_status = {
-                "rank": rank,
-                "status": "numerical_instability",
-                "failed_batch": batch_idx,
-                "error": error_str
-            }
-        # Check for OOM (OutOfMemoryError is a RuntimeError subclass)
-        elif 'out of memory' in error_str.lower() or 'oom' in error_str.lower():
-            # OOM: Reduce batch size and retry
-            try:
-                mem_allocated = torch.cuda.memory_allocated(device) / 1e9
-                mem_peak = torch.cuda.max_memory_allocated(device) / 1e9
-                mem_info = f"GPU memory: {mem_allocated:.2f}GB allocated, {mem_peak:.2f}GB peak"
-            except (AttributeError, TypeError):
-                # CUDA mocked or unavailable
-                mem_info = "GPU memory info unavailable"
-
-            logger.error(f"Rank {rank}: CUDA OOM error - {e}\n{mem_info}")
-            result_status = {
-                'rank': rank,
-                'status': 'failed',
-                'error': 'cuda_oom',
-                'error_message': error_str,
-                'retry_recommended': True,
-                'reduce_batch_size': True,
-            }
-        elif 'CUDA' in error_str or 'assert' in error_str.lower():
-            # CUDA error or assertion - likely poison input
-            logger.error(
-                f"Rank {rank}: CUDA runtime error (possible poison input) - {e}\n"
-                f"Last batch info: {len(all_ids)} sequences processed so far"
-            )
-            result_status = {
-                'rank': rank,
-                'status': 'failed',
-                'error': 'cuda_runtime',
-                'error_message': error_str,
-                'retry_recommended': True,
-                'circuit_breaker': True,
-            }
-        else:
-            # Generic runtime error
-            logger.error(f"Rank {rank}: Runtime error - {e}", exc_info=True)
-            result_status = {
-                'rank': rank,
-                'status': 'failed',
-                'error': 'generic_error',  # Backward compatibility: error is category code
-                'error_message': error_str,  # Full error message for diagnostics
-                'retry_recommended': True,
-            }
-        results_queue.put(result_status)
-        sys.exit(1)
-
-    except Exception as e:
-        # Unexpected error - full diagnostics
-        logger.error(
-            f"Rank {rank}: Unexpected error during inference",
-            exc_info=True
-        )
-        result_status = {
-            'rank': rank,
-            'status': 'failed',
-            'error': 'generic_error',  # Backward compatibility: error is category code
-            'error_message': str(e),  # Full error message for diagnostics
-        }
-        results_queue.put(result_status)
-        sys.exit(1)
+    except (RuntimeError, Exception) as e:
+        _report_error(rank, e, results_queue, logger)

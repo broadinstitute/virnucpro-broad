@@ -464,7 +464,7 @@ class TestGPUWorkerFlow:
 
         assert call_args['rank'] == 0
         assert call_args['status'] == 'failed'
-        assert 'Inference failed' in call_args['error']
+        assert 'Inference failed' in call_args['error_message']
 
 
 class TestWorkerErrorHandling:
@@ -507,7 +507,7 @@ class TestWorkerErrorHandling:
         mock_results_queue.put.assert_called_once()
         call_args = mock_results_queue.put.call_args[0][0]
         assert call_args['status'] == 'failed'
-        assert 'Model load failed' in call_args['error']
+        assert 'Model load failed' in call_args['error_message']
 
     @patch('virnucpro.pipeline.gpu_worker.torch.cuda')
     @patch('virnucpro.pipeline.gpu_worker.AsyncInferenceRunner')
@@ -559,7 +559,7 @@ class TestWorkerErrorHandling:
         mock_results_queue.put.assert_called_once()
         call_args = mock_results_queue.put.call_args[0][0]
         assert call_args['status'] == 'failed'
-        assert 'CUDA out of memory' in call_args['error']
+        assert 'CUDA out of memory' in call_args['error_message']
 
     @patch('virnucpro.pipeline.gpu_worker.torch.cuda')
     @patch('virnucpro.pipeline.gpu_worker.AsyncInferenceRunner')
@@ -622,7 +622,7 @@ class TestWorkerErrorHandling:
         mock_results_queue.put.assert_called_once()
         call_args = mock_results_queue.put.call_args[0][0]
         assert call_args['status'] == 'failed'
-        assert 'Disk full' in call_args['error']
+        assert 'Disk full' in call_args['error_message']
 
 
 class TestFP16Wiring:
