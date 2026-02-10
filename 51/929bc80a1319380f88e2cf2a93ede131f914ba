@@ -1,0 +1,26 @@
+virnucpro/pipeline/gpu_worker.py
+  13594d1a18165c30 32,35,49-449,552,554-555,559-562,567-570,575,578,601,603-604,610,639-641,644-646,651-652,658-659
+tests/unit/test_gpu_worker.py
+  13594d1a18165c30 467,510,562,625
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "51929bc80a1319380f88e2cf2a93ede131f914ba",
+  "prompts": {
+    "13594d1a18165c30": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5651eda2-5484-4c98-92cf-d0819845372a",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 1227,
+      "total_deletions": 1132,
+      "accepted_lines": 517,
+      "overriden_lines": 1,
+      "messages_url": "https://usegitai.com/cas/2daf256ae98ade548b3e9e6c94932b1ba8381dbcd416c53dfe23d7ab78c1923b"
+    }
+  }
+}
