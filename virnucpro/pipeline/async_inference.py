@@ -32,6 +32,7 @@ from torch.utils.data import DataLoader
 
 from virnucpro.cuda.stream_manager import StreamProcessor
 from virnucpro.utils.gpu_monitor import NvitopMonitor
+from virnucpro.core.env_config import get_env_config
 from virnucpro.pipeline.checkpoint_writer import (
     CheckpointTrigger,
     AsyncCheckpointWriter,
@@ -298,8 +299,8 @@ class AsyncInferenceRunner:
             input_ids = gpu_batch['input_ids']
 
             # Kill switch for emergency rollback (Gap 2)
-            import os
-            DISABLE_PACKING = os.getenv('VIRNUCPRO_DISABLE_PACKING', 'false').lower() == 'true'
+            env = get_env_config()
+            DISABLE_PACKING = env.disable_packing
 
             if 'cu_seqlens' in gpu_batch and not DISABLE_PACKING:
                 # PHASE 6: Packed format with FlashAttention varlen
@@ -997,13 +998,14 @@ class AsyncInferenceRunner:
             torch.cuda.reset_peak_memory_stats(device)
 
         # Build metadata dict
+        env = get_env_config()
         metadata = {
             'batch_idx': self._ckpt_batch_idx,
             'num_sequences': len(self._ckpt_ids),
             'timestamp': datetime.utcnow().isoformat(),
             'trigger_reason': reason,
             'model_dtype': str(next(self.model.parameters()).dtype),
-            'packing_enabled': not bool(os.environ.get("VIRNUCPRO_DISABLE_PACKING", "")),
+            'packing_enabled': not env.disable_packing,
             'gpu_memory_allocated_bytes': torch.cuda.memory_allocated(device) if device.type == 'cuda' else 0,
             'gpu_memory_peak_bytes': torch.cuda.max_memory_allocated(device) if device.type == 'cuda' else 0,
             'input_fingerprint': self._input_fingerprint,
