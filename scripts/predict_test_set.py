@@ -13,22 +13,24 @@ import argparse
 
 from units import MERGED_DIM, CHECKPOINT_VERSION
 
-# Duplicate MLPClassifier from train.py to avoid module-level execution
+# Duplicate MLPClassifier from train.py to match actual saved model architecture
 class MLPClassifier(torch.nn.Module):
     def __init__(self, input_dim=2048, hidden_dim=512, num_class=2):
         super().__init__()
-        self.fc1 = torch.nn.Linear(input_dim, hidden_dim)
-        self.fc2 = torch.nn.Linear(hidden_dim, num_class)
+        self.hidden_layer = torch.nn.Linear(input_dim, hidden_dim)
+        self.bn1 = torch.nn.BatchNorm1d(hidden_dim)
+        self.output_layer = torch.nn.Linear(hidden_dim, num_class)
         self.relu = torch.nn.ReLU()
         self.dropout = torch.nn.Dropout(0.1)
-        
+
     def forward(self, x):
         if x.shape[1] != MERGED_DIM:
             raise ValueError(f"Expected {MERGED_DIM}-dim input, got {x.shape[1]}")
-        x = self.fc1(x)
+        x = self.hidden_layer(x)
+        x = self.bn1(x)
         x = self.relu(x)
         x = self.dropout(x)
-        x = self.fc2(x)
+        x = self.output_layer(x)
         return x
 
 def load_model(checkpoint_path, device):
