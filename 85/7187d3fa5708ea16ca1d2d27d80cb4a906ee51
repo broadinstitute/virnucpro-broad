@@ -1,0 +1,24 @@
+.planning/phases/11-code-quality-foundations/11-CONTEXT.md
+  8058133763b61c84 1-70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "857187d3fa5708ea16ca1d2d27d80cb4a906ee51",
+  "prompts": {
+    "8058133763b61c84": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c211e29a-aaed-4edf-a2bf-e2585086fc6e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 70,
+      "total_deletions": 0,
+      "accepted_lines": 70,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/fd3cf91ead296c0f332d0b25912c3491d5e351ba105f0e13887d73cc8e44b104"
+    }
+  }
+}
