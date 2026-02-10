@@ -31,6 +31,7 @@ Integration:
 """
 
 import logging
+from collections import deque
 from typing import List, Dict, Any, Union
 
 import torch
@@ -99,7 +100,7 @@ class VarlenCollator:
 
         # Buffer-based packing (PACK-02, ARCH-11)
         self.buffer = []  # Accumulates sequences before packing
-        self.packed_queue = []  # Pre-packed batches ready to return
+        self.packed_queue = deque()  # Pre-packed batches ready to return (O(1) popleft)
         self.buffer_size = buffer_size
         self.enable_packing = enable_packing
 
@@ -258,7 +259,7 @@ class VarlenCollator:
         # If we have pre-packed batches ready, return one and buffer the new sequences
         if self.packed_queue:
             self.buffer.extend(batch)  # Save for later packing
-            batch_to_return = self.packed_queue.pop(0)
+            batch_to_return = self.packed_queue.popleft()
             self._total_sequences_returned += len(batch_to_return)
             logger.debug(f"Returning from packed_queue ({len(self.packed_queue)} batches remaining), buffer now has {len(self.buffer)} sequences")
             return self._tokenize_and_pack(batch_to_return)
@@ -282,7 +283,7 @@ class VarlenCollator:
 
             # Return first packed batch
             if self.packed_queue:
-                batch_to_return = self.packed_queue.pop(0)
+                batch_to_return = self.packed_queue.popleft()
                 self._total_sequences_returned += len(batch_to_return)
                 logger.debug(f"Returning first packed batch ({len(batch_to_return)} sequences), {len(self.packed_queue)} batches remaining in queue")
                 return self._tokenize_and_pack(batch_to_return)
@@ -343,7 +344,7 @@ class VarlenCollator:
 
             # Drain packed_queue (may also produce overflow back to buffer)
             while self.packed_queue:
-                batch = self.packed_queue.pop(0)
+                batch = self.packed_queue.popleft()
                 result = self._tokenize_and_pack(batch)
                 if result:
                     self._total_sequences_returned += result.get('num_sequences', 0)

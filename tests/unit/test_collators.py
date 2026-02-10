@@ -5,6 +5,7 @@ and main-process collation (worker buffer data loss prevention).
 """
 
 import pytest
+from collections import deque
 from unittest.mock import MagicMock, patch, PropertyMock
 
 
@@ -156,11 +157,11 @@ class TestVarlenCollatorPacking:
 
         # Now manually add to packed_queue to simulate pending batches
         # These are sequences already counted in received, waiting to be returned
-        collator.packed_queue = [
+        collator.packed_queue = deque([
             [{'id': 'seqX', 'sequence': 'ACGT'}],
             [{'id': 'seqY', 'sequence': 'GCTAA'}],
             [{'id': 'seqZ', 'sequence': 'GCTAA'}],
-        ]
+        ])
 
         initial_returned = collator._total_sequences_returned
 
@@ -176,7 +177,7 @@ class TestVarlenCollatorPacking:
         assert collator._total_sequences_returned >= initial_returned + 3
         # Results include buffer batch (2 seqs) + 3 queue batches (3 seqs) = 4 batches
         assert len(results) == 4
-        assert collator.packed_queue == []
+        assert len(collator.packed_queue) == 0
 
     def test_flush_handles_packed_queue(self):
         """Verify flush() also processes remaining packed_queue."""
@@ -188,10 +189,10 @@ class TestVarlenCollatorPacking:
         collator = VarlenCollator(mock_bc, enable_packing=True)
 
         # Add batches to packed_queue
-        collator.packed_queue = [
+        collator.packed_queue = deque([
             [{'id': 'seq1', 'sequence': 'MKTAYIAK'}],
             [{'id': 'seq2', 'sequence': 'VLSPADKTNV'}],
-        ]
+        ])
 
         # Mock tokenization
         with patch.object(collator, '_tokenize_and_pack', return_value={'test': 'data'}):
