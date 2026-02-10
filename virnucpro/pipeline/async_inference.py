@@ -756,6 +756,36 @@ class AsyncInferenceRunner:
             else:
                 self.trigger.reset()
 
+    def _flush_collator(self, collator: Any) -> Iterator[InferenceResult]:
+        """Flush collator buffer and yield remaining batches.
+
+        VarlenCollator accumulates sequences in buffer. This ensures no data loss
+        for the last <buffer_size sequences.
+
+        Args:
+            collator: Collator instance (or None)
+
+        Yields:
+            InferenceResult for each flushed batch
+        """
+        if collator is None:
+            logger.warning("No collator found on DataLoader - data may be lost if sequences were buffered!")
+            return
+
+        if not hasattr(collator, 'flush'):
+            return
+
+        logger.info("Flushing collator buffer for remaining sequences")
+        flushed_batches = collator.flush()
+        logger.info(f"Flush returned {len(flushed_batches)} batches")
+
+        for batch in flushed_batches:
+            if not batch or 'input_ids' not in batch:
+                logger.warning("Skipping empty batch from flush")
+                continue
+            result = self.process_batch(batch)
+            yield result
+
     def run(
         self,
         dataloader: DataLoader,
@@ -894,21 +924,7 @@ class AsyncInferenceRunner:
                 batch_idx += 1
 
             # Flush collator buffer (handles last <buffer_size sequences)
-            # VarlenCollator accumulates sequences; flush ensures no data loss.
-            # With main-process collation, the collator has the actual buffered
-            # data (not a pickled copy), so flush works correctly.
-            if collator is not None and hasattr(collator, 'flush'):
-                logger.info("Flushing collator buffer for remaining sequences")
-                flushed_batches = collator.flush()
-                logger.info(f"Flush returned {len(flushed_batches)} batches")
-                for batch in flushed_batches:
-                    if not batch or 'input_ids' not in batch:
-                        logger.warning("Skipping empty batch from flush")
-                        continue
-                    result = self.process_batch(batch)
-                    yield result
-            elif collator is None:
-                logger.warning("No collator found on DataLoader - data may be lost if sequences were buffered!")
+            yield from self._flush_collator(collator)
 
             # Final checkpoint (after loop completion)
             if self._checkpointing_enabled and self._ckpt_embeddings:
