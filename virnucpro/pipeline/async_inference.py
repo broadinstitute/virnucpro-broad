@@ -653,6 +653,74 @@ class AsyncInferenceRunner:
             packing_efficiency=packing_efficiency
         )
 
+    def _log_progress(
+        self,
+        batch_idx: int,
+        total_sequences_processed: int,
+        dataloader: DataLoader,
+        processing_start_time: float
+    ) -> None:
+        """Adaptive progress logging with ETA calculation.
+
+        Logs at different frequencies based on progress:
+        - First 10 batches: every batch
+        - Batches 10-100: every 10 batches
+        - After batch 100: every 100 batches
+
+        Args:
+            batch_idx: Current batch index
+            total_sequences_processed: Cumulative sequences processed so far
+            dataloader: DataLoader (used for dataset size estimation)
+            processing_start_time: Time when processing started (from perf_counter)
+        """
+        # Adaptive logging frequency
+        should_log_progress = False
+        if batch_idx < 10:
+            should_log_progress = True  # Log every batch during startup
+        elif batch_idx < 100:
+            should_log_progress = (batch_idx % 10 == 0)  # Every 10 batches
+        else:
+            should_log_progress = (batch_idx % 100 == 0)  # Every 100 batches
+
+        if not should_log_progress:
+            return
+
+        dl_stats = self.monitor.get_dataloader_statistics()
+        throughput = self.monitor.get_throughput()
+
+        # Calculate elapsed time and ETA
+        elapsed_time = time.perf_counter() - processing_start_time
+        seq_per_sec = throughput.get('sequences_per_sec', 0)
+
+        # Try to estimate total sequences from dataset if available
+        estimated_total = None
+        eta_str = "unknown"
+        progress_pct = ""
+
+        if hasattr(dataloader, 'dataset') and hasattr(dataloader.dataset, '__len__'):
+            try:
+                estimated_total = len(dataloader.dataset)
+                if estimated_total > 0:
+                    progress_pct = f"{total_sequences_processed}/{estimated_total} ({100*total_sequences_processed/estimated_total:.1f}%) | "
+                    remaining = estimated_total - total_sequences_processed
+                    if seq_per_sec > 0:
+                        eta_seconds = remaining / seq_per_sec
+                        eta_minutes = eta_seconds / 60
+                        eta_str = f"{eta_minutes:.1f}m" if eta_minutes < 60 else f"{eta_minutes/60:.1f}h"
+            except:
+                pass
+
+        if not progress_pct:
+            progress_pct = f"{total_sequences_processed:,} sequences | "
+
+        logger.info(
+            f"Batch {batch_idx}: {progress_pct}"
+            f"{dl_stats.get('avg_packing_efficiency', 0):.1%} pack eff, "
+            f"{throughput.get('tokens_per_sec', 0):,.0f} tok/s, "
+            f"{seq_per_sec:.1f} seq/s, "
+            f"ETA: {eta_str}"
+        )
+
     def run(
         self,
         dataloader: DataLoader,
@@ -776,54 +844,8 @@ class AsyncInferenceRunner:
                 # Track cumulative progress
                 total_sequences_processed += len(result.sequence_ids)
 
-                # Adaptive progress logging:
-                # - First 10 batches: log every batch (startup phase)
-                # - Batches 10-100: log every 10 batches
-                # - After batch 100: log every 100 batches
-                should_log_progress = False
-                if batch_idx < 10:
-                    should_log_progress = True  # Log every batch during startup
-                elif batch_idx < 100:
-                    should_log_progress = (batch_idx % 10 == 0)  # Every 10 batches
-                else:
-                    should_log_progress = (batch_idx % 100 == 0)  # Every 100 batches
-
-                if should_log_progress:
-                    dl_stats = self.monitor.get_dataloader_statistics()
-                    throughput = self.monitor.get_throughput()
-
-                    # Calculate elapsed time and ETA
-                    elapsed_time = time.perf_counter() - processing_start_time
-                    seq_per_sec = throughput.get('sequences_per_sec', 0)
-
-                    # Try to estimate total sequences from dataset if available
-                    estimated_total = None
-                    eta_str = "unknown"
-                    progress_pct = ""
-
-                    if hasattr(dataloader, 'dataset') and hasattr(dataloader.dataset, '__len__'):
-                        try:
-                            estimated_total = len(dataloader.dataset)
-                            if estimated_total > 0:
-                                progress_pct = f"{total_sequences_processed}/{estimated_total} ({100*total_sequences_processed/estimated_total:.1f}%) | "
-                                remaining = estimated_total - total_sequences_processed
-                                if seq_per_sec > 0:
-                                    eta_seconds = remaining / seq_per_sec
-                                    eta_minutes = eta_seconds / 60
-                                    eta_str = f"{eta_minutes:.1f}m" if eta_minutes < 60 else f"{eta_minutes/60:.1f}h"
-                        except:
-                            pass
-
-                    if not progress_pct:
-                        progress_pct = f"{total_sequences_processed:,} sequences | "
-
-                    logger.info(
-                        f"Batch {batch_idx}: {progress_pct}"
-                        f"{dl_stats.get('avg_packing_efficiency', 0):.1%} pack eff, "
-                        f"{throughput.get('tokens_per_sec', 0):,.0f} tok/s, "
-                        f"{seq_per_sec:.1f} seq/s, "
-                        f"ETA: {eta_str}"
-                    )
+                # Adaptive progress logging
+                self._log_progress(batch_idx, total_sequences_processed, dataloader, processing_start_time)
 
                 # Progress callback
                 if progress_callback:
