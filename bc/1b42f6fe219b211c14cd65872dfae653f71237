@@ -1,0 +1,26 @@
+.planning/phases/11-code-quality-foundations/11-04-SUMMARY.md
+  13594d1a18165c30 1-129
+.planning/STATE.md
+  13594d1a18165c30 15,17,19,24,26,45,213,216
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "bc1b42f6fe219b211c14cd65872dfae653f71237",
+  "prompts": {
+    "13594d1a18165c30": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5651eda2-5484-4c98-92cf-d0819845372a",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 137,
+      "total_deletions": 8,
+      "accepted_lines": 137,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/2daf256ae98ade548b3e9e6c94932b1ba8381dbcd416c53dfe23d7ab78c1923b"
+    }
+  }
+}
