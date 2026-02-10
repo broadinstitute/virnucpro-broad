@@ -1,0 +1,14 @@
+# Architecture Research: v2.5 Model Optimizations Round 2
+
+**Domain:** GPU-accelerated viral nucleotide prediction pipeline  
+**Researched:** 2026-02-09  
+**Confidence:** HIGH (production codebase analysis)
+
+## Executive Summary
+
+The v2.5 Model Optimizations build on an existing v2.0 async architecture that has been battle-tested for ESM-2 only. Integration points are well-defined: DNABERT-S needs AsyncInferenceRunner port (v1.0→v2.0), model flexibility requires repr_layers parameterization, torch.compile fits in load_*_model functions, and vectorized ops replace Python loops in hot paths. Code quality improvements span env var centralization and function extraction in oversized files (async_inference.py: 526 lines in run(), gpu_worker.py: 414 lines).
+
+**Architecture compatibility:** All v2.5 features integrate with existing v2.0 components without requiring new infrastructure. DNABERT-S reuses 90% of ESM-2's async stack, differing only in tokenization (transformers.AutoTokenizer vs ESM batch_converter).
+
+**Risk assessment:** LOW for code quality/vectorization, MEDIUM for torch.compile (dynamic shape interaction with FlashAttention varlen unknown), HIGH for DNABERT-S v2.0 port (replaces working v1.0 architecture, requires separate validation phase).
+
