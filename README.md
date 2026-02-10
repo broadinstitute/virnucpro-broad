@@ -4,108 +4,48 @@ A production-ready refactoring of the [original VirNucPro tool](https://github.c
 
 ## About This Project
 
-This is a comprehensive refactoring of the original VirNucPro bioinformatics tool, transforming it from a collection of standalone scripts into a production-ready Python package with:
+This is a comprehensive refactoring and GPU optimization of the original VirNucPro bioinformatics tool. The v2.0 async architecture delivers a **6.2x speedup** over v1.0 (3.5 hours to 34 minutes on 2x RTX 4090) through single-process-per-GPU design, async DataLoader, sequence packing with FlashAttention, and FP16 precision.
 
-- 🎯 **Modern CLI interface** with Click framework
-- 🔧 **Modular architecture** with proper package structure
-- 🎮 **GPU device selection** with validation and auto-detection
-- 💾 **Checkpointing/resume capability** with hash-based validation
-- 🚀 **Multi-GPU parallelization** for 150-380x speedup
-- ⚡ **Batched processing** with proper attention masking (50-100x faster)
-- ⚙️ **YAML configuration** support with CLI overrides
-- 📊 **Progress reporting** with tqdm integration
-- 📝 **Comprehensive logging** with configurable levels
-- ✅ **Input validation** and error handling
-- 🧹 **Automatic cleanup** of intermediate files
-- ✅ **Comprehensive testing** with vanilla comparison validation
+### Key Capabilities
+
+- **6.2x speedup** over v1.0 baseline with async DataLoader and sequence packing
+- **Multi-GPU scaling** with 93.7% efficiency on ESM-2 (1.87x on 2 GPUs)
+- **Sequence packing** via FFD algorithm (~358% token utilization) with FlashAttention varlen
+- **FP16 precision** with >0.99 cosine similarity to FP32
+- **Fault-tolerant checkpointing** with SIGTERM handling and elastic redistribution
+- **Click-based CLI** with YAML configuration and resume capability
+- **99.87% prediction accuracy** compared to v1.0
 
 ### Original Tool
 
 The original VirNucPro was developed by Li Jing and is available at:
 **https://github.com/Li-Jing-1997/VirNucPro**
 
-This refactoring maintains full compatibility with the original tool's prediction methodology while adding enterprise-grade features for production use.
-
-## Project Status
-
-✅ **Production Ready** - All core features implemented and tested.
-
-### Completed
-- ✅ **Phase 1**: Core infrastructure (config, logging, device management, progress reporting)
-- ✅ **Phase 2**: Core pipeline refactoring (extracting models and utilities)
-- ✅ **Phase 3**: CLI implementation with Click
-- ✅ **Phase 4**: Checkpointing system with hash-based validation and resume capability
-- ✅ **Phase 5**: Testing framework with vanilla comparison validation
-
-### Validated
-- ✅ **30/30 unit tests passing** (features, parallel processing, predictions)
-- ✅ **Vanilla comparison tests passing** - Predictions match 100% with batching optimizations
-- ✅ **Multi-GPU parallelization** - 150-380x speedup with 4 GPUs
-- ✅ **Batched processing** - 50-100x faster than sequential with proper attention masking
-
-See [STATUS.md](STATUS.md) for detailed progress tracking.
-
-## Features
-
-### Original VirNucPro Capabilities
-
-- Six-frame translation of DNA sequences
-- DNABERT-S feature extraction for nucleotide sequences
-- ESM-2 (3B) feature extraction for protein sequences
-- MLP-based viral sequence classification
-- Support for 300bp and 500bp sequence models
-- Consensus scoring across reading frames
-
-### New Refactored Features
-
-- **Click-based CLI**: Intuitive command-line interface
-  ```bash
-  python -m virnucpro predict input.fasta --model-type 500 --device cuda:0
-  ```
-
-- **GPU Selection**: Flexible device management
-  ```bash
-  python -m virnucpro utils list-devices
-  python -m virnucpro predict input.fasta --device cuda:1
-  ```
-
-- **Resume Capability**: Automatic checkpointing
-  ```bash
-  python -m virnucpro predict input.fasta --resume
-  ```
-
-- **Configuration Management**: YAML-based settings
-  ```bash
-  python -m virnucpro utils generate-config -o my_config.yaml
-  python -m virnucpro predict input.fasta --config my_config.yaml
-  ```
-
-- **Input Validation**: Pre-flight checks
-  ```bash
-  python -m virnucpro utils validate input.fasta
-  ```
+This refactoring maintains full compatibility with the original tool's prediction methodology while adding GPU optimization and production-grade features.
 
 ## Installation
 
 ### Requirements
 
 - Python 3.9+
-- PyTorch (with optional CUDA support)
+- PyTorch >= 2.8.0 (with CUDA support)
 - BioPython
-- transformers (HuggingFace)
-- ESM (Facebook Research)
-- Click, PyYAML, tqdm
+- transformers == 4.30.0 (DNABERT-S)
+- fair-esm == 2.0.0 (ESM-2 3B)
+- flash-attn >= 2.6.0 (optional, for FlashAttention-2)
+- Click, PyYAML, tqdm, rich, h5py
 
 ### Setup
 
 1. Clone this repository:
 ```bash
-git clone https://github.com/YOUR-USERNAME/virnucpro-broad.git
+git clone https://github.com/broadinstitute/virnucpro-broad.git
 cd virnucpro-broad
 ```
 
 2. Install dependencies:
 ```bash
+pixi install          # Uses pixi (Python 3.9, conda-forge)
 pip install -r requirements.txt
 ```
 
@@ -118,246 +58,204 @@ python -c "import virnucpro; print(virnucpro.__version__)"
 
 ### Quick Start
 
-Basic prediction workflow:
-
 ```bash
-# Basic prediction with default settings
+# Basic prediction (single GPU)
 python -m virnucpro predict input.fasta
 
-# Use specific model and GPU
-python -m virnucpro predict input.fasta --model-type 300 --device cuda:0
-
-# Resume interrupted prediction
-python -m virnucpro predict input.fasta --resume
-
-# Custom configuration
-python -m virnucpro predict input.fasta --config my_config.yaml
-```
-
-### Multi-GPU Parallel Processing
-
-Enable parallel DNABERT-S feature extraction across multiple GPUs for significant speedup:
-
-```bash
-# Enable parallel processing (auto-detects all GPUs)
+# Multi-GPU with v2.0 async architecture (recommended)
 python -m virnucpro predict input.fasta --parallel
 
-# Combine with custom batch size for memory management
-python -m virnucpro predict input.fasta --parallel --dnabert-batch-size 128
+# Use specific model type
+python -m virnucpro predict input.fasta --parallel --model-type 500
 
-# Full example with all options
-python -m virnucpro predict input.fasta \
-  --model-type 500 \
-  --parallel \
-  --dnabert-batch-size 256 \
-  --resume
+# Resume interrupted prediction
+python -m virnucpro predict input.fasta --parallel --resume
 ```
 
-**Performance**: With 4 GPUs, expect 150-380x speedup compared to sequential processing.
+### Multi-GPU Processing
 
-**Memory considerations**:
-- Default `--dnabert-batch-size 256` requires ~2GB VRAM per GPU
-- For GPUs with less VRAM: use `--dnabert-batch-size 128` (2-4GB) or `--dnabert-batch-size 64` (<2GB)
-- Each GPU loads its own DNABERT-S model instance (1.5GB)
-
-**When to use**:
-- Large input files (>100k sequences)
-- Multiple GPUs available
-- Not in shared GPU environments (use `--parallel` opt-in to avoid monopolizing resources)
-
-### Current Status (Phase 1)
-
-Phase 1 infrastructure is complete and can be tested:
+The `--parallel` flag enables the v2.0 async architecture for ESM-2 (auto-detects all available GPUs):
 
 ```bash
-# Test package import
-python -c "import virnucpro; print(virnucpro.__version__)"
+# Auto-detect GPUs, use v2.0 architecture
+python -m virnucpro predict input.fasta --parallel
 
-# Test configuration loading
-python -c "from virnucpro.core.config import Config; c = Config.load(); print(c.get('prediction.batch_size'))"
+# Fall back to v1.0 architecture if needed
+python -m virnucpro predict input.fasta --parallel --v1-fallback
 
-# Test device management
-python -c "from virnucpro.core.device import list_available_devices; list_available_devices()"
+# Use v1.0-compatible attention (exact v1.0 embedding reproduction)
+python -m virnucpro predict input.fasta --parallel --v1-attention
+```
+
+**Performance** (1M sequence subset):
+
+| Configuration | Time | Speedup |
+|--------------|------|---------|
+| v1.0 baseline | 3.5 hours | 1.0x |
+| v2.0, 1x RTX 4090 | 53 min | 4.0x |
+| v2.0, 2x RTX 4090 | 34 min | 6.2x |
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VIRNUCPRO_DISABLE_PACKING` | `false` | Disable sequence packing (emergency rollback) |
+| `VIRNUCPRO_DISABLE_FP16` | `false` | Disable FP16 precision |
+| `VIRNUCPRO_V1_ATTENTION` | `false` | Use v1.0-compatible attention path |
+| `VIRNUCPRO_VIRAL_CHECKPOINT_MODE` | `false` | Tune checkpointing for viral workloads |
+
+### Utilities
+
+```bash
+# List available GPU devices
+python -m virnucpro utils list-devices
+
+# Validate input file
+python -m virnucpro utils validate input.fasta
+
+# Generate default config
+python -m virnucpro utils generate-config -o my_config.yaml
 ```
 
 ## Architecture
 
+### v2.0 Pipeline (ESM-2)
+
 ```
-virnucpro-broad/
-├── virnucpro/                  # Main package
-│   ├── __init__.py            # Package initialization
-│   ├── __main__.py            # CLI entry point
-│   ├── cli/                   # Command-line interface
-│   │   ├── main.py           # Main Click group
-│   │   ├── predict.py        # Predict command
-│   │   └── utils.py          # Utility commands
-│   ├── core/                  # Core infrastructure
-│   │   ├── config.py         # Configuration management
-│   │   ├── device.py         # GPU/device handling
-│   │   ├── logging_setup.py  # Logging configuration
-│   │   └── checkpoint.py     # Checkpointing system
-│   ├── pipeline/              # Prediction pipeline
-│   │   ├── models.py         # PyTorch models
-│   │   ├── prediction.py     # Main pipeline
-│   │   ├── chunking.py       # Sequence chunking
-│   │   ├── translation.py    # Six-frame translation
-│   │   └── features.py       # Feature extraction
-│   └── utils/                 # Utilities
-│       ├── sequence.py       # Sequence processing
-│       ├── validation.py     # Input validation
-│       └── progress.py       # Progress reporting
-├── config/                    # Configuration files
-│   └── default_config.yaml   # Default settings
-├── tests/                     # Test suite
-├── thoughts/                  # Planning documents
-│   └── shared/
-│       ├── plans/            # Implementation plans
-│       └── research/         # Research notes
-├── prediction.py             # Original script (reference)
-├── units.py                  # Original utilities (reference)
-├── 300_model.pth            # Pre-trained model (300bp)
-├── 500_model.pth            # Pre-trained model (500bp)
-└── README.md                # This file
+FASTA Files
+    |
+    v
+SequenceIndex (length-sorted, stride-based sharding)
+    |
+    v
+[GPU 0]                    [GPU 1]                    [GPU N]
+IndexBasedDataset          IndexBasedDataset          IndexBasedDataset
+(byte-offset reading)      (byte-offset reading)      (byte-offset reading)
+    |                          |                          |
+DataLoader Workers         DataLoader Workers         DataLoader Workers
+(4-8 CPU workers, I/O)     (4-8 CPU workers, I/O)     (4-8 CPU workers, I/O)
+    |                          |                          |
+VarlenCollator             VarlenCollator             VarlenCollator
+(tokenize + FFD packing)   (tokenize + FFD packing)   (tokenize + FFD packing)
+    |                          |                          |
+AsyncInferenceRunner       AsyncInferenceRunner       AsyncInferenceRunner
+(FP16 + FlashAttention)    (FP16 + FlashAttention)    (FP16 + FlashAttention)
+    |                          |                          |
+shard_0.h5                 shard_1.h5                 shard_N.h5
+    \                         |                         /
+     \________________________|________________________/
+                              |
+                    Shard Aggregator
+                    (embeddings.h5)
 ```
 
-## Development
+Each GPU runs its own `AsyncInferenceRunner` in a spawned process coordinated by `GPUProcessCoordinator`.
 
-### Refactoring Plan
+### Project Structure
 
-The refactoring follows a phased approach documented in:
-`thoughts/shared/plans/2025-11-10-virnucpro-cli-refactoring.md`
+```
+virnucpro/
+  cli/                        # Click-based CLI
+    main.py, predict.py, profile.py, benchmark.py
+  core/                       # Config, device validation, checkpointing
+  cuda/                       # Stream manager, attention utils, memory manager
+  data/                       # Async DataLoader components (v2.0)
+    collators.py              #   VarlenCollator with buffer-based packing
+    dataloader_utils.py       #   create_async_dataloader() factory
+    packing.py                #   GreedyPacker FFD algorithm (~92-94% efficiency)
+    sequence_dataset.py       #   IndexBasedDataset for byte-offset reading
+    shard_index.py            #   Multi-GPU stride-based index distribution
+  models/                     # ESM-2 FlashAttention, DNABERT flash, packed attention
+  pipeline/                   # Inference orchestration
+    async_inference.py        #   AsyncInferenceRunner (single-GPU)
+    multi_gpu_inference.py    #   run_multi_gpu_inference() entry point
+    gpu_coordinator.py        #   GPUProcessCoordinator lifecycle management
+    gpu_worker.py             #   Per-GPU worker function
+    shard_aggregator.py       #   HDF5 shard merging with validation
+    checkpoint_writer.py      #   Async checkpointing with crash recovery
+    checkpoint_manifest.py    #   Multi-GPU checkpoint coordination
+    prediction.py             #   Full 9-stage pipeline orchestration
+  utils/                      # Sequence processing, validation, GPU monitor
+tests/
+  unit/                       # Component tests (62 test files)
+  integration/                # Multi-component tests
+  benchmarks/                 # Performance and scaling tests
+```
 
-**Phase 1: Project Structure & Infrastructure** ✅
-- Package structure with modular design
-- YAML configuration system with CLI overrides
-- Structured logging framework with levels
-- GPU device management and validation
-- Integrated progress reporting with tqdm
+## Testing
 
-**Phase 2: Core Pipeline Refactoring** ✅
-- Extracted and modularized pipeline components
-- Comprehensive docstrings
-- Type hints throughout
-- Full backward compatibility maintained
+```bash
+# All tests
+pytest tests/ -v
 
-**Phase 3: CLI Implementation** ✅
-- Click-based command interface
-- Input validation
-- Comprehensive error handling
+# Unit tests only
+pytest tests/unit/ -v
 
-**Phase 4: Checkpointing System** ✅
-- Hash-based state tracking with config validation
-- Resume capability for interrupted runs
-- Stage-level and file-level checkpoints
-- Atomic state saves
+# Skip slow tests
+pytest tests/ -v -m "not slow"
 
-**Phase 5: Testing & Documentation** ✅
-- 30 unit tests for features, parallel processing, predictions
-- Vanilla comparison validation (100% prediction match)
-- Comprehensive documentation with performance benchmarks
-- Empirically-validated tolerances for batching differences
+# GPU-only tests
+pytest tests/ -v -m "gpu"
 
-### Contributing
+# Pattern match
+pytest tests/ -v -k "test_packing"
+```
 
-This is an active refactoring project. If you'd like to contribute:
+**Test coverage**: 18,846 lines of production Python (61 files), 27,951 lines of test Python (62 files).
 
-1. Check the current status in [STATUS.md](STATUS.md)
-2. Review the implementation plan in `thoughts/shared/plans/`
-3. Open an issue to discuss proposed changes
-4. Submit a pull request
+## Performance Validation
+
+v2.0 was validated on a 1M sequence subset with 2x RTX 4090:
+
+| Metric | Result | Target |
+|--------|--------|--------|
+| v2.0 vs v1.0 speedup | 6.2x | >= 4.0x |
+| 1x GPU time | 53 min | < 1 hour |
+| 2x GPU time | 34 min | — |
+| ESM-2 scaling (2 GPUs) | 1.87x (93.7%) | > 1.8x |
+| Prediction accuracy | 99.87% | > 99% |
+| Packing efficiency | ~358% | > 200% |
+| ESM-2 throughput | 321 seq/s, 16.5K tok/s | — |
 
 ## Comparison with Original
 
 | Feature | Original VirNucPro | This Refactoring |
 |---------|-------------------|------------------|
-| **CLI Interface** | Basic `sys.argv` | Click framework with help |
-| **Configuration** | Hardcoded values | YAML config + CLI overrides |
-| **GPU Selection** | Auto-detect only | Manual selection + validation |
-| **Multi-GPU Support** | Not available | Parallel processing with `--parallel` |
-| **Batching** | Sequential (1 seq/GPU call) | Batched processing (256 seqs/batch) |
-| **Performance** | Baseline | 150-380x speedup with 4 GPUs |
-| **Error Handling** | Minimal | Comprehensive validation |
-| **Logging** | Print statements | Structured logging (levels) |
-| **Progress** | Basic tqdm | Integrated progress bars |
-| **Resume** | Not available | Checkpoint-based resume ✅ |
-| **Package Structure** | Flat scripts | Modular package |
-| **Testing** | None | 30 unit tests + vanilla validation ✅ |
-| **Documentation** | Basic README | Comprehensive docs + types |
-| **Input Validation** | None | Pre-flight checks |
-| **Cleanup** | Manual | Automatic (configurable) |
+| CLI Interface | Basic `sys.argv` | Click framework with help |
+| Configuration | Hardcoded values | YAML config + CLI overrides |
+| GPU Processing | Single GPU | Multi-GPU with async DataLoader |
+| Sequence Batching | Sequential (1 seq/call) | Packed batches with FlashAttention |
+| Precision | FP32 | FP16 with >0.99 cosine similarity |
+| Performance | Baseline | 6.2x speedup (2x RTX 4090) |
+| Checkpointing | Not available | Fault-tolerant with crash recovery |
+| Resume | Not available | Automatic with elastic redistribution |
+| Error Handling | Minimal | Comprehensive with SIGTERM handling |
+| Logging | Print statements | Structured logging (levels) |
+| Testing | None | 62 test files, unit + integration |
+
+## Project Timeline
+
+- **2025-11-10**: Core infrastructure (config, logging, device management)
+- **2025-11-15**: Pipeline refactoring (modular architecture)
+- **2025-11-18**: CLI implementation with Click
+- **2025-12-15**: Checkpointing system
+- **2026-01-22**: Testing framework and validation
+- **2026-02-02**: **v1.0 GPU Optimization** shipped (multi-GPU, BF16, FlashAttention-2)
+- **2026-02-09**: **v2.0 Async Architecture** shipped (6.2x speedup, sequence packing, FP16)
 
 ## Citation
 
 If you use VirNucPro in your research, please cite the original tool:
 
 ```
-[Citation information for original VirNucPro - to be added]
 Repository: https://github.com/Li-Jing-1997/VirNucPro
 ```
-
-## License
-
-[License information to be determined - should match or be compatible with original]
-
-See [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
 - **Original VirNucPro**: [Li Jing](https://github.com/Li-Jing-1997) and contributors
 - **DNABERT-S**: Zhihan Zhou et al.
 - **ESM-2**: Meta AI Research (Facebook)
+- **FlashAttention-2**: Tri Dao et al.
 - **BioPython**: The BioPython Project
 - **PyTorch**: Meta AI Research
-
-## Contact
-
-For questions about this refactoring project:
-- Open an issue on GitHub
-- See [STATUS.md](STATUS.md) for project status
-
-For questions about the original VirNucPro methodology:
-- See the [original repository](https://github.com/Li-Jing-1997/VirNucPro)
-
-## Testing & Validation
-
-### Test Suite
-
-The refactored implementation includes comprehensive testing:
-
-```bash
-# Run all tests
-pixi run pytest tests/ -v
-
-# Run specific test suites
-pixi run pytest tests/test_features.py -v          # Feature extraction tests
-pixi run pytest tests/test_parallel.py -v          # Multi-GPU parallelization tests
-pixi run pytest tests/test_vanilla_comparison.py -v # Vanilla equivalence validation
-```
-
-### Vanilla Comparison
-
-Extensive testing confirms the refactored implementation produces **scientifically equivalent** results to the original:
-
-- ✅ **100% prediction match**: All virus/non-virus classifications identical
-- ✅ **Negligible score differences**: <0.001% variance in prediction scores
-- ✅ **Embedding differences**: ~1-2% from batching optimizations (scientifically irrelevant)
-
-**Root cause of embedding differences**:
-- Batched processing (4 sequences/batch vs. 1 sequence/call)
-- Proper attention masking for padding tokens (more mathematically correct)
-
-**Impact**: The small embedding differences are absorbed by the MLP classifier and do not affect final predictions.
-
-See `tests/VANILLA_COMPARISON_RESULTS.md` for detailed analysis.
-
-## Project Timeline
-
-- **2025-11-10**: Phase 1 infrastructure complete
-- **2025-11-15**: Phase 2 pipeline refactoring complete
-- **2025-11-18**: Phase 3 CLI implementation complete
-- **2025-12-15**: Phase 4 checkpointing system complete
-- **2026-01-22**: Phase 5 testing & validation complete
-
----
-
-**Status**: ✅ **Production ready** - All phases complete and validated against vanilla implementation.
