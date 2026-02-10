@@ -12,16 +12,16 @@ See: .planning/PROJECT.md (updated 2026-02-09)
 
 Milestone: v2.5 Model Optimizations Round 2
 Phase: 11 of 17 (Code Quality Foundations)
-Plan: 0 of 5 in current phase
-Status: Ready to plan
-Last activity: 2026-02-09 — v2.5 roadmap created
+Plan: 1 of 5 in current phase
+Status: In progress
+Last activity: 2026-02-10 — Completed 11-01-PLAN.md (EnvConfig dataclass)
 
-Progress: [░░░░░░░░░░] 0/31 plans (v2.5)
+Progress: [█░░░░░░░░░] 1/31 plans (v2.5)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 93 (v1.0: 34, v2.0: 59, v2.5: 0)
+- Total plans completed: 94 (v1.0: 34, v2.0: 59, v2.5: 1)
 - Average duration: 4.2 min
 - Total execution time: 7.1 hours
 
@@ -42,10 +42,11 @@ Progress: [░░░░░░░░░░] 0/31 plans (v2.5)
 | 10.1 | 4 (complete) | 14 min | 3.5 min |
 | 10.2 | 2 (complete) | 9 min | 4.5 min |
 | 10 | 3/3 (complete) | 120 min | 40 min |
+| 11 | 1/5 | 2 min | 2 min |
 
 **Recent Trend:**
 - Last 5 plans: ~25 min average (includes 62-min and 45-min benchmark runs)
-- Trend: Phase 10 benchmarks complete - all 93 plans executed
+- Trend: Phase 11 started - TDD foundation work is fast (2 min)
 
 *Updated after each plan completion*
 
@@ -189,6 +190,9 @@ Recent decisions affecting current work:
 - **DNABERT-S v1.0 bin-packing bottleneck (10-03)**: v1.0 architecture runs 4% slower with 2 GPUs vs 1 GPU due to coordination overhead - v2.1 should port DNABERT-S to v2.0
 - **GPU utilization metric misleading (10-03)**: 65-80% utilization with queue always full and stable throughput - nvidia-smi doesn't accurately reflect compute saturation for variable-batch workloads
 - **v2.0 achieves primary project goal (10-03)**: 6.2x speedup over v1.0 (3.5h to 34min) - exceeds 4.0x target significantly
+- **EnvConfig scope: VIRNUCPRO_* vars only (11-01)**: EnvConfig contains only application configuration variables, not external tool vars (CUDA_VISIBLE_DEVICES, PYTORCH_CUDA_ALLOC_CONF, TOKENIZERS_PARALLELISM) - external vars control third-party library behavior and are set/read directly at use sites
+- **Standardized boolean parsing (11-01)**: All VIRNUCPRO_* boolean env vars accept true/false/1/0/yes/no (case-insensitive) with descriptive ValueError on invalid values - eliminates per-var parsing differences
+- **EnvConfig singleton caching (11-01)**: get_env_config() uses @lru_cache(maxsize=1) for efficient reuse, cache_clear() for test isolation and late-setting scenarios - env vars must be set before first call or cache cleared after late-setting
 
 ### Pending Todos
 
@@ -205,8 +209,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-09
-Stopped at: v2.5 roadmap created, ready to plan Phase 11
+Last session: 2026-02-10
+Stopped at: Completed 11-01-PLAN.md (EnvConfig dataclass)
 Resume file: None
 
-**Next step:** `/gsd:plan-phase 11`
+**Next step:** Continue Phase 11 with 11-02-PLAN.md
