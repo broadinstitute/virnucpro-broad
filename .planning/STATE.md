@@ -12,18 +12,18 @@ See: .planning/PROJECT.md (updated 2026-02-09)
 
 Milestone: v2.5 Model Optimizations Round 2
 Phase: 11 of 17 (Code Quality Foundations)
-Plan: 3 of 5 in current phase
+Plan: 5 of 5 in current phase
 Status: In progress
-Last activity: 2026-02-10 — Completed 11-03-PLAN.md (AsyncInferenceRunner refactoring)
+Last activity: 2026-02-10 — Completed 11-05-PLAN.md (EnvConfig centralization)
 
-Progress: [██░░░░░░░░] 3/31 plans (v2.5)
+Progress: [███░░░░░░░] 5/31 plans (v2.5)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 98 (v1.0: 34, v2.0: 59, v2.5: 3)
-- Average duration: 4.2 min
-- Total execution time: 7.4 hours
+- Total plans completed: 100 (v1.0: 34, v2.0: 59, v2.5: 5)
+- Average duration: 4.4 min
+- Total execution time: 7.9 hours
 
 **By Phase:**
 
@@ -42,11 +42,11 @@ Progress: [██░░░░░░░░] 3/31 plans (v2.5)
 | 10.1 | 4 (complete) | 14 min | 3.5 min |
 | 10.2 | 2 (complete) | 9 min | 4.5 min |
 | 10 | 3/3 (complete) | 120 min | 40 min |
-| 11 | 3/5 | 15 min | 5.0 min |
+| 11 | 5/5 (complete) | 44 min | 8.8 min |
 
 **Recent Trend:**
-- Last 5 plans: ~4 min average (Phase 11 refactoring work is fast)
-- Trend: Phase 11 in progress - code quality improvements running efficiently
+- Last 5 plans: ~8 min average (Phase 11 complete - test fixing took extra time)
+- Trend: Phase 11 complete (5/5 plans) - code quality foundations established
 
 *Updated after each plan completion*
 
@@ -195,6 +195,7 @@ Recent decisions affecting current work:
 - **EnvConfig singleton caching (11-01)**: get_env_config() uses @lru_cache(maxsize=1) for efficient reuse, cache_clear() for test isolation and late-setting scenarios - env vars must be set before first call or cache cleared after late-setting
 - **Incremental method extraction (11-03)**: Extract long methods one helper at a time with atomic commits and tests between - prevents Edit failures from large old_string blocks (>50 lines)
 - **Helper method side effects (11-03)**: Document side effects explicitly in docstrings (e.g., "_resume_checkpoints updates self._ckpt_embeddings") - makes state mutations visible
+- **EnvConfig cache invalidation (11-05)**: Tests using @patch.dict or monkeypatch for VIRNUCPRO_* env vars must call get_env_config.cache_clear() to pick up patched values - CLI late-setting (predict.py) also calls cache_clear() after setting env vars
 
 ### Pending Todos
 
@@ -212,7 +213,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-10
-Stopped at: Completed 11-03-PLAN.md (AsyncInferenceRunner refactoring)
+Stopped at: Completed 11-05-PLAN.md (EnvConfig centralization - Phase 11 complete)
 Resume file: None
 
-**Next step:** Continue Phase 11 with 11-04-PLAN.md
+**Next step:** Phase 11 complete (5/5 plans). Proceed to Phase 12.
