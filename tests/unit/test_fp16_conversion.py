@@ -31,6 +31,8 @@ class TestShouldUseFP16:
     def test_should_use_fp16_disabled_numeric(self):
         """Set VIRNUCPRO_DISABLE_FP16=1, verify returns False."""
         with patch.dict(os.environ, {'VIRNUCPRO_DISABLE_FP16': '1'}):
+            from virnucpro.core.env_config import get_env_config
+            get_env_config.cache_clear()
             result = should_use_fp16()
 
         assert result is False, "should_use_fp16() should return False when VIRNUCPRO_DISABLE_FP16=1"
@@ -38,6 +40,8 @@ class TestShouldUseFP16:
     def test_should_use_fp16_disabled_true(self):
         """Set VIRNUCPRO_DISABLE_FP16=true, verify returns False."""
         with patch.dict(os.environ, {'VIRNUCPRO_DISABLE_FP16': 'true'}):
+            from virnucpro.core.env_config import get_env_config
+            get_env_config.cache_clear()
             result = should_use_fp16()
 
         assert result is False, "should_use_fp16() should return False when VIRNUCPRO_DISABLE_FP16=true"
@@ -45,6 +49,8 @@ class TestShouldUseFP16:
     def test_should_use_fp16_disabled_true_uppercase(self):
         """Set VIRNUCPRO_DISABLE_FP16=TRUE (uppercase), verify returns False."""
         with patch.dict(os.environ, {'VIRNUCPRO_DISABLE_FP16': 'TRUE'}):
+            from virnucpro.core.env_config import get_env_config
+            get_env_config.cache_clear()
             result = should_use_fp16()
 
         assert result is False, "should_use_fp16() should return False when VIRNUCPRO_DISABLE_FP16=TRUE"
@@ -52,6 +58,8 @@ class TestShouldUseFP16:
     def test_should_use_fp16_disabled_true_mixed_case(self):
         """Set VIRNUCPRO_DISABLE_FP16=True (mixed case), verify returns False."""
         with patch.dict(os.environ, {'VIRNUCPRO_DISABLE_FP16': 'True'}):
+            from virnucpro.core.env_config import get_env_config
+            get_env_config.cache_clear()
             result = should_use_fp16()
 
         assert result is False, "should_use_fp16() should return False when VIRNUCPRO_DISABLE_FP16=True"
@@ -59,6 +67,8 @@ class TestShouldUseFP16:
     def test_should_use_fp16_disabled_yes(self):
         """Set VIRNUCPRO_DISABLE_FP16=yes, verify returns False."""
         with patch.dict(os.environ, {'VIRNUCPRO_DISABLE_FP16': 'yes'}):
+            from virnucpro.core.env_config import get_env_config
+            get_env_config.cache_clear()
             result = should_use_fp16()
 
         assert result is False, "should_use_fp16() should return False when VIRNUCPRO_DISABLE_FP16=yes"
@@ -66,6 +76,8 @@ class TestShouldUseFP16:
     def test_should_use_fp16_disabled_yes_uppercase(self):
         """Set VIRNUCPRO_DISABLE_FP16=YES (uppercase), verify returns False."""
         with patch.dict(os.environ, {'VIRNUCPRO_DISABLE_FP16': 'YES'}):
+            from virnucpro.core.env_config import get_env_config
+            get_env_config.cache_clear()
             result = should_use_fp16()
 
         assert result is False, "should_use_fp16() should return False when VIRNUCPRO_DISABLE_FP16=YES"
@@ -73,6 +85,8 @@ class TestShouldUseFP16:
     def test_should_use_fp16_disabled_with_whitespace(self):
         """Set VIRNUCPRO_DISABLE_FP16= 1  (with spaces), verify returns False."""
         with patch.dict(os.environ, {'VIRNUCPRO_DISABLE_FP16': ' 1 '}):
+            from virnucpro.core.env_config import get_env_config
+            get_env_config.cache_clear()
             result = should_use_fp16()
 
         assert result is False, "should_use_fp16() should return False when VIRNUCPRO_DISABLE_FP16=' 1 '"
@@ -80,6 +94,8 @@ class TestShouldUseFP16:
     def test_should_use_fp16_disabled_with_whitespace_true(self):
         """Set VIRNUCPRO_DISABLE_FP16= true  (with spaces), verify returns False."""
         with patch.dict(os.environ, {'VIRNUCPRO_DISABLE_FP16': ' true '}):
+            from virnucpro.core.env_config import get_env_config
+            get_env_config.cache_clear()
             result = should_use_fp16()
 
         assert result is False, "should_use_fp16() should return False when VIRNUCPRO_DISABLE_FP16=' true '"
@@ -218,6 +234,8 @@ class TestDisableFP16ProducesFP32:
 
         # Test with VIRNUCPRO_DISABLE_FP16=1
         with patch.dict(os.environ, {'VIRNUCPRO_DISABLE_FP16': '1'}):
+            from virnucpro.core.env_config import get_env_config
+            get_env_config.cache_clear()
             # Simulate gpu_worker pattern: check env var BEFORE calling load_esm2_model
             # This is the actual implementation in gpu_worker.py
             if not should_use_fp16():

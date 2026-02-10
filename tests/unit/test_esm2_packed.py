@@ -234,7 +234,11 @@ def test_v1_compatible_default_does_not_call_fallback():
 @patch.dict(os.environ, {'VIRNUCPRO_V1_ATTENTION': 'true'})
 def test_env_var_enables_v1_attention():
     """Verify VIRNUCPRO_V1_ATTENTION=true enables v1.0 compatibility mode."""
+    from virnucpro.core.env_config import get_env_config
     from virnucpro.models.esm2_flash import ESM2WithFlashAttention
+
+    # Clear cache after env var patched by decorator
+    get_env_config.cache_clear()
 
     mock_model = Mock()
     mock_model.to = Mock(return_value=mock_model)
@@ -267,7 +271,11 @@ def test_env_var_enables_v1_attention():
 @patch.dict(os.environ, {'VIRNUCPRO_V1_ATTENTION': 'false'})
 def test_env_var_false_does_not_affect_default():
     """Verify VIRNUCPRO_V1_ATTENTION=false does not force v1 mode."""
+    from virnucpro.core.env_config import get_env_config
     from virnucpro.models.esm2_flash import ESM2WithFlashAttention
+
+    # Clear cache after env var patched by decorator
+    get_env_config.cache_clear()
 
     mock_model = Mock()
     mock_model.to = Mock(return_value=mock_model)
