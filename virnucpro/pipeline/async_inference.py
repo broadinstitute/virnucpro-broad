@@ -609,6 +609,50 @@ class AsyncInferenceRunner:
 
         return batch
 
+    def _record_batch_metrics(
+        self,
+        batch: Dict[str, Any],
+        result: InferenceResult,
+        batch_idx: int,
+        fetch_time_ms: float
+    ) -> None:
+        """Record batch composition and packing metrics.
+
+        Args:
+            batch: Collated batch dict with tensors
+            result: InferenceResult from process_batch
+            batch_idx: Current batch index
+            fetch_time_ms: Time to fetch batch from DataLoader (ms)
+        """
+        # Calculate batch composition metrics
+        num_sequences = len(result.sequence_ids)
+        tokens_in_batch = batch.get('input_ids', torch.tensor([])).numel()
+        avg_seq_len = tokens_in_batch / num_sequences if num_sequences > 0 else 0
+        max_seq_len = batch.get('max_seqlen', 0)
+
+        # Compute packing efficiency for this batch
+        packing_efficiency = None
+        if 'cu_seqlens' in batch and 'max_seqlen' in batch:
+            from virnucpro.data.packing import compute_batch_efficiency
+            efficiency_stats = compute_batch_efficiency(
+                num_tokens=tokens_in_batch,
+                num_sequences=num_sequences,
+                max_seqlen=batch['max_seqlen'],
+                max_tokens_per_batch=batch.get('token_budget', 4096)
+            )
+            packing_efficiency = efficiency_stats['token_utilization']
+
+        # Record DataLoader metrics
+        self.monitor.record_dataloader_wait(
+            wait_time_ms=fetch_time_ms,
+            batch_idx=batch_idx,
+            sequences_in_batch=num_sequences,
+            tokens_in_batch=tokens_in_batch,
+            avg_sequence_length=avg_seq_len,
+            max_sequence_length=max_seq_len,
+            packing_efficiency=packing_efficiency
+        )
+
     def run(
         self,
         dataloader: DataLoader,
@@ -722,41 +766,15 @@ class AsyncInferenceRunner:
                 # Process batch
                 result = self.process_batch(batch)
 
-                # FIX 1: Calculate batch composition metrics
-                num_sequences = len(result.sequence_ids)
-                tokens_in_batch = batch.get('input_ids', torch.tensor([])).numel()
-                avg_seq_len = tokens_in_batch / num_sequences if num_sequences > 0 else 0
-                max_seq_len = batch.get('max_seqlen', 0)
-
-                # Compute packing efficiency for this batch
-                packing_efficiency = None
-                if 'cu_seqlens' in batch and 'max_seqlen' in batch:
-                    from virnucpro.data.packing import compute_batch_efficiency
-                    efficiency_stats = compute_batch_efficiency(
-                        num_tokens=tokens_in_batch,
-                        num_sequences=num_sequences,
-                        max_seqlen=batch['max_seqlen'],
-                        max_tokens_per_batch=batch.get('token_budget', 4096)
-                    )
-                    packing_efficiency = efficiency_stats['token_utilization']
-
-                # Record DataLoader metrics
-                self.monitor.record_dataloader_wait(
-                    wait_time_ms=fetch_time_ms,
-                    batch_idx=batch_idx,
-                    sequences_in_batch=num_sequences,
-                    tokens_in_batch=tokens_in_batch,
-                    avg_sequence_length=avg_seq_len,
-                    max_sequence_length=max_seq_len,
-                    packing_efficiency=packing_efficiency
-                )
+                # Record batch metrics
+                self._record_batch_metrics(batch, result, batch_idx, fetch_time_ms)
 
                 # Check for bottleneck every 10 batches
                 if batch_idx % 10 == 0 and batch_idx > 0:
                     is_bottleneck, severity, avg_util = self.monitor.check_bottleneck()
 
                 # Track cumulative progress
-                total_sequences_processed += num_sequences
+                total_sequences_processed += len(result.sequence_ids)
 
                 # Adaptive progress logging:
                 # - First 10 batches: log every batch (startup phase)
