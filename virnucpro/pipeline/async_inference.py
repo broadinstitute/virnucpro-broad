@@ -583,6 +583,32 @@ class AsyncInferenceRunner:
 
         return None
 
+    def _process_raw_item(self, raw_item: Any, collator: Any, main_process_collation: bool) -> Optional[Dict]:
+        """Process raw item from DataLoader through collation.
+
+        Args:
+            raw_item: Raw item from DataLoader iterator
+            collator: Collator instance (or None for legacy path)
+            main_process_collation: Whether main-process collation is enabled
+
+        Returns:
+            Collated batch dict, or None if batch not ready (buffer not full)
+        """
+        if main_process_collation:
+            # Main-process collation: raw_item is a dict from the dataset.
+            # Pass through the collator which buffers and returns packed
+            # batches when ready (or {} when buffer not full).
+            batch = collator(raw_item)
+        else:
+            # Legacy path: collation already happened in DataLoader workers
+            batch = raw_item
+
+        # Skip empty batches (collator returns {} when buffer not full)
+        if not batch or 'input_ids' not in batch:
+            return None
+
+        return batch
+
     def run(
         self,
         dataloader: DataLoader,
@@ -674,17 +700,9 @@ class AsyncInferenceRunner:
                         f"Check worker logs and CUDA isolation."
                     ) from e
 
-                if main_process_collation:
-                    # Main-process collation: raw_item is a dict from the dataset.
-                    # Pass through the collator which buffers and returns packed
-                    # batches when ready (or {} when buffer not full).
-                    batch = collator(raw_item)
-                else:
-                    # Legacy path: collation already happened in DataLoader workers
-                    batch = raw_item
-
-                # Skip empty batches (collator returns {} when buffer not full)
-                if not batch or 'input_ids' not in batch:
+                # Process raw item through collation
+                batch = self._process_raw_item(raw_item, collator, main_process_collation)
+                if batch is None:
                     continue
 
                 # FIX 5: Validate memory pinning (critical for performance)
