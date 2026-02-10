@@ -34,6 +34,7 @@ import numpy as np
 import torch
 
 from virnucpro.core.checkpoint import has_done_marker, remove_done_marker
+from virnucpro.core.env_config import get_env_config
 
 logger = logging.getLogger('virnucpro.pipeline.checkpoint_writer')
 
@@ -84,7 +85,8 @@ class CheckpointTrigger:
             )
 
         # Check for viral mode override (only applies to defaults)
-        viral_mode = os.environ.get('VIRNUCPRO_VIRAL_CHECKPOINT_MODE', '').lower() == 'true'
+        env = get_env_config()
+        viral_mode = env.viral_checkpoint_mode
         defaults_used = (
             seq_threshold == 10000
             and time_threshold_sec == 300.0

@@ -648,6 +648,10 @@ class TestFP16Wiring:
         mock_batch_converter
     ):
         """Verify FP16 enabled by default when VIRNUCPRO_DISABLE_FP16 not set."""
+        # Clear EnvConfig cache after env var is patched by decorator
+        from virnucpro.core.env_config import get_env_config
+        get_env_config.cache_clear()
+
         mock_setup_logging.return_value = temp_output_dir / "logs" / "worker_0.log"
         mock_load_model.return_value = (mock_model, mock_batch_converter)
         mock_cuda.get_device_name.return_value = "Mock GPU"
@@ -695,6 +699,10 @@ class TestFP16Wiring:
         mock_batch_converter
     ):
         """Verify VIRNUCPRO_DISABLE_FP16=1 overrides config and disables FP16."""
+        # Clear EnvConfig cache after env var is patched by decorator
+        from virnucpro.core.env_config import get_env_config
+        get_env_config.cache_clear()
+
         mock_setup_logging.return_value = temp_output_dir / "logs" / "worker_0.log"
         mock_load_model.return_value = (mock_model, mock_batch_converter)
         mock_cuda.get_device_name.return_value = "Mock GPU"
@@ -741,6 +749,10 @@ class TestFP16Wiring:
         mock_model
     ):
         """Verify DNABERT model respects VIRNUCPRO_DISABLE_FP16 env var."""
+        # Clear EnvConfig cache after env var is patched by decorator
+        from virnucpro.core.env_config import get_env_config
+        get_env_config.cache_clear()
+
         mock_setup_logging.return_value = temp_output_dir / "logs" / "worker_0.log"
         mock_load_model.return_value = (mock_model, Mock())
         mock_cuda.get_device_name.return_value = "Mock GPU"
@@ -901,6 +913,10 @@ class TestFP16Wiring:
         mock_batch_converter
     ):
         """Verify VIRNUCPRO_DISABLE_FP16=' 1 ' with whitespace is correctly parsed."""
+        # Clear EnvConfig cache after env var is patched by decorator
+        from virnucpro.core.env_config import get_env_config
+        get_env_config.cache_clear()
+
         mock_setup_logging.return_value = temp_output_dir / "logs" / "worker_0.log"
         mock_load_model.return_value = (mock_model, mock_batch_converter)
         mock_cuda.get_device_name.return_value = "Mock GPU"
@@ -948,6 +964,10 @@ class TestFP16Wiring:
         mock_batch_converter
     ):
         """Verify VIRNUCPRO_DISABLE_FP16=' true ' with whitespace is correctly parsed."""
+        # Clear EnvConfig cache after env var is patched by decorator
+        from virnucpro.core.env_config import get_env_config
+        get_env_config.cache_clear()
+
         mock_setup_logging.return_value = temp_output_dir / "logs" / "worker_0.log"
         mock_load_model.return_value = (mock_model, mock_batch_converter)
         mock_cuda.get_device_name.return_value = "Mock GPU"

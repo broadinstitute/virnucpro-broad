@@ -8,6 +8,7 @@ import logging
 
 from virnucpro.core.device import validate_and_get_device
 from virnucpro.core.config import Config
+from virnucpro.core.env_config import get_env_config
 from virnucpro.pipeline.parallel import detect_cuda_devices
 
 logger = logging.getLogger('virnucpro.cli.predict')
@@ -274,6 +275,8 @@ def predict(ctx, input_file, model_type, model_path, expected_length,
         # Set v1.0 attention compatibility mode via environment variable
         if v1_attention:
             os.environ['VIRNUCPRO_V1_ATTENTION'] = 'true'
+            # Invalidate EnvConfig cache so implementation layer sees the new value
+            get_env_config.cache_clear()
             logger.info("V1.0 attention compatibility: enabled (VIRNUCPRO_V1_ATTENTION=true)")
 
         # Construct RuntimeConfig when v2.0 is active

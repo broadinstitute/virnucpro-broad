@@ -3,8 +3,9 @@
 This module provides shared utilities for controlling model precision via
 the VIRNUCPRO_DISABLE_FP16 environment variable.
 """
-import os
 import logging
+
+from virnucpro.core.env_config import get_env_config
 
 logger = logging.getLogger('virnucpro.utils.precision')
 
@@ -33,7 +34,8 @@ def should_use_fp16() -> bool:
         # Diagnostic mode (FP32 for troubleshooting)
         $ VIRNUCPRO_DISABLE_FP16=1 python -m virnucpro predict input.fasta
     """
-    disable = os.getenv("VIRNUCPRO_DISABLE_FP16", "").strip().lower() in ("1", "true", "yes")
+    env = get_env_config()
+    disable = env.disable_fp16
     if disable:
         logger.warning(
             "FP16 precision DISABLED via VIRNUCPRO_DISABLE_FP16. "

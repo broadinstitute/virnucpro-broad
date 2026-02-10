@@ -12,7 +12,6 @@ import torch
 import torch.nn as nn
 from typing import Optional, Tuple, Any, Literal
 import logging
-import os
 import esm
 from esm.modules import gelu as esm_gelu
 
@@ -26,6 +25,7 @@ from virnucpro.models.packed_attention import (
     FLASH_ATTN_AVAILABLE,
 )
 from virnucpro.utils.precision import should_use_fp16
+from virnucpro.core.env_config import get_env_config
 
 logger = logging.getLogger('virnucpro.models.esm2_flash')
 
@@ -206,7 +206,8 @@ class ESM2WithFlashAttention(nn.Module):
         if repr_layers is None:
             repr_layers = [36]  # Default to final layer for ESM-2 3B
 
-        _use_v1_attention = v1_compatible or os.environ.get('VIRNUCPRO_V1_ATTENTION', '').lower() == 'true'
+        env = get_env_config()
+        _use_v1_attention = v1_compatible or env.v1_attention
 
         if _use_v1_attention:
             logger.info("Using v1.0-compatible standard attention path (FP16 accumulation, slower)")
