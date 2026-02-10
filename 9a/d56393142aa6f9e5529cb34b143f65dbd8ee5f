@@ -1,0 +1,24 @@
+.planning/phases/11-code-quality-foundations/11-RESEARCH.md
+  ba5bc070883412ed 1-651
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "9ad56393142aa6f9e5529cb34b143f65dbd8ee5f",
+  "prompts": {
+    "ba5bc070883412ed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b11aa06e-0f44-4ed5-8075-10c1a1d7fe95",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 651,
+      "total_deletions": 0,
+      "accepted_lines": 651,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/ac0bd565db9ea0b3b30d22afe95f45a959d9c8017772991e762efdf478b53a95"
+    }
+  }
+}
