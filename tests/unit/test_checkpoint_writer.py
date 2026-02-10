@@ -89,6 +89,9 @@ class TestCheckpointTrigger:
         """Test viral mode env var overrides default thresholds."""
         # Set env var
         monkeypatch.setenv('VIRNUCPRO_VIRAL_CHECKPOINT_MODE', 'true')
+        # Clear EnvConfig cache so CheckpointTrigger picks up the new env var value
+        from virnucpro.core.env_config import get_env_config
+        get_env_config.cache_clear()
 
         # Create trigger with DEFAULT args (no explicit thresholds)
         trigger = CheckpointTrigger()
@@ -111,6 +114,9 @@ class TestCheckpointTrigger:
         """Test defaults used when viral mode disabled."""
         # Ensure env var is not set
         monkeypatch.delenv('VIRNUCPRO_VIRAL_CHECKPOINT_MODE', raising=False)
+        # Clear EnvConfig cache so CheckpointTrigger picks up the removed env var
+        from virnucpro.core.env_config import get_env_config
+        get_env_config.cache_clear()
 
         trigger = CheckpointTrigger()
 
