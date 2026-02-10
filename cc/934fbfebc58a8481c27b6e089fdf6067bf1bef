@@ -1,0 +1,28 @@
+.planning/STATE.md
+  e643a4ccc1818a96 9,14-17,19,24,199-204,209,212
+.planning/REQUIREMENTS.md
+  e643a4ccc1818a96 68-89,93-94,98
+.planning/ROADMAP.md
+  e643a4ccc1818a96 1-230
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "cc934fbfebc58a8481c27b6e089fdf6067bf1bef",
+  "prompts": {
+    "e643a4ccc1818a96": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6d3bc142-91e1-47a8-8844-a99fd74f3d45",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 270,
+      "total_deletions": 116,
+      "accepted_lines": 270,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/efde029980f4c72e9fa7ff00722f97340261d41b72e20e54aedf8bb08b0471ec"
+    }
+  }
+}
