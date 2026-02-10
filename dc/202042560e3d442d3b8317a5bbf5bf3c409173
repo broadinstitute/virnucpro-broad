@@ -1,0 +1,24 @@
+tests/unit/test_checkpoint_writer.py
+  13594d1a18165c30 92-94,117-119,251,255,257,270,272,275,279,282
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "dc202042560e3d442d3b8317a5bbf5bf3c409173",
+  "prompts": {
+    "13594d1a18165c30": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5651eda2-5484-4c98-92cf-d0819845372a",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 42,
+      "total_deletions": 36,
+      "accepted_lines": 14,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/8cd1798118cd4a9ead42f69ad688ff1b24ec270af6351eefb11da51373a74138"
+    }
+  }
+}
