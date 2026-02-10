@@ -705,7 +705,17 @@ class TestCheckpointDirectoryStructure:
         checkpoint_data = torch.load(expected_ckpt, weights_only=False, map_location='cpu')
         assert len(checkpoint_data["embeddings"]) == 10
         expected_dtype = torch.float16 if should_use_fp16() else torch.float32
-        assert checkpoint_data["embeddings"].dtype == expected_dtype
+        # Convert to torch tensor if it's a numpy array (handles dtype comparison properly)
+        embeddings = checkpoint_data["embeddings"]
+        if hasattr(embeddings, 'dtype'):
+            # Could be torch.Tensor or numpy.ndarray
+            if str(embeddings.dtype) == 'float16':
+                actual_dtype = torch.float16
+            elif str(embeddings.dtype) == 'float32':
+                actual_dtype = torch.float32
+            else:
+                actual_dtype = embeddings.dtype
+            assert actual_dtype == expected_dtype, f"Expected {expected_dtype}, got {actual_dtype}"
         assert checkpoint_data["sequence_ids"] == ["seq_0", "seq_1", "seq_2"]
 
         double_nested = checkpoint_base / "shard_0" / "shard_0" / "batch_00000.pt"

@@ -38,6 +38,57 @@ from virnucpro.data.shard_index import load_sequence_index
 logger = logging.getLogger('virnucpro.data.sequence_dataset')
 
 
+def validate_cuda_isolation(validated: bool) -> bool:
+    """Validate that worker process has NO CUDA access.
+
+    This check runs once per worker when iteration starts. It ensures
+    workers are CPU-only by checking:
+    1. CUDA_VISIBLE_DEVICES is empty (set by worker_init_fn)
+    2. torch.cuda.is_available() returns False
+
+    Args:
+        validated: Flag to skip redundant validation checks
+
+    Returns:
+        True after successful validation
+
+    Raises:
+        RuntimeError: If worker has CUDA access
+
+    Note:
+        This only validates in worker processes, not main process.
+        Main process (worker_info is None) is allowed to have CUDA.
+    """
+    if validated:
+        return True
+
+    worker_info = get_worker_info()
+
+    # Only validate in worker process (not main process)
+    if worker_info is not None:
+        worker_id = worker_info.id
+
+        # Check CUDA_VISIBLE_DEVICES is hidden
+        cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES', '')
+        if cuda_visible != '':
+            raise RuntimeError(
+                f"Worker {worker_id}: CUDA_VISIBLE_DEVICES not empty: '{cuda_visible}'. "
+                "Workers must have CUDA_VISIBLE_DEVICES='' for safety."
+            )
+
+        # Check torch doesn't see CUDA
+        if torch.cuda.is_available():
+            raise RuntimeError(
+                f"Worker {worker_id}: CUDA access detected. Workers must be CPU-only. "
+                "Check that spawn multiprocessing context is used and worker_init_fn "
+                "sets CUDA_VISIBLE_DEVICES=''."
+            )
+
+        logger.debug(f"Worker {worker_id}: CUDA isolation validated")
+
+    return True
+
+
 class SequenceDataset(IterableDataset):
     """CPU-only dataset that streams FASTA files and yields sequence strings.
 
@@ -83,46 +134,9 @@ class SequenceDataset(IterableDataset):
     def _validate_cuda_isolation(self):
         """Validate that worker process has NO CUDA access.
 
-        This check runs once per worker when iteration starts. It ensures
-        workers are CPU-only by checking:
-        1. CUDA_VISIBLE_DEVICES is empty (set by worker_init_fn)
-        2. torch.cuda.is_available() returns False
-
-        Raises:
-            RuntimeError: If worker has CUDA access
-
-        Note:
-            This only validates in worker processes, not main process.
-            Main process (worker_info is None) is allowed to have CUDA.
+        Delegates to module-level validate_cuda_isolation function.
         """
-        if self._validated:
-            return
-
-        worker_info = get_worker_info()
-
-        # Only validate in worker process (not main process)
-        if worker_info is not None:
-            worker_id = worker_info.id
-
-            # Check CUDA_VISIBLE_DEVICES is hidden
-            cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES', '')
-            if cuda_visible != '':
-                raise RuntimeError(
-                    f"Worker {worker_id}: CUDA_VISIBLE_DEVICES not empty: '{cuda_visible}'. "
-                    "Workers must have CUDA_VISIBLE_DEVICES='' for safety."
-                )
-
-            # Check torch doesn't see CUDA
-            if torch.cuda.is_available():
-                raise RuntimeError(
-                    f"Worker {worker_id}: CUDA access detected. Workers must be CPU-only. "
-                    "Check that spawn multiprocessing context is used and worker_init_fn "
-                    "sets CUDA_VISIBLE_DEVICES=''."
-                )
-
-            logger.debug(f"Worker {worker_id}: CUDA isolation validated")
-
-        self._validated = True
+        self._validated = validate_cuda_isolation(self._validated)
 
     def __iter__(self) -> Iterator[Dict[str, str]]:
         """Yield sequence dictionaries from FASTA files.
@@ -245,46 +259,9 @@ class IndexBasedDataset(IterableDataset):
     def _validate_cuda_isolation(self):
         """Validate that worker process has NO CUDA access.
 
-        This check runs once per worker when iteration starts. It ensures
-        workers are CPU-only by checking:
-        1. CUDA_VISIBLE_DEVICES is empty (set by worker_init_fn)
-        2. torch.cuda.is_available() returns False
-
-        Raises:
-            RuntimeError: If worker has CUDA access
-
-        Note:
-            This only validates in worker processes, not main process.
-            Main process (worker_info is None) is allowed to have CUDA.
+        Delegates to module-level validate_cuda_isolation function.
         """
-        if self._validated:
-            return
-
-        worker_info = get_worker_info()
-
-        # Only validate in worker process (not main process)
-        if worker_info is not None:
-            worker_id = worker_info.id
-
-            # Check CUDA_VISIBLE_DEVICES is hidden
-            cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES', '')
-            if cuda_visible != '':
-                raise RuntimeError(
-                    f"Worker {worker_id}: CUDA_VISIBLE_DEVICES not empty: '{cuda_visible}'. "
-                    "Workers must have CUDA_VISIBLE_DEVICES='' for safety."
-                )
-
-            # Check torch doesn't see CUDA
-            if torch.cuda.is_available():
-                raise RuntimeError(
-                    f"Worker {worker_id}: CUDA access detected. Workers must be CPU-only. "
-                    "Check that spawn multiprocessing context is used and worker_init_fn "
-                    "sets CUDA_VISIBLE_DEVICES=''."
-                )
-
-            logger.debug(f"Worker {worker_id}: CUDA isolation validated")
-
-        self._validated = True
+        self._validated = validate_cuda_isolation(self._validated)
 
     def _read_sequence_at_offset(self, file_handle, entry: Dict) -> str:
         """Read sequence from file at specified byte offset.
