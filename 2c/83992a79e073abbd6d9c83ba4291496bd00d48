@@ -1,0 +1,32 @@
+virnucpro/utils/precision.py
+  13594d1a18165c30 8,37-38
+virnucpro/pipeline/checkpoint_writer.py
+  13594d1a18165c30 37,88-89
+virnucpro/models/esm2_flash.py
+  13594d1a18165c30 28,209-210
+virnucpro/cli/predict.py
+  13594d1a18165c30 11,278-279
+tests/unit/test_gpu_worker.py
+  13594d1a18165c30 651-654,702-705,752-755,916-919,967-970
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "2c83992a79e073abbd6d9c83ba4291496bd00d48",
+  "prompts": {
+    "13594d1a18165c30": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5651eda2-5484-4c98-92cf-d0819845372a",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 33,
+      "total_deletions": 5,
+      "accepted_lines": 33,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/8cd1798118cd4a9ead42f69ad688ff1b24ec270af6351eefb11da51373a74138"
+    }
+  }
+}
