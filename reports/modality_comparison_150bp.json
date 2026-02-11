@@ -1,0 +1,35 @@
+{
+  "dna": {
+    "input_dim": 768,
+    "metrics": {
+      "accuracy": 0.68956,
+      "precision": 0.6994913606103673,
+      "recall": 0.7141275295914471,
+      "f1_score": 0.7067336759371221,
+      "roc_auc": 0.7617533125855238
+    },
+    "model_path": "300_model_fastesm650_dna.pth"
+  },
+  "protein": {
+    "input_dim": 1280,
+    "metrics": {
+      "accuracy": 0.4562,
+      "precision": 0.48265214072583446,
+      "recall": 0.5311569301260023,
+      "f1_score": 0.5057442012651785,
+      "roc_auc": 0.43786133269316285
+    },
+    "model_path": "300_model_fastesm650_protein.pth"
+  },
+  "combined": {
+    "input_dim": 2048,
+    "metrics": {
+      "accuracy": 0.53846,
+      "precision": 0.5422651858690635,
+      "recall": 0.7625047728140512,
+      "f1_score": 0.6337972293190727,
+      "roc_auc": 0.5615949786388006
+    },
+    "model_path": "300_model_fastesm650_combined.pth"
+  }
+}

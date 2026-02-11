@@ -1,3 +1,43 @@
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Model checkpoints (large binary files)
+*.pth
+
+# Data files (embeddings, FASTA)
+*.pt
+*.fasta
+*.fa
+*.faa
+data/test_150bp/
+data/test_150bp_50k/
+data/test_150bp_50k_esm2_3b/
+data/test_150bp_subset/
+data/train_150bp/
+test_sequences_*/
+
+# Cache
+.cache/
+
+# Logs
+*.log
+
+# Temporary metadata at root
+test_150bp_*.json
+train_150bp_*.json
+
+# Predictions
+prediction_results*.txt
+prediction_results*.csv
+
+# Test/debug files
+test_extract_*.py
+debug_*.py
+nvidia_*.md
