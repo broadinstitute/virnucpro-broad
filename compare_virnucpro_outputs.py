@@ -63,17 +63,17 @@ class PredictionComparator:
             file_path: Path to prediction_results_highestscore.csv
 
         Returns:
-            DataFrame with columns: Modified_ID, Is_Virus, max_score_0, max_score_1
+            DataFrame with columns: Modified_ID, Is_Virus, and optionally max_score_0, max_score_1
         """
         if not file_path.exists():
             raise FileNotFoundError(f"Consensus file not found: {file_path}")
 
         df = pd.read_csv(file_path, sep='\t')
 
-        # Validate expected columns
-        expected_cols = {'Modified_ID', 'Is_Virus', 'max_score_0', 'max_score_1'}
-        if not expected_cols.issubset(df.columns):
-            raise ValueError(f"Expected columns {expected_cols}, got {set(df.columns)}")
+        # Validate required columns
+        required_cols = {'Modified_ID', 'Is_Virus'}
+        if not required_cols.issubset(df.columns):
+            raise ValueError(f"Expected columns {required_cols}, got {set(df.columns)}")
 
         return df
 
@@ -183,6 +183,9 @@ class PredictionComparator:
         """
         Compare consensus prediction outputs.
 
+        Handles files with or without score columns (max_score_0, max_score_1).
+        When scores are missing from either file, only label agreement is compared.
+
         Args:
             vanilla_df: Consensus from vanilla implementation
             refactored_df: Consensus from refactored implementation
@@ -194,6 +197,19 @@ class PredictionComparator:
         self.mismatches = []
         self.missing_in_ref = []
         self.missing_in_vanilla = []
+
+        # Detect whether score columns are available
+        has_vanilla_scores = 'max_score_0' in vanilla_df.columns and 'max_score_1' in vanilla_df.columns
+        has_refactored_scores = 'max_score_0' in refactored_df.columns and 'max_score_1' in refactored_df.columns
+        has_scores = has_vanilla_scores and has_refactored_scores
+
+        if not has_scores:
+            missing = []
+            if not has_vanilla_scores:
+                missing.append("vanilla")
+            if not has_refactored_scores:
+                missing.append("refactored")
+            print(f"Note: Score columns missing from {', '.join(missing)} file(s). Comparing labels only.")
 
         # Index by Modified_ID for fast lookup
         vanilla_dict = vanilla_df.set_index('Modified_ID').to_dict('index')
@@ -224,62 +240,81 @@ class PredictionComparator:
             vanilla_is_virus = bool(vanilla_pred['Is_Virus'])
             refactored_is_virus = bool(refactored_pred['Is_Virus'])
 
-            vanilla_score0 = float(vanilla_pred['max_score_0'])
-            vanilla_score1 = float(vanilla_pred['max_score_1'])
-            refactored_score0 = float(refactored_pred['max_score_0'])
-            refactored_score1 = float(refactored_pred['max_score_1'])
-
-            # Check for prediction mismatch
             prediction_match = vanilla_is_virus == refactored_is_virus
 
-            # Check for score differences
-            score0_diff = abs(vanilla_score0 - refactored_score0)
-            score1_diff = abs(vanilla_score1 - refactored_score1)
-            max_score_diff = max(score0_diff, score1_diff)
+            if has_scores:
+                vanilla_score0 = float(vanilla_pred['max_score_0'])
+                vanilla_score1 = float(vanilla_pred['max_score_1'])
+                refactored_score0 = float(refactored_pred['max_score_0'])
+                refactored_score1 = float(refactored_pred['max_score_1'])
 
-            score_match = (score0_diff <= self.score_tolerance and
-                          score1_diff <= self.score_tolerance)
+                score0_diff = abs(vanilla_score0 - refactored_score0)
+                score1_diff = abs(vanilla_score1 - refactored_score1)
+                max_score_diff = max(score0_diff, score1_diff)
 
-            if prediction_match and score_match:
-                matching_predictions += 1
+                score_match = (score0_diff <= self.score_tolerance and
+                              score1_diff <= self.score_tolerance)
+
+                if prediction_match and score_match:
+                    matching_predictions += 1
+                else:
+                    self.mismatches.append({
+                        'seq_id': seq_id,
+                        'vanilla_pred': 'virus' if vanilla_is_virus else 'others',
+                        'refactored_pred': 'virus' if refactored_is_virus else 'others',
+                        'vanilla_score0': vanilla_score0,
+                        'vanilla_score1': vanilla_score1,
+                        'refactored_score0': refactored_score0,
+                        'refactored_score1': refactored_score1,
+                        'score0_diff': score0_diff,
+                        'score1_diff': score1_diff,
+                        'max_diff': max_score_diff,
+                        'prediction_mismatch': not prediction_match,
+                        'score_mismatch': not score_match
+                    })
+
+                score_differences.append(max_score_diff)
             else:
-                self.mismatches.append({
-                    'seq_id': seq_id,
-                    'vanilla_pred': 'virus' if vanilla_is_virus else 'others',
-                    'refactored_pred': 'virus' if refactored_is_virus else 'others',
-                    'vanilla_score0': vanilla_score0,
-                    'vanilla_score1': vanilla_score1,
-                    'refactored_score0': refactored_score0,
-                    'refactored_score1': refactored_score1,
-                    'score0_diff': score0_diff,
-                    'score1_diff': score1_diff,
-                    'max_diff': max_score_diff,
-                    'prediction_mismatch': not prediction_match,
-                    'score_mismatch': not score_match
-                })
-
-            # Track score differences for statistics
-            score_differences.append(max_score_diff)
+                # Label-only comparison
+                if prediction_match:
+                    matching_predictions += 1
+                else:
+                    self.mismatches.append({
+                        'seq_id': seq_id,
+                        'vanilla_pred': 'virus' if vanilla_is_virus else 'others',
+                        'refactored_pred': 'virus' if refactored_is_virus else 'others',
+                        'max_diff': 0.0,
+                        'prediction_mismatch': True,
+                        'score_mismatch': False
+                    })
 
         # Calculate statistics
-        score_diff_array = np.array(score_differences) if score_differences else np.array([0.0])
+        compared = matching_predictions + len(self.mismatches)
 
-        return {
+        result = {
             'total_sequences': total_sequences,
-            'compared_sequences': len(score_differences),
+            'compared_sequences': compared,
             'matching': matching_predictions,
             'mismatching': len(self.mismatches),
             'missing_in_refactored': len(self.missing_in_ref),
             'missing_in_vanilla': len(self.missing_in_vanilla),
-            'match_percentage': (matching_predictions / len(score_differences) * 100) if score_differences else 0.0,
-            'score_stats': {
+            'match_percentage': (matching_predictions / compared * 100) if compared else 0.0,
+            'has_scores': has_scores,
+        }
+
+        if has_scores:
+            score_diff_array = np.array(score_differences) if score_differences else np.array([0.0])
+            result['score_stats'] = {
                 'mean_diff': float(np.mean(score_diff_array)),
                 'median_diff': float(np.median(score_diff_array)),
                 'max_diff': float(np.max(score_diff_array)),
                 'min_diff': float(np.min(score_diff_array)),
                 'std_diff': float(np.std(score_diff_array))
             }
-        }
+        else:
+            result['score_stats'] = None
+
+        return result
 
     def print_summary(self, results: Dict, mode: str):
         """Print comparison summary."""
@@ -294,12 +329,15 @@ class PredictionComparator:
         print(f"\nMatching predictions: {results['matching']} ({results['match_percentage']:.2f}%)")
         print(f"Mismatching predictions: {results['mismatching']}")
 
-        print(f"\nScore Difference Statistics:")
-        print(f"  Mean: {results['score_stats']['mean_diff']:.6e}")
-        print(f"  Median: {results['score_stats']['median_diff']:.6e}")
-        print(f"  Max: {results['score_stats']['max_diff']:.6e}")
-        print(f"  Min: {results['score_stats']['min_diff']:.6e}")
-        print(f"  Std Dev: {results['score_stats']['std_diff']:.6e}")
+        if results.get('score_stats'):
+            print(f"\nScore Difference Statistics:")
+            print(f"  Mean: {results['score_stats']['mean_diff']:.6e}")
+            print(f"  Median: {results['score_stats']['median_diff']:.6e}")
+            print(f"  Max: {results['score_stats']['max_diff']:.6e}")
+            print(f"  Min: {results['score_stats']['min_diff']:.6e}")
+            print(f"  Std Dev: {results['score_stats']['std_diff']:.6e}")
+        else:
+            print(f"\nScore comparison: N/A (score columns not present in both files)")
 
         if results['mismatching'] == 0 and results['missing_in_refactored'] == 0 and results['missing_in_vanilla'] == 0:
             print(f"\n{'='*80}")
