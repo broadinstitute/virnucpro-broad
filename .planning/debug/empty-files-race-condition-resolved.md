@@ -1,8 +1,10 @@
 ---
-status: fixing
+status: resolved
 trigger: "empty-files-race-condition"
 created: 2026-01-29T00:00:00Z
 updated: 2026-01-29T00:00:15Z
+resolved: 2026-02-10T15:59:00Z
+resolution: Fix verified - staggered loading delay + load_dnabert_model() wrapper eliminates race condition
 ---
 
 ## Current Focus
