@@ -1,0 +1,26 @@
+requirements.txt
+  14ad6b7c4b79a6b4 22-24
+README.md
+  14ad6b7c4b79a6b4 35,52-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.3",
+  "base_commit_sha": "a8d3e4b1079cf71cabb246d6e2a43ef84d78c25d",
+  "prompts": {
+    "14ad6b7c4b79a6b4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c43db6ad-d02a-484b-b9ad-631193964039",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Cesar Arze <cesar.arze@gmail.com>",
+      "messages": [],
+      "total_additions": 10,
+      "total_deletions": 1,
+      "accepted_lines": 10,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/48f6d1245c586d68f4e4ea23186774c1ec61aa83b762cfe296343068bed998e7"
+    }
+  }
+}
