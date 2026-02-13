@@ -32,7 +32,7 @@ This refactoring maintains full compatibility with the original tool's predictio
 - BioPython
 - transformers == 4.30.0 (DNABERT-S)
 - fair-esm == 2.0.0 (ESM-2 3B)
-- flash-attn >= 2.6.0 (optional, for FlashAttention-2)
+- flash-attn >= 2.6.0 (FlashAttention-2 for packed attention with FP32 accumulation)
 - Click, PyYAML, tqdm, rich, h5py
 
 ### Setup
@@ -48,6 +48,12 @@ cd virnucpro-broad
 pixi install          # Uses pixi (Python 3.9, conda-forge)
 pip install -r requirements.txt
 ```
+
+> **Note:** `flash-attn` ships pre-built wheels for common CUDA/torch/Python combinations.
+> If installation fails (e.g., uncommon CUDA version), install it separately with:
+> ```bash
+> pip install flash-attn>=2.6.0 --no-build-isolation
+> ```
 
 3. Verify installation:
 ```bash

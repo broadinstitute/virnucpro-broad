@@ -19,3 +19,6 @@ click>=8.0.0
 tqdm
 pandas
 rich>=13.0.0
+h5py
+PyYAML
+flash-attn>=2.6.0
